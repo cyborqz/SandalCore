@@ -152,6 +152,7 @@ bool PlayerSession::allocate_channels(const Connection& conn) {
 
 PlayerSession::~PlayerSession() {
     finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
+    drop_held_chat_lines();   // ... and the tells it held while loading are dropped, not delivered
     leave_friends("the session is destroyed");
     forget_party();
     forget_guild();   // social, step 9: the roster loses its online flag
@@ -408,6 +409,7 @@ void PlayerSession::fail(std::string why) {
     if (failed_) return;
     failed_ = true;
     failure_ = std::move(why);
+    drop_held_chat_lines();   // (a session that failed before its phase-in delivers nothing: its held tells are dropped and counted)
     spdlog::error("[session] {}: {}", name(), failure_);
 }
 
@@ -588,6 +590,7 @@ void PlayerSession::hand_over(const char* why, bool periodic) {
 void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
+    drop_held_chat_lines();   // (a session that ends before its phase-in delivers nothing: its held tells are dropped and counted)
     leave_party_on_finish();
     leave_guild_on_finish();   // social, step 9: the roster says the member is offline now, and the other members are told
     leave_duels(last_now_);   // #23 (MrJambix)

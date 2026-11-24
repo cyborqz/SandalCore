@@ -95,6 +95,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
+- Commissions: the town boards' tasks, their rewards and rerolls, and the mayor's commissions.
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).
@@ -106,11 +107,11 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Abilities: the bars of Deliverance (a held cast) and Disengage follow the game's recorded timeline.
 - The walking map: walls, fences, water and holes.
 - The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, random gatherables, and camp props (tents, totems, caches, doors).
-- Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
-- Economy: player trading, marketplaces, node currency and crates.
-- Social: mail.
-- Node sieges and territory wars.
-- Caravans and trade routes.
+- Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes, and the node's service buildings and their upgrades.
+- Economy: player trading, marketplaces and their buy orders, node currency and crates, and the node's own storage.
+- Social: mail, guild storage, guild levels and perks, the guild board and the calendar.
+- Node sieges and territory wars: the siege teams and their invites, the siege weapons, and the war's phases.
+- Caravans and trade routes: buying one, loading its cargo, and raiding it on the road.
 - Conversations: NPC voice and animation while they talk.
 - Infrastructure: multi-process cell sharding for crowded worlds.
 - Fishing: sport fishing (the lure, the fish that is fought with the line, and the fishing grounds with their fish).
@@ -128,10 +129,10 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.
 8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations. Still to come: sport fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
-10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.
-11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events.
-12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC vendors, crates and storage. Still to come: node currencies and more crates.
-13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking, stopping and riding their mounts, with their gear, weapons in hand, level, live Health and Mana and corruption, their death and their combat stance (the draw, the fight, the PvP key and the name colour of their flag) kept current; a Cleric's Resurrection revives a dead player in place; a player's heals, buffs, cleanses and Resurrection reach other players, harmful abilities between players follow the PvP rules (the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level and place; a party can become a raid of 2 to 40 players in up to 10 squads of 8. Still to come: suppression areas, guards and pets, guild and node wars, other players' abilities shown to the players who see them, guilds, chat and mail, player trading and the marketplace.
-14. **14- Node sieges** — [Planned] Node sieges and territory wars.
-15. **15- Caravans** — [Planned] Caravans and trade routes.
-16. **16- World events** — [Planned] Corruption events and other world events.
+10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes, and the node's service buildings and their upgrades.
+11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events, and the towns' commission boards.
+12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC vendors, crates and storage. Still to come: node currencies and more crates, the marketplace's buy orders, and the node's own storage.
+13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking, stopping and riding their mounts, with their gear, weapons in hand, level, live Health and Mana and corruption, their death and their combat stance (the draw, the fight, the PvP key and the name colour of their flag) kept current; a Cleric's Resurrection revives a dead player in place; a player's heals, buffs, cleanses and Resurrection reach other players, harmful abilities between players follow the PvP rules (the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level and place; a party can become a raid of 2 to 40 players in up to 10 squads of 8. Still to come: suppression areas, guards and pets, guild and node wars, other players' abilities shown to the players who see them, guilds, chat and mail, player trading and the marketplace, guild storage, guild levels and perks, and the guild board and calendar.
+14. **14- Node sieges** — [Planned] Node sieges and territory wars: the siege teams and their invites, the siege weapons, and the war's phases.
+15. **15- Caravans** — [Planned] Caravans and trade routes: buying one, loading its cargo, and raiding it on the road.
+16. **16- World events** — [Planned] Corruption events and other world events, with their stages, goals and rewards.

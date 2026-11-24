@@ -22,8 +22,9 @@
 //  The /tell: a SendChatMessage with ChatCategory 45 and a TargetName.  The sender reads "To <TargetName>: <text>" with
 //  From empty and the player named reads the text with the sender's name, both category 45 (the recordings' two copies).
 //  A tell to oneself sends both copies; a name that is offline or unknown sends the sender's copy and one SYSBROADCAST
-//  line "<name> is not online."; names match in any case; a tell has no range; the text is capped at 512 characters like
-//  the say.  Nothing else receives it.
+//  line "<name> is not online."; a player who has joined but is still loading holds the line and reads it after the welcome
+//  line, and the sender gets only its copy; names match in any case; a tell has no range; the text is capped at 512
+//  characters like the say.  Nothing else receives it.
 //
 //  The directory: the sessions of one world find each other through ChatEntry (session/members/chat.inc): the entry is
 //  added when the session is built and removed when it is destroyed, and it learns the session's connection at its first
@@ -143,6 +144,17 @@ PlayerSession::ChatEntry* PlayerSession::ChatEntry::find(const PlayerWorld* worl
     return nullptr;
 }
 
+PlayerSession::ChatEntry* PlayerSession::ChatEntry::loading(const PlayerWorld* world, const std::string& name) {
+    if (name.empty()) return nullptr;
+    for (ChatEntry* e : registry()) {
+        // (the connection is not asked for until it is known: a session that has not ticked yet still holds the name, and the tell waits for it)
+        if (e->world != world || !e->self || e->self->finished_ || e->self->failed_ || e->self->phase_in_done_) continue;
+        if (e->connection && (e->connection->closing() || e->connection->closed_by_client() || e->connection->failed())) continue;
+        if (iequal(e->self->name(), name)) return e;
+    }
+    return nullptr;
+}
+
 // ---- the welcome line -------------------------------------------------------------------------------------------------------
 
 /// The welcome line, once a session and only after the phase-in was built.  Queued behind the phase-in, so it cannot overtake it.
@@ -158,6 +170,7 @@ void PlayerSession::run_chat(Connection& conn, Clock::time_point now) {
     (void)now;
     chat_entry_.connection = &conn;   // the chat directory reaches this session through it
     if (phase_in_done_ && !welcome_sent_) send_welcome(conn);
+    if (phase_in_done_ && welcome_sent_) deliver_held_chat_lines(conn);
 }
 
 /// One chat line another session sends this player: queued behind what the session already has (true), or dropped and counted when its queue has no room (false).
@@ -171,6 +184,33 @@ bool PlayerSession::receive_chat_line(Connection& conn, std::string text, int ca
         return pb.chat_line(text, category, from);
     }, conn);
     return true;
+}
+
+/// One tell another session sends a player who is still loading: held until its phase-in is built and the welcome line is queued (true), or dropped and
+/// counted when the session already holds kMaxPendingReplies of them (false).
+bool PlayerSession::hold_chat_line(std::string text, int category, std::string from) {
+    if (held_tells_.size() >= kMaxPendingReplies) {
+        ++chat_dropped_;
+        return false;
+    }
+    held_tells_.push_back({std::move(text), category, std::move(from)});
+    return true;
+}
+
+/// The held tells, once the phase-in is built and the welcome line was queued: in the order they came, as many as the reply queue has room for in this
+/// tick; the rest wait for the next.  Each one goes through receive_chat_line, so it counts in chat_lines_received_.
+void PlayerSession::deliver_held_chat_lines(Connection& conn) {
+    while (!held_tells_.empty() && room_for(1)) {
+        HeldTell tell = std::move(held_tells_.front());
+        held_tells_.pop_front();
+        receive_chat_line(conn, std::move(tell.text), tell.category, std::move(tell.from));
+    }
+}
+
+/// A session that ends before its phase-in delivers nothing: its held tells are dropped and counted.
+void PlayerSession::drop_held_chat_lines() {
+    chat_dropped_ += held_tells_.size();
+    held_tells_.clear();
 }
 
 /// SendChatMessage(ChatData): the step-2 echo, a /say's fan-out, a /tell's two copies, or a refusal.
@@ -236,9 +276,10 @@ void PlayerSession::on_send_chat_message(Connection& conn, const repl::ClientRpc
         return;
     }
     if (chat_category == kTellCategory) {
-        // the room the tell needs in this sender's queue: his own copy, and the "not online" line when nobody of that name is there (the named player's copy goes into that player's queue)
+        // the room the tell needs in this sender's queue: his own copy, and the "not online" line when nobody of that name is there or still loading (the named player's copy goes into that player's queue)
         ChatEntry* const named = ChatEntry::find(world_, target_name);
-        if (!room_for(named ? 1 : 2)) {
+        ChatEntry* const loading = named ? nullptr : ChatEntry::loading(world_, target_name);
+        if (!room_for(named || loading ? 1 : 2)) {
             ++chat_refused_;
             return;
         }
@@ -250,6 +291,12 @@ void PlayerSession::on_send_chat_message(Connection& conn, const repl::ClientRpc
         }, conn);
         if (named) {
             named->self->receive_chat_line(*named->connection, line, static_cast<int>(chat_category), from);
+        } else if (loading) {
+            if (loading->self->hold_chat_line(line, static_cast<int>(chat_category), from)) {
+                spdlog::log(level_for(chat_logged_), "[chat] {}: the tell to \"{}\" is held until the player is in the world", name(), log_text(target_name));
+            } else {
+                spdlog::log(level_for(chat_logged_), "[chat] {}: the tell to \"{}\" found no room in the held lines and was dropped", name(), log_text(target_name));
+            }
         } else {
             const std::string miss = target_name + " is not online.";
             queue("ClientReceiveChatMessages (tell)", [miss](bootstrap::PlayerBootstrap& pb) {
