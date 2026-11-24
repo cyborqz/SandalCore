@@ -1060,8 +1060,9 @@ void   step_multi_hit(Cast& cast, double t);
     /// variant), else the hit's key map.  False for a hit that is no ally hit (its mask names no Ally, Party or Raid, or no ally targeting record is its own): the hits
     /// of the Saga on the caster alone (the notes' consuming) and on enemies (the Apocalypse's, the Horrors') are the cast's ordinary hits.
     bool   ally_targets(const abilities::AbilityDef& def, const abilities::HitDef& hit, size_t max, int64_t named, const std::string& fallback, std::vector<uint64_t>& out);
-    /// The same for a targeting record by name (the Silent Pantheon's spawn hits name no targeting of their own).
-    std::vector<uint64_t> ally_targets_of(const char* record, size_t max);
+    /// The same for a targeting record by name (the Silent Pantheon's spawn hits name no targeting of their own); a candidate the hit's mask
+    /// does not reach (its Party or Raid bit, the squad or the whole raid) is left out.
+    std::vector<uint64_t> ally_targets_of(const char* record, size_t max, int mask);
     /// The Saga's launcher hit fires a Homing projectile: one flies at each ally, and the launcher's confirmation goes out with the first landing.
     /// `first_at` is when the first projectile lands at 0 m (its request's answer + its flight).  A hit that fires no Homing projectile is not this.
     void   fire_ally_from_hit(const abilities::AbilityDef& def, int32_t client_id, double trigger_at, const abilities::HitDef& hit, const std::vector<uint64_t>& allies,
@@ -1411,6 +1412,10 @@ void   step_multi_hit(Cast& cast, double t);
     std::set<int64_t>         reaction_noted_;                      // reactions whose inert state or unserved shape was logged
     std::set<int64_t>         reaction_recursive_noted_;            // reactions whose hits fire further hits (not followed) that were logged
     std::set<int>             unserved_host_;                       // host functions an expression asked for and the runtime does not answer yet
+public:
+    /// A test reads a targeting record's ally candidates with the hit's mask (the filters of ally_targets_of); the server itself only
+    /// reaches them through a cast (the Bard's Saga).
+    std::vector<uint64_t> ally_targets_for_test(const char* record, size_t max, int mask);
 };
 
 }  // namespace aoc::worldd

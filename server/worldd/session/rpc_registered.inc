@@ -38,3 +38,4 @@ AOC_RPC_FEATURE(resurrect)
 AOC_RPC_FEATURE(stance)
 AOC_RPC_FEATURE(duels)   // #23 (MrJambix)
 AOC_RPC_FEATURE(guild)   // social, step 9
+AOC_RPC_FEATURE(raid)

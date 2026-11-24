@@ -23,3 +23,4 @@
 #include "session_guild_tests.inc"
 #include "session_guild_rules_tests.inc"
 #include "session_guild_scroll_tests.inc"
+#include "session_raid_tests.inc"

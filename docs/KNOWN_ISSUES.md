@@ -2,7 +2,7 @@
 
 This document lists the known issues of the current SandalCore main in one place: what happens, a workaround when there is one, and the status. What is still to be built is in [ROADMAP.md](ROADMAP.md), under "Achieved and left".
 
-**Last updated:** 22 November 2026
+**Last updated:** 24 November 2026
 
 ---
 
@@ -68,7 +68,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **World / Seasons** | The season shown on the map window moves with the game clock, a new one about every 13 days the server stays up, but the mobs always spawn for Summer. | None. | Open. |
 | **Chat / Say** | A /say reaches every player within 30 m of the speaker, measured on the ground (height does not count). The 30 m is modelled: no game record and no recording names a chat range. | None. | Open: the radius is ours. |
 | **Social / Emotes** | 15 of the 54 emote commands (/airguitar, /bigcelebrate, /crossarms, /facepalm, /frustrated, /groove, /kiss, /looking, /maybe, /notrouble, /searching, /shakefist, /stinks, /surrender and /wipebrow) have no ability in the game's data and do nothing. | None. | Open. |
-| **Social / Parties** | The group frame lists the members and the leader, but not yet their health, mana, level or position. Party loot settings, the master looter's choices and loot rolls are not built, and a party cannot become a raid. | None. | Open. |
+| **Social / Parties** | The group frame lists the members and the leader, but not yet their health, mana, level or position. Party loot settings, the master looter's choices and loot rolls are not built. A raid has no loot rules, summon, or raid and squad chat yet. | None. | Open. |
 | **Social / Friends** | The friends window does not show the last time a friend was online or their guild yet, and a friend counts as online only on the same world server. | None. | Open. |
 | **Combat / Crowd-control resistance** | A crowd control that a mob has kept up is thrown off at its build-up's threshold and the tier stat gets +100 for 10 s, so a new crowd control of that kind is resisted; a boss is immune to the 24 exported effects the data gates on the Boss effect, and Rafflesia's Steadfast Root and Shardmaw's Void Rage make their holder immune to tagged crowd control while they last. Not built: the data's CharacterType > 1.5 rule (caravans, destructibles and caravels resist every debuff), which waits for the caravan work. | None. | Open: the caravan, destructible and caravel rule. |
 | **Artisan certification and recipe items** | The artisan certifiers in Aven's End, Briarmoor Workshops and the farms west of Aven's End (the Smithy Foreman, the Agricultural Supplier and the others) move a profession one tier up or down. A Promote needs the profession at its tier's level cap and room under the next tier's limit, counted over the professions at that tier or above. A recipe item teaches its recipe when the character holds the certification it asks for, and is used up. | None. | Open: a refused Promote gives the player no message (how the game refused one is not known), and a Demote is taken at once where the game asks the player to confirm it first. |

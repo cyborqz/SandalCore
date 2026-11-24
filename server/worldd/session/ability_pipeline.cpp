@@ -5,6 +5,7 @@
 //  session/ability_pipeline.cpp  (see ability_pipeline.h)
 // ============================================================================
 #include "session/ability_pipeline.h"
+#include "combat/combat_world.h"   // (the mask tiers the ally candidate lists follow)
 #include "combat/pvp_corruption.h"   // #23 (MrJambix)
 
 #include "bootstrap/constants.h"
@@ -2985,11 +2986,11 @@ bool AbilityPipeline::ally_targets(const AbilityDef& def, const HitDef& hit, siz
         std::string why;
         if (eval(hit.row.max_targets_expr, v, why) && v >= 1) cap = std::min(cap, v);
     }
-    out = ally_targets_of(rule->record, static_cast<size_t>(cap));
+    out = ally_targets_of(rule->record, static_cast<size_t>(cap), hit.row.applicable_targets);
     return true;
 }
 
-std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_t max) {
+std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_t max, int mask) {
     if (!combat_ || record == nullptr) return {};
     const AllyTargeting* rule = ally_targeting_named(record);
     if (!rule) return {};
@@ -3000,9 +3001,10 @@ std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_
     };
     std::vector<Candidate> candidates;
     for (const combat::AllyInfo& a : combat_->allies()) {
-        if (!a.party && !a.self) continue;   // (the Saga's allies are the caster's party and the caster: another player of the world is no one of them)
+        if (!a.party && !a.self) continue;   // (the Saga's allies are the caster's group and the caster: another player of the world is no one of them)
         const combat::TargetInfo ti = combat_->inspect(a.actor);
         if (!ti.exists || !ti.alive) continue;
+        if ((mask & (8 | 16)) != 0 && !combat::mask_reaches(mask, ti)) continue;   // (a Party mask keeps the squad, a Raid mask the whole raid)
         const double distance = std::hypot(ti.position.x - me.x, ti.position.y - me.y);
         if (distance > rule->radius_cm) continue;
         const double hpp = a.max_health > 0 ? std::clamp(a.health / a.max_health, 0.0, 1.0) : 1.0;
@@ -3020,6 +3022,10 @@ std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_
         out.push_back(c.actor);
     }
     return out;
+}
+
+std::vector<uint64_t> AbilityPipeline::ally_targets_for_test(const char* record, size_t max, int mask) {
+    return ally_targets_of(record, max, mask);
 }
 
 double AbilityPipeline::hit_trigger_count(int64_t record) const {
@@ -6553,7 +6559,7 @@ void AbilityPipeline::start_saga_pantheon(const Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
     // the four spawn hits are NET_ServerOnly: the server runs them by itself.  Their montage notifies are in no table (the one recorded Saga is the Return's),
     // so they are fired together with the cost step; each has its own requirement (the data's RandDouble() < 0.5) and each projectile lands a 1 m blessing zone.
-    const std::vector<uint64_t> allies = ally_targets_of("Bard_Saga_Pantheon", 8);
+    const std::vector<uint64_t> allies = ally_targets_of("Bard_Saga_Pantheon", 8, 9);   // (the Pantheon hit's Self and Party mask)
     size_t spawned = 0;
     for (const content::AbilityHitRow& row : def.hits) {
         if (row.source != "hit") continue;

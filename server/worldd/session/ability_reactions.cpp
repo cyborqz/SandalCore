@@ -25,6 +25,7 @@
 // ============================================================================
 #include "session/ability_pipeline.h"
 
+#include "combat/combat_world.h"   // (the mask tiers the party-only prefilter follows)
 #include "content/content_db.h"
 
 #include <spdlog/spdlog.h>
@@ -346,7 +347,12 @@ std::vector<uint64_t> AbilityPipeline::targeting_targets(const HitDef& child, co
         // the score of "favors yourself and party members" asks whether the actor is of the caster's party: the world's own party flag, read before any scoring
         std::set<uint64_t> party;
         for (const combat::AllyInfo& a : around) {
-            if (a.party) party.insert(a.actor);
+            if (!a.party) continue;
+            if (party_only) {
+                const combat::TargetInfo ti = combat_->inspect(a.actor);
+                if (!combat::mask_reaches(mask, ti)) continue;   // (a Party mask keeps the squad, a Raid mask the whole raid)
+            }
+            party.insert(a.actor);
         }
         if (self != 0) party.insert(self);
         struct PartyScope {
@@ -358,7 +364,7 @@ std::vector<uint64_t> AbilityPipeline::targeting_targets(const HitDef& child, co
         for (const combat::AllyInfo& a : around) {
             const combat::TargetInfo ti = combat_->inspect(a.actor);
             if (!ti.exists || !ti.alive) continue;
-            if (party_only && !a.self && !a.party) continue;
+            if (party_only && !combat::mask_reaches(mask, ti)) continue;
             if (def.los && a.actor != self && !combat_->line_clear(centre, ti.position)) continue;
             self_seen = self_seen || a.actor == self;
             double score = 0;

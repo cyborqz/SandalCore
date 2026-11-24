@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 18 November 2026
+**Last updated:** 24 November 2026
 
 ---
 
@@ -82,6 +82,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - PvP, first part: the rules between players (the PvP key, the account's PvP settings and parties), the combatant flag at the first harmful action with its 60 s colour, corruption from a kill with its costs on death and kept on the character, duels with their banner, and the respawn's 60 s of protection. Still to come: suppression areas, guards and pets, guild and node wars.
 - Guilds, first part: creating one (letters with single spaces, no cost, a name no stored guild has, the data's 432,000 s cooldown after leaving), inviting players for 60 s each, accepting and declining, leaving, kicking, disbanding, promoting and demoting within the data's three ranks and 35 permissions, the leader's leaving (the next-highest-ranking member leads), the roster (level, class, rank, last online and online) with its refresh, the guild's name over the nameplate and the green name of a guildmate, guild chat between the ranks that may read and write it, the guild and its members kept by the character service, and a game-master command that puts a character into a guild for a one-client test. Still to come: the perks and guild levels, storage, wars, the board, the calendar, the patron guild hall, and raids and mail.
 - The mobs' target-scoring choices and their checks on the target: a move plays at the actor its tree's selector scores (the players a creature hates, a heal's most hurt ally) from as far away as the selector reaches, and a target-effect check such as the Raptor's Smell of Blood reads the effects its target holds.
+- Raids: a party becomes a raid of 2 to 40 players in up to 10 squads of 8, by the group window's Convert to Raid button or a yes to the 9th invitation's ask; the raid leader moves members between squads and sets each squad's leader; a raid of 8 or fewer turns back into a party.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -107,7 +108,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
 - Economy: player trading, marketplaces, node currency and crates.
-- Social: raids and mail.
+- Social: mail.
 - Node sieges and territory wars.
 - Caravans and trade routes.
 - Conversations: NPC voice and animation while they talk.
@@ -130,7 +131,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.
 11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events.
 12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC vendors, crates and storage. Still to come: node currencies and more crates.
-13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking, stopping and riding their mounts, with their gear, weapons in hand, level, live Health and Mana and corruption, their death and their combat stance (the draw, the fight, the PvP key and the name colour of their flag) kept current; a Cleric's Resurrection revives a dead player in place; a player's heals, buffs, cleanses and Resurrection reach other players, harmful abilities between players follow the PvP rules (the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level and place. Still to come: suppression areas, guards and pets, guild and node wars, other players' abilities shown to the players who see them, guilds, raids, chat and mail, player trading and the marketplace.
+13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking, stopping and riding their mounts, with their gear, weapons in hand, level, live Health and Mana and corruption, their death and their combat stance (the draw, the fight, the PvP key and the name colour of their flag) kept current; a Cleric's Resurrection revives a dead player in place; a player's heals, buffs, cleanses and Resurrection reach other players, harmful abilities between players follow the PvP rules (the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level and place; a party can become a raid of 2 to 40 players in up to 10 squads of 8. Still to come: suppression areas, guards and pets, guild and node wars, other players' abilities shown to the players who see them, guilds, chat and mail, player trading and the marketplace.
 14. **14- Node sieges** — [Planned] Node sieges and territory wars.
 15. **15- Caravans** — [Planned] Caravans and trade routes.
 16. **16- World events** — [Planned] Corruption events and other world events.

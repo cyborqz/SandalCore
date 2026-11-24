@@ -227,6 +227,9 @@ public:
     // Abilities between players: contributed by MrJambix in #23.
     /// The party the player is in, as a key two players share when they are in one (0: none): what a hit's Party mask reads.  A pet's port has none.
     virtual uint64_t group_key() const { return 0; }
+    /// The squad the player is in, as a key two players share when they are in one squad (0: none).  A port that knows no squads keeps its group's
+    /// key, so a party (one squad) stays at tier 2.
+    virtual uint64_t squad_key() const { return group_key(); }
 
     // ---- PvP (combat/pvp.h, combat/combat_pvp.cpp)
     // PvP: contributed by MrJambix in #23.

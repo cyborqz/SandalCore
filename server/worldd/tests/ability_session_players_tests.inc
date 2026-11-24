@@ -131,8 +131,8 @@ struct Players {
     }
 
     bool start(size_t count) {
-        static const char* const ids[] = {"bbec5c86eb101fe5f38c87f0fa22e7d1", "cbec5c86eb101fe5f38c87f0fa22e7d2"};
-        static const char* const names[] = {"AshesPatient", "AshesStranger"};
+        static const char* const ids[] = {"bbec5c86eb101fe5f38c87f0fa22e7d1", "cbec5c86eb101fe5f38c87f0fa22e7d2", "dbec5c86eb101fe5f38c87f0fa22e7d3"};
+        static const char* const names[] = {"AshesPatient", "AshesStranger", "AshesThird"};
         for (size_t i = 0; i < count; ++i) {
             svc::Character c = bard25_bagged();
             if (i == 0) c.class_id = 3;   // the Cleric

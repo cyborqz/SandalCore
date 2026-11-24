@@ -195,12 +195,25 @@ struct GroupMember {
     bool operator==(const GroupMember&) const = default;
 };
 
-/// The whole group a ClientUpdateGroup carries: the group's GUID, its leader and its master looter, and the members in squad order.
+/// One squad of a group as ClientUpdateGroup's squad element carries it: its number (1 to 10), its members, its one squad leader (a zero GUID:
+/// none) and its member-shouts setting.  A party's one squad is the flat roster's, built when the frame is made.
+struct GroupSquadData {
+    int32_t                            number = 1;
+    std::vector<GroupMember>           members;
+    std::vector<std::array<uint32_t, 4>> leaders;
+    bool                               member_shouts = true;
+};
+
+/// The whole group a ClientUpdateGroup carries: the group's GUID, its leader and its master looter, the group type (0 party, 1 raid), the flat
+/// roster in roster order, the squads (a party's one, a raid's several) and the raid settings.
 struct GroupClientData {
-    std::array<uint32_t, 4>  group_guid{};
-    std::array<uint32_t, 4>  leader_guid{};
-    std::array<uint32_t, 4>  master_looter_guid{};
-    std::vector<GroupMember> members;
+    std::array<uint32_t, 4>   group_guid{};
+    std::array<uint32_t, 4>   leader_guid{};
+    std::array<uint32_t, 4>   master_looter_guid{};
+    uint64_t                  group_type = 0;
+    uint64_t                  shout_privilege = 2;
+    std::vector<GroupMember>  members;
+    std::vector<GroupSquadData> squads;
 };
 
 /// One member of a group as ClientUpdateGroup's squad element carries it: the name, the character GUID, the class, the nine PlayerStats values and the online flag
@@ -604,8 +617,10 @@ public:
     /// invitation; the caller sends the two-member state when the invitation is accepted.
     std::optional<Send> group_update(const GroupClientData& group);
     /// ClientRequestJoinGroup(GroupGuid, InviterName, GroupType): the invitation the invitee's client answers with
-    /// ServerAcceptJoinGroup or ServerDeclineJoinGroup.
-    std::optional<Send> group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name);
+    /// ServerAcceptJoinGroup or ServerDeclineJoinGroup; `group_type` is 0 for a party, 1 for a raid.
+    std::optional<Send> group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name, uint64_t group_type);
+    /// ClientRequestConvertToRaid(InvitedPlayer): the 9th invitation's ask to the leader; his yes is ServerAcceptConvertToRaid.
+    std::optional<Send> convert_to_raid_request(const std::string& invited_player);
     /// ClientUpdateGroupSettings with the settings a party starts with (member shouts on, the loot methods of the party frame).
     std::optional<Send> group_settings();
     /// ClientPromptResurrect(InstigatorGuid): the dead player is asked whether `instigator` (the Cleric's character GUID) raises him.  Social, seeing other

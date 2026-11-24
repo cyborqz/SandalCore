@@ -77,9 +77,9 @@ bool set_party_settings(const schema::RpcSchema& rpc, repl::RpcParams& params, c
     return set_loot_methods(rpc, params, block + ".LootAllocationMethods") && ok;
 }
 
-/// The raid settings a frame carries: shout privilege 2, the party's loot overridden off, and the same loot methods.
-bool set_raid_settings(const schema::RpcSchema& rpc, repl::RpcParams& params, const std::string& block) {
-    bool ok = repl::set_rpc_param(rpc, params, block + ".ShoutPrivilege", Value::u64(2));
+/// The raid settings a frame carries: the shout privilege it is given, the party's loot overridden off, and the party's loot methods.
+bool set_raid_settings(const schema::RpcSchema& rpc, repl::RpcParams& params, const std::string& block, uint64_t shout_privilege) {
+    bool ok = repl::set_rpc_param(rpc, params, block + ".ShoutPrivilege", Value::u64(shout_privilege));
     ok = repl::set_rpc_param(rpc, params, block + ".bOverridePartyLootSettings", Value::boolean(false)) && ok;
     return set_loot_methods(rpc, params, block + ".LootAllocationMethods") && ok;
 }
@@ -2204,22 +2204,26 @@ std::optional<Send> PlayerBootstrap::group_update(const GroupClientData& group) 
     set_guid("NewGroup.GroupGuid", group.group_guid);
     set_guid("NewGroup.LeaderGuid", group.leader_guid);
     set_guid("NewGroup.MasterLooterGuid", group.master_looter_guid);
-    set("NewGroup.GroupType", Value::u64(0));
+    set("NewGroup.GroupType", Value::u64(group.group_type));
     repl::ArrayValue squads;
-    repl::ElementState squad;
-    squad.values[1] = Value::i64(1);   // SquadNumber
-    repl::ArrayValue members;
-    for (const GroupMember& shown : group.members) members.elements.push_back(group_member_element(shown));
-    squad.values[2] = Value(std::move(members));
-    repl::ArrayValue leaders;
-    repl::ElementState leader;
-    for (int i = 0; i < 4; ++i) leader.values[static_cast<uint16_t>(1 + i)] = Value::i64(static_cast<int32_t>(group.leader_guid[i]));
-    leaders.elements.push_back(std::move(leader));
-    squad.values[3] = Value(std::move(leaders));
-    squad.values[4] = Value::boolean(true);   // SquadSettings.bEnableMemberShouts
-    squads.elements.push_back(std::move(squad));
+    for (const GroupSquadData& shown : group.squads) {
+        repl::ElementState squad;
+        squad.values[1] = Value::i64(shown.number);   // SquadNumber
+        repl::ArrayValue members;
+        for (const GroupMember& member : shown.members) members.elements.push_back(group_member_element(member));
+        squad.values[2] = Value(std::move(members));
+        repl::ArrayValue leaders;
+        for (const std::array<uint32_t, 4>& guid : shown.leaders) {
+            repl::ElementState leader;
+            for (int i = 0; i < 4; ++i) leader.values[static_cast<uint16_t>(1 + i)] = Value::i64(static_cast<int32_t>(guid[static_cast<size_t>(i)]));
+            leaders.elements.push_back(std::move(leader));
+        }
+        squad.values[3] = Value(std::move(leaders));
+        squad.values[4] = Value::boolean(shown.member_shouts);   // SquadSettings.bEnableMemberShouts
+        squads.elements.push_back(std::move(squad));
+    }
     set("NewGroup.Squads", Value(std::move(squads)));
-    good = set_raid_settings(*rpc, params, "NewGroup.RaidSettings") && good;
+    good = set_raid_settings(*rpc, params, "NewGroup.RaidSettings", group.shout_privilege) && good;
     good = set_party_settings(*rpc, params, "NewGroup.PartySettings") && good;
     if (!good) return std::nullopt;
     BunchWriter bits;
@@ -2233,7 +2237,7 @@ std::optional<Send> PlayerBootstrap::group_update(const GroupClientData& group) 
     return finish(Role::PlayerController, false, "ClientUpdateGroup (party)", std::move(e));
 }
 
-std::optional<Send> PlayerBootstrap::group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name) {
+std::optional<Send> PlayerBootstrap::group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name, uint64_t group_type) {
     if (!ok_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientRequestJoinGroup");
     if (!rpc) return std::nullopt;
@@ -2243,7 +2247,7 @@ std::optional<Send> PlayerBootstrap::group_invite(const std::array<uint32_t, 4>&
         good = repl::set_rpc_param(*rpc, params, std::string("GroupGuid.") + "ABCD"[i], Value::i64(static_cast<int32_t>(group_guid[i]))) && good;
     }
     good = repl::set_rpc_param(*rpc, params, "InviterName", Value::str(inviter_name)) && good;
-    good = repl::set_rpc_param(*rpc, params, "GroupType", Value::u64(0)) && good;
+    good = repl::set_rpc_param(*rpc, params, "GroupType", Value::u64(group_type)) && good;
     if (!good) return std::nullopt;
     BunchWriter bits;
     bool failed = false;
@@ -2254,6 +2258,23 @@ std::optional<Send> PlayerBootstrap::group_invite(const std::array<uint32_t, 4>&
     repl::BlockHeader header;
     if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
     return finish(Role::PlayerController, false, "ClientRequestJoinGroup", std::move(e));
+}
+
+std::optional<Send> PlayerBootstrap::convert_to_raid_request(const std::string& invited_player) {
+    if (!ok_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientRequestConvertToRaid");
+    if (!rpc) return std::nullopt;
+    repl::RpcParams params;
+    if (!repl::set_rpc_param(*rpc, params, "InvitedPlayer", Value::str(invited_player))) return std::nullopt;
+    BunchWriter bits;
+    bool failed = false;
+    if (repl::write_rpc_params(*rpc, params, bits, {}, &failed) == 0 || failed) return std::nullopt;
+    BunchWriter field;
+    if (repl::write_field(*pc_.obj.schema, rpc->field_index, bits, field) == 0) return std::nullopt;
+    Emission e;
+    repl::BlockHeader header;
+    if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
+    return finish(Role::PlayerController, false, "ClientRequestConvertToRaid", std::move(e));
 }
 
 std::optional<Send> PlayerBootstrap::resurrect_prompt(const std::array<uint32_t, 4>& instigator) {
@@ -2283,7 +2304,7 @@ std::optional<Send> PlayerBootstrap::group_settings() {
     if (!rpc) return std::nullopt;
     repl::RpcParams params;
     bool good = set_party_settings(*rpc, params, "PartySettings");
-    good = set_raid_settings(*rpc, params, "RaidSettings") && good;
+    good = set_raid_settings(*rpc, params, "RaidSettings", 2) && good;
     good = repl::set_rpc_param(*rpc, params, "SquadSettings.bEnableMemberShouts", Value::boolean(true)) && good;
     if (!good) return std::nullopt;
     BunchWriter bits;

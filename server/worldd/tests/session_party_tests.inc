@@ -7,16 +7,18 @@
 //  Registered tests of test_worldd_session: social step 8, a party of two to eight.  An invitation reaches the named player on line as
 //  ClientRequestJoinGroup and is answered with ServerAcceptJoinGroup or ServerDeclineJoinGroup; the accept sends ClientUpdateGroup to every
 //  member (the leader included) and then ClientUpdateGroupSettings; a leave, a kick, a leader change, a logout and a disband reach every
-//  frame; the party holds eight members and an invitation stands five minutes.  The group's frame carries the whole state: the two GUIDs
-//  and the master looter's, the group type, and the squad with its members and its leader.  The two-member frame's fields and its bit
-//  size are checked against the game's own frame; the one-member frame and the settings update have their own sizes.
+//  frame; the party holds eight members, the ninth invitation asks the leader to convert to a raid, several invitations wait at once and
+//  one stands five minutes.  The group's frame carries the whole state: the two GUIDs and the master looter's, the group type, and the
+//  squad with its members and its leader.  The two-member frame's fields and its bit size are checked against the game's own frame; the
+//  one-member frame and the settings update have their own sizes.  (The raids themselves are tests/session_raid_tests.inc.)
 // ============================================================================
 #include "protocol/repl/rpc_fields.h"
 
 namespace {
 
-/// The most players one test of this file joins: the eight members of a full party and the two players who test the refusals.
-constexpr size_t kMaxPartyTestPlayers = 10;
+/// The most players one test of this file joins: the eight members of a full party and the two players who test the refusals.  The raid
+/// tests (session_raid_tests.inc) share this world and hold their forty-member raid in the same array.
+constexpr size_t kMaxPartyTestPlayers = 41;
 
 /// How long an invitation stands (the game's group timeout).
 constexpr auto kPartyInviteLifetime = std::chrono::minutes(5);
@@ -753,8 +755,8 @@ static void test_party_owner_playerb_flow() {
 
 AOC_REGISTER_TEST(test_party_owner_playerb_flow);
 
-static void test_party_ninth_member_refused() {
-    std::printf("eight members form a party and the ninth is refused\n");
+static void test_party_ninth_member_asks_to_convert() {
+    std::printf("eight members form a party; the ninth invitation asks the leader to convert; his yes converts and invites him\n");
     PartyWorld w;
     const schema::ClassSchema& pc_cls = class_named("AoCPlayerControllerBP_C");
     CHECK(party_enter(w, 9), "nine players enter the world");
@@ -768,23 +770,42 @@ static void test_party_ninth_member_refused() {
         CHECK(requests.size() == 1 && party_accept(w, i, requests[0].group_guid, requests[0].inviter), ("member " + std::to_string(i) + " accepts").c_str());
         w.settle();
     }
-    const PartyFrame full = last_party_frame(w[0].got, pc_cls);
     std::vector<std::string> names;
     for (size_t i = 0; i < 8; ++i) names.push_back("p" + std::to_string(i + 1));
     std::string why;
-    CHECK(frame_lists(full, names, w.guid_of(0), &why), ("the party holds eight members: " + why).c_str());
+    CHECK(frame_lists(last_party_frame(w[0].got, pc_cls), names, w.guid_of(0), &why), ("the party holds eight members: " + why).c_str());
     const size_t before_ninth = w[8].got.size();
     const size_t before_leader = w[0].got.size();
     CHECK(party_invite(w, 0, "p9"), "p1 invites the ninth player");
     w.settle();
-    CHECK(party_requests_in(w[8].got, pc_cls, before_ninth).empty(), "the ninth player gets no ClientRequestJoinGroup");
-    std::string line_why;
-    CHECK(one_system_line(w[0].got, pc_cls, before_leader, "p9 cannot join: the party is full.", &line_why),
-          ("the leader is told the party is full: " + line_why).c_str());
-    CHECK(frame_lists(last_party_frame(w[0].got, pc_cls), names, w.guid_of(0), &why), "the eight-member party is unchanged");
+    CHECK(party_requests_in(w[8].got, pc_cls, before_ninth).empty(), "the ninth player gets no ClientRequestJoinGroup yet");
+    bool asked = false;
+    std::string invited;
+    for (size_t i = before_leader; i < w[0].got.size(); ++i) {
+        if (const auto call = party_single_rpc(w[0].got[i], pc_cls, "ClientRequestConvertToRaid")) {
+            asked = true;
+            if (const auto* s = repl::rpcf::as<std::string>(repl::rpcf::value_of(*call->rpc, call->params, "InvitedPlayer"))) invited = *s;
+        }
+    }
+    CHECK(asked && invited == "p9", "the leader's client is asked to convert for p9");
+    const schema::RpcSchema* accept = pc_cls.rpc("ServerAcceptConvertToRaid");
+    repl::RpcParams params;
+    CHECK(accept && repl::set_rpc_param(*accept, params, "InvitedPlayer", repl::Value::str("p9")) && party_send(w, 0, "ServerAcceptConvertToRaid", params),
+          "the leader presses yes");
+    w.settle();
+    const PartyFrame raid = last_party_frame(w[0].got, pc_cls);
+    CHECK(raid.group_type == 1, "the group is a raid now");
+    CHECK(raid.squad_number == 1 && raid.members.size() == 8, "the frame's first squad is still the eight");
+    CHECK(raid.leader_guid == w.guid_of(0), "p1 is the raid leader");
+    const auto requests = party_requests_in(w[8].got, pc_cls, before_ninth);
+    CHECK(requests.size() == 1 && requests[0].group_type == 1, "p9 gets exactly one raid invitation");
+    if (requests.size() != 1) return;
+    CHECK(party_accept(w, 8, requests[0].group_guid, requests[0].inviter), "p9 accepts");
+    w.settle();
+    CHECK(last_party_frame(w[0].got, pc_cls).group_type == 1, "the group stays a raid after the ninth joined");
 }
 
-AOC_REGISTER_TEST(test_party_ninth_member_refused);
+AOC_REGISTER_TEST(test_party_ninth_member_asks_to_convert);
 
 static void test_party_invite_unknown_and_already_grouped() {
     std::printf("an invite to an unknown name and to a player already in a party is refused with one system line\n");
@@ -1250,8 +1271,8 @@ static void test_party_disband_clears_every_frame() {
 
 AOC_REGISTER_TEST(test_party_disband_clears_every_frame);
 
-static void test_party_second_invite_keeps_first() {
-    std::printf("a second invitation while one is pending keeps the first and sends no second join request\n");
+static void test_party_second_invite_waits_too() {
+    std::printf("a second invitation while one is pending waits too (several at once)\n");
     PartyWorld w;
     const schema::ClassSchema& pc_cls = class_named("AoCPlayerControllerBP_C");
     CHECK(party_enter(w, 3), "three players enter the world");
@@ -1262,24 +1283,22 @@ static void test_party_second_invite_keeps_first() {
     w.settle();
     const auto first = party_requests_in(w[1].got, pc_cls, before_b);
     CHECK(first.size() == 1, "p2 gets the first invitation");
-    const size_t before_second = w[0].got.size();
     CHECK(party_invite(w, 0, "p3"), "p1 invites p3 while p2's invitation is pending");
     w.settle();
-    CHECK(party_requests_in(w[2].got, pc_cls, before_c).empty(), "p3 gets no second join request");
-    std::string why;
-    CHECK(one_system_line(w[0].got, pc_cls, before_second, "p3 cannot join yet: the invitation of p2 is still pending.", &why),
-          ("the leader is told whose invitation is still pending: " + why).c_str());
-    if (first.size() != 1) return;
+    const auto second = party_requests_in(w[2].got, pc_cls, before_c);
+    CHECK(second.size() == 1, "p3 gets the second invitation too");
+    if (first.size() != 1 || second.size() != 1) return;
     CHECK(party_accept(w, 1, first[0].group_guid, first[0].inviter), "p2 accepts the first invitation");
     w.settle();
-    CHECK(frame_lists(last_party_frame(w[0].got, pc_cls), {"p1", "p2"}, w.guid_of(0), &why), ("the first invitation still forms the party: " + why).c_str());
-    const size_t before_third = w[2].got.size();
-    CHECK(party_invite(w, 0, "p3"), "p1 invites p3 now that no invitation is pending");
+    std::string why;
+    CHECK(frame_lists(last_party_frame(w[0].got, pc_cls), {"p1", "p2"}, w.guid_of(0), &why), ("the first invitation forms the two: " + why).c_str());
+    CHECK(party_accept(w, 2, second[0].group_guid, second[0].inviter), "p3 accepts the second invitation");
     w.settle();
-    CHECK(party_requests_in(w[2].got, pc_cls, before_third).size() == 1, "p3's invitation arrives then");
+    why.clear();
+    CHECK(frame_lists(last_party_frame(w[0].got, pc_cls), {"p1", "p2", "p3"}, w.guid_of(0), &why), ("the second invitation still stands: " + why).c_str());
 }
 
-AOC_REGISTER_TEST(test_party_second_invite_keeps_first);
+AOC_REGISTER_TEST(test_party_second_invite_waits_too);
 
 static void test_party_decline_removes_pending() {
     std::printf("a decline is a normal refusal: the pending invitation goes and a lone leader's frame empties\n");

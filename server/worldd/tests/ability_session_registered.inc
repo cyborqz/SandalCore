@@ -22,3 +22,4 @@
 #include "ability_session_pvp_tests.inc"   // #23 (MrJambix)
 #include "ability_session_duels_tests.inc"   // #23 (MrJambix)
 #include "ability_session_pvp_more_tests.inc"
+#include "ability_session_raid_tests.inc"

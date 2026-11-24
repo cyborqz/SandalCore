@@ -27,7 +27,7 @@ bool CombatWorld::pvp_pair(PlayerPort& self, PlayerPort& target, pvp::Side& a, b
     bool target_force = false;
     if (!self.pvp_side(a, force) || !target.pvp_side(b, target_force)) return false;
     const uint64_t group = self.group_key();
-    pair.group = group != 0 && group == target.group_key() ? 2 : 0;   // (one party: one squad)
+    pair.group = group != 0 && group == target.group_key() ? (self.squad_key() != 0 && self.squad_key() == target.squad_key() ? 2 : 1) : 0;   // one raid: 1, one squad: 2
     return true;
 }
 

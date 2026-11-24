@@ -58,7 +58,9 @@ TargetInfo CombatWorld::inspect_player(PlayerPort& target, const Fighter& from) 
     t.other_player = me && me != &target;   // (the caster's own pawn is not another player: mask Self reaches it; his own runtime runs his self hits)
     if (!t.other_player) return t;
     const uint64_t group = me->group_key();
-    if (group != 0 && group == target.group_key()) t.group = 2;   // one party: one squad
+    if (group != 0 && group == target.group_key()) {
+        t.group = me->squad_key() != 0 && me->squad_key() == target.squad_key() ? 2 : 1;   // one raid: 1, one squad of it: 2; a party is one squad
+    }
     // PvP: what the rules between players let the caster do to him (a pet, which keeps no side, stays on its owner's side as before)
     pvp::Side a, b;
     pvp::Pair pair;

@@ -33,3 +33,4 @@
 #include "session/members/pvp.inc"   // #23 (MrJambix)
 #include "session/members/duels.inc"   // #23 (MrJambix)
 #include "session/members/guild.inc"
+#include "session/members/raid.inc"

@@ -98,6 +98,7 @@ public:
     // abilities between players (combat/combat_players.cpp): the party is the key two members share
     // Abilities between players: contributed by MrJambix in #23.
     uint64_t group_key() const override { return reinterpret_cast<uintptr_t>(s_.party_group_); }
+    uint64_t squad_key() const override { return s_.squad_key(); }
     // PvP (session/player_pvp.cpp): the flag changes at once (the rules of the next hit read it), the client hears of it at the session's tick
     // PvP: contributed by MrJambix in #23.
     bool pvp_side(combat::pvp::Side& out, bool& force) const override {
