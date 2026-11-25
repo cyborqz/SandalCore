@@ -33,6 +33,7 @@
 //             montage to its end section and, kRestEndEffectDelay later, removes the effect and puts the regeneration
 //             back; the ability item stays until the next Rest replaces it, as in the capture.  A second Rest while one is
 //             running replaces the first in one step (pkt#8240).  A Sprint or a Dodge ends it.
+//             A second press (ServerEndAbility with the item's ServerInstanceId) ends it as a cancel does.  A fight ends it too: the Rest effect's fragility breaks it.
 //    anything else, or a Sprint or Dodge that is refused: ClientEndAbility(ClientInstanceId) and nothing else.
 //
 //  Instances.  The ability item's ServerInstanceId is the server's own counter of the instances it started (0, 1, 2 ...; a
@@ -216,6 +217,7 @@ public:
     void set_regen_rate(double per_second, double now);
     /// The player moves or stands (from the A6 moves).
     void set_moving(bool moving, double now);
+    /// The player's combat state.  A running Rest ends when combat starts: its effect's fragility breaks it.   // #20 (war-drayv)
     void set_in_combat(bool in_combat, double now);
     /// The mounts milestone, stage 3 fix 2: the player gets on (or off) a mount.  A mounted rider has no Sprint and no Stamina use [R: General_Sprint is not bUsableWhileMounted, and
     /// the rider's moves are the mount's]: getting on ends a running Sprint the way a Sprint ends (its items removed, MoveSpeedMult back to 1.0, the StaminaRegeneration item,
@@ -238,8 +240,12 @@ public:
     /// is ignored.
     bool cancel(int32_t client_instance_id, double now);
 
-    /// The character stands up on the server's say (a second /sit): a Rest that runs ends the way its cancel ends it, the montage jumps to its end section and the effect follows.  It works in
-    /// combat too.  False when no Rest runs.
+    // Rest and Sprint end: contributed by war-drayv in #20.
+    /// ServerEndAbility: ends the running Sprint or Rest whose server instance is `server_instance_id` (the number the client got in
+    /// the ability item).  The client's own ids stay in cancel().  False when no running instance has that number.
+    bool end_server_instance(int64_t server_instance_id, double now);
+
+    /// The character stands up on the server's say (a second /sit): a Rest that runs ends the way its cancel ends it, the montage jumps to its end section and the effect follows.  False when no Rest runs.
     bool end_rest(double now);
 
     /// Runs the timers that fell due up to `now`.
