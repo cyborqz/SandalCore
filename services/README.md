@@ -644,6 +644,17 @@ DELETE FROM schema_migrations WHERE version = 26;
 COMMIT;
 ```
 
+**Rolling back migration 0027.** Migration 0027 (mail) adds TWO tables, `character_mails` and `character_mail_items` (a character's mails with their sender, subject, body, status and times, and the items attached to each mail with its claimed flag); it writes nowhere else, backfills nothing and touches no existing table or column. worldd reads a character's mails at login and when the mail window opens (`GetMails`) and saves one mail whole after every change (`SaveMail`: the read and delete marks, and the items claimed); the admin send adds one (`CreateMail`). The rollback drops the tables with whatever they hold: every mail and every item still attached to one is forgotten (an item already claimed into the bags is in `character_items` and stays). The characters and everything else they own are untouched, and the migration applies again. Stop the character service and worldd first: a worldd of this version reads the mails at every login.
+
+```sql
+-- rollback of migration 0027 (mail)
+BEGIN;
+DROP TABLE character_mail_items;
+DROP TABLE character_mails;
+DELETE FROM schema_migrations WHERE version = 27;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or

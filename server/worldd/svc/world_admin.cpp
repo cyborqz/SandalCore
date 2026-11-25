@@ -25,6 +25,28 @@ namespace adminv1 = ::aoc::worldadmin::v1;
 
 // ---- the queue ------------------------------------------------------------------------------------------------------------------------------------
 
+bool AdminQueue::wait_started(const CallRef& call, std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(call->mu);
+    if (!call->cv.wait_for(lock, timeout, [&] { return call->started || call->cancelled_; })) {
+        call->cancelled_ = true;   // the network thread has not started it: it never will
+        return false;
+    }
+    return call->started && !call->cancelled_;
+}
+
+void AdminQueue::Call::answer(const std::function<void()>& write) {
+    std::lock_guard<std::mutex> lock(mu);
+    if (cancelled_ || done) return;
+    if (write) write();
+    done = true;
+    cv.notify_all();
+}
+
+bool AdminQueue::Call::cancelled() const {
+    std::lock_guard<std::mutex> lock(mu);
+    return cancelled_;
+}
+
 bool AdminQueue::run(std::function<void()> task, std::chrono::milliseconds timeout) {
     auto call = std::make_shared<Call>();
     call->task = std::move(task);
@@ -36,22 +58,46 @@ bool AdminQueue::run(std::function<void()> task, std::chrono::milliseconds timeo
         }
         queue_.push_back(call);
     }
+    if (!wait_started(call, timeout)) {
+        ++abandoned_;
+        return false;
+    }
     std::unique_lock<std::mutex> lock(call->mu);
-    if (!call->cv.wait_for(lock, timeout, [&] { return call->started || call->cancelled; })) {
-        call->cancelled = true;   // the network thread has not started it: it never will
-        ++abandoned_;
-        return false;
-    }
-    if (!call->started) {   // closed while it waited
-        ++abandoned_;
-        return false;
-    }
     call->cv.wait(lock, [&] { return call->done; });
     return true;
 }
 
+bool AdminQueue::run_later(std::function<bool(CallRef)> task, std::chrono::milliseconds timeout) {
+    auto call = std::make_shared<Call>();
+    call->later = std::move(task);
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (closed_) {
+            ++abandoned_;
+            return false;
+        }
+        queue_.push_back(call);
+    }
+    if (!wait_started(call, timeout)) {
+        ++abandoned_;
+        return false;
+    }
+    std::unique_lock<std::mutex> lock(call->mu);
+    call->cv.wait(lock, [&] { return call->done; });
+    return !call->cancelled_;
+}
+
 size_t AdminQueue::drain(size_t max) {
     size_t ran = 0;
+    {
+        // a later call that has answered is no longer needed by close()
+        std::lock_guard<std::mutex> lock(mu_);
+        later_.erase(std::remove_if(later_.begin(), later_.end(), [](const std::shared_ptr<Call>& call) {
+                         std::lock_guard<std::mutex> inner(call->mu);
+                         return call->done;
+                     }),
+                     later_.end());
+    }
     while (ran < max) {
         std::shared_ptr<Call> call;
         {
@@ -62,22 +108,37 @@ size_t AdminQueue::drain(size_t max) {
         }
         {
             std::lock_guard<std::mutex> lock(call->mu);
-            if (call->cancelled) continue;   // its caller gave up
+            if (call->cancelled_) continue;   // its caller gave up
             call->started = true;
         }
         call->cv.notify_all();
-        try {
-            call->task();
-        } catch (const std::exception& e) {
-            spdlog::error("[admin] a call threw {}: it is answered as if it had run", e.what());
-        } catch (...) {
-            spdlog::error("[admin] a call threw: it is answered as if it had run");
+        if (call->later) {
+            bool ready = false;
+            try {
+                ready = call->later(call);
+            } catch (const std::exception& e) {
+                spdlog::error("[admin] a later call threw {}: it is answered as if it had run", e.what());
+                ready = true;
+            } catch (...) {
+                spdlog::error("[admin] a later call threw: it is answered as if it had run");
+                ready = true;
+            }
+            if (ready) {
+                call->answer({});
+            } else {
+                std::lock_guard<std::mutex> lock(mu_);
+                later_.push_back(call);
+            }
+        } else {
+            try {
+                call->task();
+            } catch (const std::exception& e) {
+                spdlog::error("[admin] a call threw {}: it is answered as if it had run", e.what());
+            } catch (...) {
+                spdlog::error("[admin] a call threw: it is answered as if it had run");
+            }
+            call->answer({});
         }
-        {
-            std::lock_guard<std::mutex> lock(call->mu);
-            call->done = true;
-        }
-        call->cv.notify_all();
         ++ran;
         ++ran_;
     }
@@ -87,15 +148,26 @@ size_t AdminQueue::drain(size_t max) {
 
 void AdminQueue::close() {
     std::deque<std::shared_ptr<Call>> waiting;
+    std::vector<std::shared_ptr<Call>> later;
     {
         std::lock_guard<std::mutex> lock(mu_);
         closed_ = true;
         waiting.swap(queue_);
+        later.swap(later_);
     }
     for (const auto& call : waiting) {
         {
             std::lock_guard<std::mutex> lock(call->mu);
-            call->cancelled = true;
+            call->cancelled_ = true;
+        }
+        call->cv.notify_all();
+    }
+    for (const auto& call : later) {
+        {
+            std::lock_guard<std::mutex> lock(call->mu);
+            if (call->done) continue;
+            call->cancelled_ = true;
+            call->done = true;
         }
         call->cv.notify_all();
     }
@@ -531,7 +603,17 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         std::map<std::string, std::string> fields(req->fields().begin(), req->fields().end());
         const std::string command = req->command();
         GmRunResult out;
-        if (auto s = on_net_thread([&] { out = owner.travel_.run_command(command, fields, by); }); !s.ok()) return s;
+        // send-mail to a character in the world creates the mail on the world's mail worker; its answer lands on a later tick
+        if (!owner.queue_.run_later(
+                [&](AdminQueue::CallRef call) {
+                    out = owner.travel_.run_command(command, fields, by, [&out, call](const GmRunResult& final) {
+                        call->answer([&out, &final] { out = final; });
+                    });
+                    return !out.pending;
+                },
+                owner.options_.call_timeout)) {
+            return grpc::Status(grpc::StatusCode::UNAVAILABLE, "worldd's network thread did not take the call in time (is worldd stopping?)");
+        }
         if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
         resp->set_command(out.command);
         resp->set_character(out.character);

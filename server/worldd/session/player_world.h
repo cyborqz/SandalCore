@@ -54,6 +54,7 @@
 #include "quest/quest_service.h"
 #include "session/ability_catalog.h"
 #include "session/leveling.h"
+#include "session/mail_jobs.h"
 #include "session/move_checker.h"
 #include "session/position_saver.h"
 #include "session/professions.h"
@@ -196,6 +197,14 @@ public:
     uint64_t submit_friend_lookup(const std::string& key, bool by_name) const;
     /// Takes the result of a submitted lookup when the worker has it yet; false when it has not.
     bool take_friend_lookup(uint64_t ticket, svc::CharacterResult& out) const;
+
+    /// Mail: submits one mail call to the world's mail worker, which asks the sink off the network thread; the ticket is how the
+    /// answer comes back.  The jobs of a character run in the order they were submitted.
+    uint64_t submit_mail_job(MailJobRequest request) const;
+    /// Takes a mail job's answer when the worker has it; false when it has not.
+    bool take_mail_job(uint64_t ticket, MailJobAnswer& out) const;
+    /// Drops a mail job's answer: a session that ended never reads it.
+    void forget_mail_job(uint64_t ticket) const;
 
     /// The per-connection values of one joining player: ServerId, `world_time` (seconds), the next PlayerId and a
     /// fresh set of GUIDs.
@@ -619,6 +628,7 @@ private:
     MovementConfig                       movement_;
     PositionSink*                        sink_ = nullptr;
     mutable std::unique_ptr<FriendLookups> friend_lookups_;   // created at the first friend lookup; destroyed with the world (before the sink it holds)
+    mutable std::unique_ptr<MailJobs>      mail_jobs_;        // created at the first mail call; destroyed with the world (before the sink it holds)
     world::ActorRegistry                 registry_;
     std::shared_ptr<world::DuelBook>     duel_book_ = std::make_shared<world::DuelBook>(&registry_, [this] { return guids_.next(); });   // PvP: the duels (after the registry it names)   // #23 (MrJambix)
     spawns::AreaConfig                   area_;

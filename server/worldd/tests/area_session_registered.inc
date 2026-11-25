@@ -20,3 +20,5 @@
 #include "friend_wire_edges_tests.inc"
 #include "certification_session_tests.inc"
 #include "guild_saver_tests.inc"
+#include "mail_saver_tests.inc"
+#include "area_session_mail_tests.inc"

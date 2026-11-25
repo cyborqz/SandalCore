@@ -1288,6 +1288,467 @@ static void test_world_clock_pushes() {
     CHECK(first && std::fabs(first->first - wc::WorldClock::starting_at(7.0).game_time(100.0)) < 1e-3, "a push reads the clock it is given, not the one of the setup");
 }
 
+// ---- mail: the window, the list, the detail, the claims, the status marks and the unread count --------------------------------
+
+static GuidValue mail_guid(uint32_t seed) { return GuidValue{seed, seed + 1, seed + 2, seed + 3}; }
+
+/// A component id for the components the captured character predates (the session mints one after the captured ids): without it the
+/// SocialComponent would take the quest component's zero id and the mail calls would land on the wrong component.
+static FIntrepidNetworkGUID fixture_guid(uint64_t id) {
+    FIntrepidNetworkGUID g;
+    g.ObjectId = id;
+    g.ServerId = bs::kCapturedServerId;
+    g.Randomizer = bs::kCapturedRandomizer;
+    return g;
+}
+
+/// The captured character with the SocialComponent's own id, as a session's bootstrap has it: the captured setup leaves the components
+/// added since the capture (the quest, the social and the guild one) at the zero id, and the mail calls need the social one.
+static PlayerBootstrap mail_bootstrap() {
+    bs::PlayerSetup setup = captured_setup();
+    setup.guids.social = fixture_guid(10341568);
+    PlayerBootstrap pb(setup, bs::GameStateMode::Tier2);
+    if (!pb.ok()) {
+        std::printf("  [FAIL] the mail fixture's bootstrap does not build: %s\n", pb.error().c_str());
+        std::exit(2);
+    }
+    return pb;
+}
+
+/// One fabricated list row: every value differs by its index, so a page read out of order is seen.
+static MailHeader make_mail_header(size_t i) {
+    MailHeader h;
+    h.guid = mail_guid(static_cast<uint32_t>(1000 + 4 * i));
+    h.sender = "sender " + std::to_string(i);
+    h.subject = "subject " + std::to_string(i);
+    h.has_attachments = (i % 2) == 0;
+    h.status = (i % 3) == 0 ? 4 : ((i % 3) == 1 ? 2 : 6);
+    h.expiration_time = 1700000000000LL + static_cast<int64_t>(i);
+    h.issue_time = 1600000000000LL + static_cast<int64_t>(i);
+    return h;
+}
+
+static std::vector<MailHeader> make_mail_headers(size_t n) {
+    std::vector<MailHeader> out;
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) out.push_back(make_mail_header(i));
+    return out;
+}
+
+/// One fabricated attachment in the shape the item codec accepts: an item with its own guid and creation time and no arrays.
+static ItemInstance make_mail_item() {
+    ItemInstance item;
+    item.has_item = true;
+    item.record_id = 6064630560782155776ull;
+    item.quantity = 3;
+    item.quality = 5;
+    item.durability = 100.0f;
+    item.guid = mail_guid(4000);
+    item.creation_time = 1700000000000LL;
+    return item;
+}
+
+static MailPersistenceData make_mail_data() {
+    MailPersistenceData d;
+    d.guid = mail_guid(2000);
+    d.sender_guid = mail_guid(2100);
+    d.recipient_guid = mail_guid(2200);
+    d.subject = "a detail subject";
+    d.type = 3;
+    d.batch_num = 7;
+    d.created_time = 1700000000000LL;
+    d.expiration_time = 1700003600000LL;
+    d.node = 33;
+    d.sender = "detail sender";
+    d.message.title = "the title";
+    d.message.body = "the body";
+    d.message.system = false;
+    MailItem item;
+    item.item = make_mail_item();
+    item.claimed = false;
+    d.items.push_back(std::move(item));
+    d.currency_claimed = false;
+    d.status = 4;
+    return d;
+}
+
+/// The one decoded call `rpc` on the block `block_name` (nullptr: the actor), or nullptr; the caller CHECKs the result.
+static const RpcCall* mail_one_call(const Decoded& d, const char* rpc, const char* block_name) {
+    if (!d.ok || d.blocks.size() != 1) return nullptr;
+    const Block& b = d.blocks[0];
+    if (block_name ? (b.is_actor || b.name != block_name) : !b.is_actor) return nullptr;
+    if (b.rpcs.size() != 1 || !b.rpcs[0].decoded || !b.rpcs[0].rpc) return nullptr;
+    if (std::string_view(b.rpcs[0].rpc->name) != rpc) return nullptr;
+    return &b.rpcs[0];
+}
+
+/// The FGuid's four words (handles first..first+3) of one call.
+static bool mail_guid_param(const RpcCall& call, uint16_t first, GuidValue* out) {
+    uint32_t words[4] = {};
+    for (uint16_t i = 0; i < 4; ++i) {
+        const auto it = call.params.values.find(static_cast<uint16_t>(first + i));
+        if (it == call.params.values.end()) return false;
+        const int64_t* v = it->second.get_if<int64_t>();
+        if (!v) return false;
+        words[i] = static_cast<uint32_t>(*v);
+    }
+    *out = GuidValue{words[0], words[1], words[2], words[3]};
+    return true;
+}
+
+/// The Int32 parameter at `handle`, or nullptr.
+static const int64_t* mail_int_param(const RpcCall& call, uint16_t handle) {
+    const auto it = call.params.values.find(handle);
+    return it == call.params.values.end() ? nullptr : it->second.get_if<int64_t>();
+}
+
+/// The UInt32 parameter at `handle`, or nullptr.
+static const uint64_t* mail_uint_param(const RpcCall& call, uint16_t handle) {
+    const auto it = call.params.values.find(handle);
+    return it == call.params.values.end() ? nullptr : it->second.get_if<uint64_t>();
+}
+
+/// One ClientUpdateMailHeaders chain: its headers, whether the Headers and Version parameters are on the wire, its version and bComplete.
+/// False when the chain is not exactly such a page.
+static bool mail_read_page(const Decoded& d, std::vector<MailHeader>* headers, bool* headers_present, bool* version_present, uint64_t* version,
+                           bool* complete) {
+    headers->clear();
+    *headers_present = false;
+    *version_present = false;
+    *version = 0;
+    *complete = false;
+    const RpcCall* call = mail_one_call(d, "ClientUpdateMailHeaders", nullptr);
+    if (!call) return false;
+    const auto c = call->params.values.find(3);
+    const bool* complete_value = c == call->params.values.end() ? nullptr : c->second.get_if<bool>();
+    if (!complete_value) return false;
+    *complete = *complete_value;
+    const auto v = call->params.values.find(2);
+    if (v != call->params.values.end()) {
+        const uint64_t* number = v->second.get_if<uint64_t>();
+        if (!number) return false;
+        *version_present = true;
+        *version = *number;
+    }
+    const auto h = call->params.values.find(1);
+    if (h == call->params.values.end()) return true;
+    const ArrayValue* array = h->second.get_if<ArrayValue>();
+    if (!array) return false;
+    *headers_present = true;
+    for (const ElementState& e : array->elements) {
+        const auto it = e.values.find(1);
+        if (it == e.values.end()) return false;
+        const MailHeader* header = it->second.get_if<MailHeader>();
+        if (!header) return false;
+        headers->push_back(*header);
+    }
+    return true;
+}
+
+/// Checks a whole page set against the headers given: the page count, each header by its own guid and whole value, the version on every
+/// page (absent for 0), bComplete on the last only and the Headers parameter absent only for an empty page.
+static void mail_check_pages(const PlayerBootstrap& pb, const std::optional<std::vector<Send>>& sends, const std::vector<MailHeader>& want,
+                             uint64_t version, const char* what) {
+    const size_t pages = want.empty() ? 1 : (want.size() + bs::kMaxMailHeadersPerPage - 1) / bs::kMaxMailHeadersPerPage;
+    CHECK(sends.has_value(), what);
+    if (!sends) return;
+    CHECK(sends->size() == pages, "the page count is one page per 20 headers, at least one");
+    if (sends->size() != pages) return;
+    std::vector<MailHeader> got;
+    bool all = true;
+    for (size_t page = 0; page < pages; ++page) {
+        const Decoded d = decode(pb, (*sends)[page]);
+        std::vector<MailHeader> headers;
+        bool headers_present = false, version_present = false, complete = false;
+        uint64_t read_version = 0;
+        const bool read = mail_read_page(d, &headers, &headers_present, &version_present, &read_version, &complete);
+        const size_t from = page * bs::kMaxMailHeadersPerPage;
+        const size_t n = want.empty() ? 0 : std::min(bs::kMaxMailHeadersPerPage, want.size() - from);
+        bool page_ok = read && headers.size() == n && headers_present == (n != 0) && version_present == (version != 0) && read_version == version &&
+                       complete == (page + 1 == pages);
+        for (size_t i = 0; page_ok && i < n; ++i) {
+            page_ok = headers[i].guid == want[from + i].guid && headers[i] == want[from + i];
+        }
+        char msg[240];
+        std::snprintf(msg, sizeof(msg), "%s: page %zu of %zu has %zu headers, each by its own guid, Version %s and bComplete %d", what, page + 1, pages, n,
+                      version_present ? std::to_string(read_version).c_str() : "absent", complete ? 1 : 0);
+        CHECK(page_ok, msg);
+        all = all && page_ok;
+        got.insert(got.end(), headers.begin(), headers.end());
+    }
+    CHECK(all && got.size() == want.size() && got == want, "the headers are the ones given, in order, each pinned by guid and whole value");
+}
+
+/// The SocialComponent's NumUnreadMail in one PlayerController update: false when there is no such block or property.
+static bool mail_unread_in_update(const PlayerBootstrap& pb, const Send& send, int64_t* count) {
+    *count = -1;
+    const Decoded d = decode(pb, send);
+    const schema::ClassSchema* cls = gen::find_component_schema("SocialComponent");
+    if (!d.ok || d.blocks.size() != 1 || d.blocks[0].is_actor || d.blocks[0].name != "SocialComponent" || !cls) return false;
+    const Value* value = value_of(d.blocks[0], *cls, "NumUnreadMail");
+    const int64_t* number = value ? value->get_if<int64_t>() : nullptr;
+    if (!number) return false;
+    *count = *number;
+    return true;
+}
+
+static void test_mail_open() {
+    std::printf("mail: the window's open call, its four words and the guard\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    const GuidValue mailbox = mail_guid(5100);
+    CHECK(!pb.open_mail_ui(mailbox).has_value(), "before the pawn's second state the window is refused");
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    const std::optional<Send> send = pb.open_mail_ui(mailbox);
+    CHECK(send.has_value(), "after the join the window's open builds");
+    if (!send) return;
+    CHECK(send->role == Role::PlayerController && send->reliable() && !send->opens_channel, "the open is one reliable chain on the PlayerController's channel");
+    const Decoded d = decode(pb, *send);
+    const RpcCall* call = mail_one_call(d, "ClientOpenMailUI", nullptr);
+    CHECK(call != nullptr, "the chain is one ClientOpenMailUI call on the PlayerController actor");
+    CHECK(call && call->params.values.size() == 4, "the call carries the mailbox's four words and nothing else");
+    if (!call) return;
+    GuidValue got;
+    CHECK(mail_guid_param(*call, 1, &got) && got == mailbox, "MailboxGuid.A, .B, .C and .D are the mailbox's four words, in order");
+}
+
+static void test_mail_headers() {
+    std::printf("mail: the list's pages, the version and bComplete\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    // one page of 20, a second page for the 21st, two full pages for 40 and ten for the store's 200-mail cap
+    const std::vector<MailHeader> twenty = make_mail_headers(20);
+    const auto first = pb.mail_headers(std::span<const MailHeader>(twenty), 42);
+    CHECK(first.has_value() && first->size() == 1, "20 headers build one page");
+    if (!first) return;
+    mail_check_pages(pb, first, twenty, 42, "20 headers");
+    const std::vector<MailHeader> twenty_one = make_mail_headers(21);
+    mail_check_pages(pb, pb.mail_headers(std::span<const MailHeader>(twenty_one), 42), twenty_one, 42, "21 headers");
+    const std::vector<MailHeader> forty = make_mail_headers(40);
+    mail_check_pages(pb, pb.mail_headers(std::span<const MailHeader>(forty), 42), forty, 42, "40 headers");
+    const size_t store_cap = 200;   // the character store's live-mailbox cap
+    const std::vector<MailHeader> two_hundred = make_mail_headers(store_cap);
+    mail_check_pages(pb, pb.mail_headers(std::span<const MailHeader>(two_hundred), 42), two_hundred, 42, "200 headers");
+    // the empty list: one page with no headers at all and bComplete 1
+    mail_check_pages(pb, pb.mail_headers(std::span<const MailHeader>{}, 42), std::vector<MailHeader>{}, 42, "no mail");
+    // the caller's version is carried as given; a 0 version is the parameter's default, so it is absent from the wire
+    const std::vector<MailHeader> three = make_mail_headers(3);
+    mail_check_pages(pb, pb.mail_headers(std::span<const MailHeader>(three), 43), three, 43, "version 43");
+    mail_check_pages(pb, pb.mail_headers(std::span<const MailHeader>(three), 0), three, 0, "version 0");
+    // the worst-case page: the store's sender and subject caps with a non-ASCII character, so both strings are UTF-16 on the wire
+    std::vector<MailHeader> worst;
+    worst.reserve(bs::kMaxMailHeadersPerPage);
+    for (size_t i = 0; i < bs::kMaxMailHeadersPerPage; ++i) {
+        MailHeader h = make_mail_header(i);
+        h.sender = std::string(62, 'a') + "\xC3\xA9";     // 64 UTF-8 bytes, 63 characters
+        h.subject = std::string(126, 'a') + "\xC3\xA9";   // 128 UTF-8 bytes, 127 characters
+        worst.push_back(std::move(h));
+    }
+    const auto worst_page = pb.mail_headers(std::span<const MailHeader>(worst), 42);
+    CHECK(worst_page.has_value() && worst_page->size() == 1, "a page of the longest UTF-16 headers builds one chain");
+    if (!worst_page || worst_page->size() != 1) return;
+    CHECK(parts_of((*worst_page)[0]) <= 10, "the longest-header page is at most ten parts of the connection's content limit");
+}
+
+static void test_mail_data() {
+    std::printf("mail: the detail call\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    const MailPersistenceData wanted = make_mail_data();
+    CHECK(!pb.mail_data(wanted).has_value(), "before the social component the detail is refused");
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    const std::optional<Send> send = pb.mail_data(wanted);
+    CHECK(send.has_value(), "after the join the detail builds");
+    if (!send) return;
+    CHECK(send->role == Role::PlayerController && send->reliable() && !send->opens_channel, "the detail is one reliable chain on the PlayerController's channel");
+    const Decoded d = decode(pb, *send);
+    const RpcCall* call = mail_one_call(d, "ClientGetMailData", "SocialComponent");
+    CHECK(call != nullptr, "the chain is one ClientGetMailData call on the SocialComponent");
+    if (!call) return;
+    const auto it = call->params.values.find(1);
+    const MailPersistenceData* got = it == call->params.values.end() ? nullptr : it->second.get_if<MailPersistenceData>();
+    CHECK(got != nullptr, "the call carries MailData");
+    if (!got) return;
+    CHECK(*got == wanted, "MailData is the mail whole: its guids, subject, type, batch, times, node, sender, message, item and status");
+    CHECK(got->currency.entries.empty() && !got->currency_claimed, "the empty currency container and the false claimed flag are carried as the value has them");
+}
+
+static void test_mail_claims() {
+    std::printf("mail: the item and currency claims\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    const GuidValue mail = mail_guid(6100);
+    CHECK(!pb.mail_item_claimed(mail, 3).has_value() && !pb.mail_currency_claimed(mail).has_value(), "before the social component both claims are refused");
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    const std::optional<Send> zero = pb.mail_item_claimed(mail, 0);
+    CHECK(zero.has_value(), "the item claim builds");
+    if (!zero) return;
+    CHECK(zero->role == Role::PlayerController && zero->reliable() && !zero->opens_channel, "the claim is one reliable chain on the PlayerController's channel");
+    const Decoded zero_d = decode(pb, *zero);
+    const RpcCall* zero_call = mail_one_call(zero_d, "ClientClaimMailItem", "SocialComponent");
+    CHECK(zero_call != nullptr, "the chain is one ClientClaimMailItem call on the SocialComponent");
+    if (!zero_call) return;
+    GuidValue got;
+    CHECK(mail_guid_param(*zero_call, 1, &got) && got == mail, "MailGuid.A to .D are the claimed mail's four words, in order");
+    CHECK(zero_call->params.values.count(5) == 0, "an attachment index of 0 is left at the parameter's default and is absent from the wire");
+    const std::optional<Send> three = pb.mail_item_claimed(mail, 3);
+    CHECK(three.has_value(), "an item claim with index 3 builds");
+    if (!three) return;
+    const Decoded three_d = decode(pb, *three);
+    const RpcCall* three_call = mail_one_call(three_d, "ClientClaimMailItem", "SocialComponent");
+    CHECK(three_call != nullptr, "the chain is one ClientClaimMailItem call on the SocialComponent");
+    if (!three_call) return;
+    const int64_t* index = mail_int_param(*three_call, 5);
+    CHECK(index && *index == 3, "an attachment index of 3 is carried as 3");
+    const std::optional<Send> currency = pb.mail_currency_claimed(mail);
+    CHECK(currency.has_value(), "the currency claim builds");
+    if (!currency) return;
+    CHECK(currency->role == Role::PlayerController && currency->reliable(), "the currency claim is one reliable chain");
+    const Decoded currency_d = decode(pb, *currency);
+    const RpcCall* currency_call = mail_one_call(currency_d, "ClientClaimMailCurrency", "SocialComponent");
+    CHECK(currency_call != nullptr, "the chain is one ClientClaimMailCurrency call on the SocialComponent");
+    if (!currency_call) return;
+    CHECK(mail_guid_param(*currency_call, 1, &got) && got == mail, "the currency claim carries the mail's four words and nothing else");
+    CHECK(currency_call->params.values.size() == 4, "(the claim has no amount parameter)");
+}
+
+static void test_mail_status() {
+    std::printf("mail: the status marks, one by one and in bulk\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    const std::vector<GuidValue> mails{mail_guid(7100), mail_guid(7200), mail_guid(7300)};
+    CHECK(!pb.mail_status_update(std::span<const GuidValue>(mails), 4).has_value(), "before the social component the marks are refused");
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    const std::optional<Send> send = pb.mail_status_update(std::span<const GuidValue>(mails), 4);
+    CHECK(send.has_value(), "three marks build one chain");
+    if (!send) return;
+    CHECK(send->role == Role::PlayerController && send->reliable() && !send->opens_channel, "the marks are one reliable chain on the PlayerController's channel");
+    const Decoded d = decode(pb, *send);
+    CHECK(d.ok && d.blocks.size() == mails.size(), "the chain carries one content block per mail");
+    if (!d.ok || d.blocks.size() != mails.size()) return;
+    bool all = true;
+    GuidValue got;
+    for (size_t i = 0; i < mails.size(); ++i) {
+        const Block& b = d.blocks[i];
+        const bool one = b.rpcs.size() == 1 && b.rpcs[0].decoded && b.rpcs[0].rpc != nullptr && std::string_view(b.rpcs[0].rpc->name) == "ClientUpdateMailStatus";
+        const uint64_t* status = one ? mail_uint_param(b.rpcs[0], 5) : nullptr;
+        const bool ok = one && !b.is_actor && b.name == "SocialComponent" && mail_guid_param(b.rpcs[0], 1, &got) && got == mails[i] && status && *status == 4;
+        all = all && ok;
+    }
+    CHECK(all, "every block is one ClientUpdateMailStatus on the SocialComponent, for its own mail's guid, with status 4");
+    const std::optional<Send> zero = pb.mail_status_update(std::span<const GuidValue>(mails).first(1), 0);
+    CHECK(zero.has_value(), "a status of 0 builds one call");
+    if (!zero) return;
+    const Decoded zero_d = decode(pb, *zero);
+    const RpcCall* zero_call = mail_one_call(zero_d, "ClientUpdateMailStatus", "SocialComponent");
+    CHECK(zero_call != nullptr, "the chain is one ClientUpdateMailStatus call on the SocialComponent");
+    CHECK(zero_call && mail_guid_param(*zero_call, 1, &got) && got == mails[0], "the call carries the first mail's four words");
+    CHECK(zero_call && zero_call->params.values.count(5) == 0, "a status of 0 is left at the parameter's default and is absent from the wire");
+    std::vector<GuidValue> full;
+    full.reserve(bs::kMaxMailStatusUpdates);
+    for (size_t i = 0; i < bs::kMaxMailStatusUpdates; ++i) full.push_back(mail_guid(static_cast<uint32_t>(10000 + 4 * i)));
+    const std::optional<Send> at_limit = pb.mail_status_update(std::span<const GuidValue>(full), 4);
+    CHECK(at_limit.has_value(), "a whole mailbox's 200 marks build one chain");
+    if (at_limit) {
+        CHECK(parts_of(*at_limit) <= aoc::worldd::Connection::kMaxUnackedReliable, "the 200-call chain fits the connection's unacked-reliable window");
+    }
+    std::vector<GuidValue> over = full;
+    over.push_back(mail_guid(20000));
+    CHECK(!pb.mail_status_update(std::span<const GuidValue>(over), 4).has_value(), "201 marks are refused (one more than the bound)");
+    CHECK(!pb.mail_status_update(std::span<const GuidValue>{}, 4).has_value(), "no mail, no chain");
+}
+
+static void test_mail_unread() {
+    std::printf("mail: the social component's unread count\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    CHECK(!pb.set_num_unread_mail(2), "before the social component the unread count is refused");
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    CHECK(pb.set_num_unread_mail(2), "NumUnreadMail takes 2 after the join");
+    const std::optional<Send> first = pb.friends_update();
+    int64_t count = -1;
+    CHECK(first.has_value() && mail_unread_in_update(pb, *first, &count) && count == 2, "friends_update carries NumUnreadMail 2 on the SocialComponent");
+    CHECK(!pb.friends_update().has_value(), "an unchanged count sends nothing");
+    CHECK(pb.set_num_unread_mail(5), "NumUnreadMail takes 5");
+    const std::optional<Send> second = pb.friends_update();
+    CHECK(second.has_value() && mail_unread_in_update(pb, *second, &count) && count == 5, "the next friends_update carries 5");
+    CHECK(pb.set_num_unread_mail(5), "setting 5 again is accepted");
+    CHECK(!pb.friends_update().has_value(), "setting the same value again sends nothing");
+    CHECK(pb.set_num_unread_mail(0), "NumUnreadMail takes 0");
+    const std::optional<Send> third = pb.friends_update();
+    CHECK(third.has_value() && mail_unread_in_update(pb, *third, &count) && count == 0, "the change to 0 is carried as 0");
+    CHECK(!pb.set_num_unread_mail(-1), "a negative count is refused");
+    CHECK(!pb.friends_update().has_value(), "a negative count changes nothing (nothing to send)");
+}
+
+static void test_mail_refusals() {
+    std::printf("mail: the guards and the refused inputs\n");
+    PlayerBootstrap fresh = mail_bootstrap();
+    const GuidValue mailbox = mail_guid(3100);
+    const std::vector<MailHeader> one = make_mail_headers(1);
+    const MailPersistenceData detail = make_mail_data();
+    const GuidValue mail = mail_guid(3200);
+    CHECK(!fresh.open_mail_ui(mailbox).has_value(), "before the pawn's second state the window is refused");
+    CHECK(!fresh.mail_headers(std::span<const MailHeader>(one), 42).has_value(), "before the pawn's second state the list is refused");
+    CHECK(!fresh.mail_data(detail).has_value(), "before the social component the detail is refused");
+    CHECK(!fresh.mail_item_claimed(mail, 3).has_value() && !fresh.mail_currency_claimed(mail).has_value(), "before the social component the claims are refused");
+    CHECK(!fresh.mail_status_update(std::span<const GuidValue>(&mail, 1), 4).has_value(), "before the social component the status marks are refused");
+    CHECK(!fresh.set_num_unread_mail(0), "before the social component the unread count is refused");
+    PlayerBootstrap pb = mail_bootstrap();
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    CHECK(pb.mail_data(detail).has_value(), "the positive control: a valid detail after the join builds");
+    MailHeader bad = one.front();
+    bad.subject = "a subject";
+    bad.subject.push_back('\0');
+    bad.subject += "and text after the NUL";
+    const std::vector<MailHeader> bad_page{bad};
+    CHECK(!pb.mail_headers(std::span<const MailHeader>(bad_page), 42).has_value(), "a header with a NUL in its subject is refused");
+    CHECK(!pb.mail_status_update(std::span<const GuidValue>{}, 4).has_value(), "a status send with no mail is refused");
+    CHECK(!pb.set_num_unread_mail(-1), "a negative unread count is refused");
+    CHECK(!pb.friends_update().has_value(), "the negative count changed nothing");
+}
+
+static void test_mail_twice() {
+    std::printf("mail: the same answer twice, and two bootstraps\n");
+    PlayerBootstrap pb = mail_bootstrap();
+    const auto seq = pb.join_sequence();
+    CHECK(seq.has_value(), "the join builds");
+    if (!seq) return;
+    CHECK(!pb.friends_update().has_value(), "a freshly joined bootstrap has no count to send");
+    const GuidValue mailbox = mail_guid(4100);
+    const std::optional<Send> open_first = pb.open_mail_ui(mailbox);
+    const std::optional<Send> open_second = pb.open_mail_ui(mailbox);
+    CHECK(open_first.has_value() && open_second.has_value(), "the same open builds twice");
+    if (!open_first || !open_second) return;
+    CHECK(same_emission(open_first->emission, open_second->emission), "the same open built twice is the same bits");
+    const std::vector<MailHeader> page = make_mail_headers(3);
+    const auto headers_first = pb.mail_headers(std::span<const MailHeader>(page), 77);
+    const auto headers_second = pb.mail_headers(std::span<const MailHeader>(page), 77);
+    CHECK(headers_first.has_value() && headers_first->size() == 1 && headers_second.has_value() && headers_second->size() == 1, "the same page builds twice");
+    if (!headers_first || !headers_second || headers_first->size() != 1 || headers_second->size() != 1) return;
+    CHECK(same_emission((*headers_first)[0].emission, (*headers_second)[0].emission), "the same page built twice is the same bits");
+    PlayerBootstrap other = mail_bootstrap();
+    const auto other_seq = other.join_sequence();
+    CHECK(other_seq.has_value(), "the second bootstrap's join builds");
+    if (!other_seq) return;
+    CHECK(pb.set_num_unread_mail(2) && other.set_num_unread_mail(7), "the two bootstraps take their own counts");
+    const std::optional<Send> mine = pb.friends_update();
+    const std::optional<Send> theirs = other.friends_update();
+    int64_t count = -1;
+    CHECK(mine.has_value() && mail_unread_in_update(pb, *mine, &count) && count == 2, "the first bootstrap sends its own count 2");
+    count = -1;
+    CHECK(theirs.has_value() && mail_unread_in_update(other, *theirs, &count) && count == 7, "the second bootstrap sends its own count 7");
+}
+
 int main() {
     test_lingering_actor();
     test_player_controller();
@@ -1307,6 +1768,14 @@ int main() {
     test_world_clock_first_login();
     test_world_clock_samples();
     test_world_clock_pushes();
+    test_mail_open();
+    test_mail_headers();
+    test_mail_data();
+    test_mail_claims();
+    test_mail_status();
+    test_mail_unread();
+    test_mail_refusals();
+    test_mail_twice();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

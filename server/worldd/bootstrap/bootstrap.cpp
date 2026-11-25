@@ -3021,5 +3021,6 @@ std::optional<Send> PlayerBootstrap::correction(float time_stamp, const repl::Ve
 #include "bootstrap/bootstrap_social.inc"
 #include "bootstrap/bootstrap_guild.inc"
 #include "bootstrap/group_member.inc"
+#include "bootstrap/bootstrap_mail.inc"
 
 }  // namespace aoc::worldd::bootstrap

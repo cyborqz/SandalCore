@@ -40,6 +40,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_quick_make(conn, now);
     run_cargo(conn, now);
     run_chat(conn, now);
+    run_mail(conn, now);   // mail: the worker's answers land here, before the queue sends them
     run_friends(conn, now);
     run_party(conn, now);
     run_guild(conn, now);   // social, step 9: the guild's invitation and the roster's levels

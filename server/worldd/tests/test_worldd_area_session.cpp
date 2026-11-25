@@ -61,6 +61,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 // ~ C Y B :: C.O.A ~
 
@@ -322,11 +323,14 @@ struct Harness {
     void run(milliseconds total) {
         for (milliseconds done{0}; done < total; done += milliseconds(20)) step();
     }
+    /// A mail job runs on the world's worker thread, and the fake clock never lets that thread run, so while a mail job is pending
+    /// each step first waits 1 ms of real time.
     void settle() {
         for (int quiet = 0, i = 0; quiet < 5 && i < 600; ++i) {
+            if (s->mail_pending() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
             const size_t before = got.size();
             step();
-            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0) ? quiet + 1 : 0;
+            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0 && s->mail_pending() == 0) ? quiet + 1 : 0;
         }
     }
     void client_request(const BunchWriter& rpc, uint32_t channel) {

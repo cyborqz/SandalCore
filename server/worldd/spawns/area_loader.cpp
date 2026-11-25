@@ -8,6 +8,7 @@
 // ============================================================================
 #include "spawns/area_loader.h"
 #include "respawn/make_shrines.h"
+#include "spawns/generic_npc.h"
 
 #include "spawns/npc_looks.h"
 #include "world/interaction_state.h"
@@ -35,6 +36,10 @@ uint64_t mix(uint64_t z) {
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
     return z ^ (z >> 31);
 }
+
+/// The warehouse mailbox's quest object: the component and interaction the data names, for the instances that share no actor definition.
+constexpr int64_t kMailboxComponent = 6064634013971120329ll;
+constexpr int64_t kMailboxInteraction = 6064631686289752065ll;
 
 }  // namespace
 
@@ -76,10 +81,17 @@ std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minte
             // the interaction of the definition's first input is what the component lists (the instance's own response is 0 on a crate or a site)
             if (const auto it = objects->interactables.find(p.component_def); it != objects->interactables.end() && it->second.pid != 0) p.interact_def = it->second.pid;
         }
+        // the shared mailbox instances name no definitions: the warehouse mailbox's own quest object stands in, with or without the object data
+        if (s.asset && is_mailbox_path(s.asset->archetype_path)) {
+            if (p.component_def == 0) p.component_def = kMailboxComponent;
+            if (p.interact_def == 0) p.interact_def = kMailboxInteraction;
+        }
     }
     if (params) *params = p;
     auto w = instantiate(*s.open, mint, p, error);
     if (!w) return std::nullopt;
+    // the mailbox's class reads the plain actor's properties and the four guid words, not the state-machine actor's own properties the quest object's branch writes
+    if (s.open && is_mailbox_path(s.open->archetype_path)) keep_mailbox_actor_properties(w->actor.obj);
     if (s.looks) {   // a humanoid is dressed and named by the data, not by the recording its open came from (a failure leaves the recorded look: the NPC still stands)
         std::string look_error;
         if (!s.looks->dress(*w, s, look_error)) spdlog::debug("[looks] {}: {}", s.asset ? s.asset->name : std::string("?"), look_error);

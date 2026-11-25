@@ -62,6 +62,66 @@ Guild guild_of(const characterv1::Guild& g) {
     return out;
 }
 
+/// Mail (migration 0027): one attachment as the character service sends it, mapped to worldd's form. An attachment has no place in the bags yet: the container
+/// and slot are the defaults and are not used until a claim moves the item.
+MailItem mail_item_of(const characterv1::MailItem& i) {
+    MailItem out;
+    out.item.container = ItemContainer::Backpack;
+    out.item.slot = 0;
+    out.item.item_record_id = i.item_record_id();
+    out.item.instance_guid = i.instance_guid();
+    out.item.quantity = i.quantity();
+    out.item.quality = i.quality();
+    out.item.durability = i.durability();
+    out.item.created_at_ms = i.created_at_ms();
+    if (i.has_persisted_health()) out.item.persisted_health = i.persisted_health();
+    if (i.has_persisted_mana()) out.item.persisted_mana = i.persisted_mana();
+    out.item.lock_expiration = i.lock_expiration();
+    out.claimed = i.claimed();
+    return out;
+}
+
+/// Mail (migration 0027): a mail as the character service sends it, with its attachments in the mail's order.
+Mail mail_of(const characterv1::Mail& m) {
+    Mail out;
+    out.id = m.id();
+    out.sender = m.sender();
+    out.subject = m.subject();
+    out.body = m.body();
+    out.status = m.status();
+    out.issued_at_ms = m.issued_at_ms();
+    out.expires_at_ms = m.expires_at_ms();
+    for (const auto& i : m.items()) out.items.push_back(mail_item_of(i));
+    return out;
+}
+
+/// Mail (migration 0027): one attachment as a save or a create sends it. Its container and slot stay unset: the attachment has no place until a claim moves it
+/// into the bags.
+void set_mail_item(characterv1::MailItem* p, const MailItem& it) {
+    p->set_item_record_id(it.item.item_record_id);
+    p->set_instance_guid(it.item.instance_guid);
+    p->set_quantity(it.item.quantity);
+    p->set_quality(it.item.quality);
+    p->set_durability(it.item.durability);
+    p->set_created_at_ms(it.item.created_at_ms);
+    if (it.item.persisted_health) p->set_persisted_health(*it.item.persisted_health);
+    if (it.item.persisted_mana) p->set_persisted_mana(*it.item.persisted_mana);
+    p->set_lock_expiration(it.item.lock_expiration);
+    p->set_claimed(it.claimed);
+}
+
+/// Mail (migration 0027): one mail as SaveMail sends it.
+void set_mail(characterv1::Mail* m, const Mail& mail) {
+    m->set_id(mail.id);
+    m->set_sender(mail.sender);
+    m->set_subject(mail.subject);
+    m->set_body(mail.body);
+    m->set_status(mail.status);
+    m->set_issued_at_ms(mail.issued_at_ms);
+    m->set_expires_at_ms(mail.expires_at_ms);
+    for (const MailItem& it : mail.items) set_mail_item(m->add_items(), it);
+}
+
 }  // namespace
 
 CallStatus map_grpc_status(const grpc::Status& s) {
@@ -71,6 +131,7 @@ CallStatus map_grpc_status(const grpc::Status& s) {
     case grpc::StatusCode::ALREADY_EXISTS:   // (a guild name another guild has)
     case grpc::StatusCode::INVALID_ARGUMENT: return CallStatus::Refused;
     case grpc::StatusCode::NOT_FOUND: return CallStatus::NotFound;
+    case grpc::StatusCode::UNIMPLEMENTED: return CallStatus::Unsupported;   // (the service keeps none of this call)
     case grpc::StatusCode::UNAVAILABLE:
     case grpc::StatusCode::DEADLINE_EXCEEDED:
     case grpc::StatusCode::CANCELLED:
@@ -157,6 +218,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     r.character.appearance_json = c.appearance_json();
     r.character.level = c.level();
     if (c.has_guild()) r.character.guild = guild_of(c.guild());   // social, step 9
+    r.character.unread_mail_count = c.unread_mail_count();   // mail (migration 0027)
     r.character.has_position = c.has_position();
     if (c.has_position()) {
         r.character.position = {c.position().x(), c.position().y(), c.position().z(), c.position().yaw()};
@@ -432,6 +494,59 @@ CallStatus GrpcServices::save_guild_cooldown(const std::string& character_id, in
     req.set_until_ms(until_ms);
     characterv1::SaveGuildCooldownResponse resp;
     return map_grpc_status(stubs_->character->SaveGuildCooldown(&ctx, req, &resp));
+}
+
+MailsResult GrpcServices::load_mails(const std::string& character_id) {
+    grpc::ClientContext ctx;
+    prepare(ctx);
+    characterv1::GetMailsRequest req;
+    req.set_character_id(character_id);
+    characterv1::GetMailsResponse resp;
+    const grpc::Status s = stubs_->character->GetMails(&ctx, req, &resp);
+    MailsResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    for (const auto& m : resp.mails()) r.mails.push_back(mail_of(m));
+    return r;
+}
+
+MailSaveResult GrpcServices::save_mail(const std::string& character_id, const Mail& mail) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::SaveMailRequest req;
+    req.set_character_id(character_id);
+    set_mail(req.mutable_mail(), mail);
+    characterv1::SaveMailResponse resp;
+    const grpc::Status s = stubs_->character->SaveMail(&ctx, req, &resp);
+    MailSaveResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) r.reason = s.error_message();
+    return r;
+}
+
+MailResult GrpcServices::create_mail(const std::string& character_id, const NewMail& mail) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::CreateMailRequest req;
+    req.set_character_id(character_id);
+    req.set_sender(mail.sender);
+    req.set_subject(mail.subject);
+    req.set_body(mail.body);
+    req.set_expires_in_ms(mail.expires_in_ms);
+    for (const MailItem& it : mail.items) set_mail_item(req.add_items(), it);
+    characterv1::CreateMailResponse resp;
+    const grpc::Status s = stubs_->character->CreateMail(&ctx, req, &resp);
+    MailResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    if (resp.has_mail()) r.mail = mail_of(resp.mail());
+    return r;
 }
 
 CallStatus GrpcServices::save_position(const std::string& id, const Position& position) {

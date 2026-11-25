@@ -137,6 +137,29 @@ void PlayerSession::finish_prop_use(Connection& conn, uint64_t actor_id, Clock::
     const FIntrepidNetworkGUID component = component_guid_of(*a, a->npc.interact_component);
     const FIntrepidNetworkGUID actor = a->actor.guid;
     queue("ClientOnDoInteract", [component, actor](bootstrap::PlayerBootstrap& pb) { return pb.interact_done(component, actor); }, conn, /*must_build=*/true);
+    // the mailbox opens its window with the actor's own base guid (the FGuid the spawn wrote), not the network guid
+    if (row.name == "ICD_OpenMailbox" && a->actor.obj.schema) {
+        const auto word = [&](const char* path) -> uint32_t {
+            const repl::Value* v = a->actor.obj.state.get(*a->actor.obj.schema, path);
+            const auto* n = v ? v->get_if<int64_t>() : nullptr;
+            return n ? static_cast<uint32_t>(*n) : 0;
+        };
+        const repl::GuidValue mailbox{word("InteractableBaseGuid.A"), word("InteractableBaseGuid.B"), word("InteractableBaseGuid.C"), word("InteractableBaseGuid.D")};
+        if (mailbox.a != 0 || mailbox.b != 0 || mailbox.c != 0 || mailbox.d != 0) {
+            queue("ClientOpenMailUI", [mailbox](bootstrap::PlayerBootstrap& pb) { return pb.open_mail_ui(mailbox); }, conn, /*must_build=*/true);
+            // the window opens with no list: the mails and the unread count follow it (the game asks for neither)
+            bool waiting = false;
+            if (!mail_loaded_) {
+                MailWait wait;
+                wait.kind = MailWaitKind::Fetch;
+                waiting = mail_start_load("the mailbox was used", std::move(wait), now);
+            }
+            if (!waiting) {
+                mail_send_headers(conn);
+                mail_send_unread(conn, "the mailbox was used");
+            }
+        }
+    }
     // what its use gives
     if (!row.grants.empty()) {
         gather::Harvest h;

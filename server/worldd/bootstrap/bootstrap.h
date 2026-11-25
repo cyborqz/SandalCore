@@ -301,6 +301,11 @@ inline constexpr size_t kMaxIgnoredNames = 50;
 /// character service refuses a list over either; the session cuts a record that is over one, so that what it saves back is what the rules allow.
 inline constexpr size_t kMaxFriends = 100;
 inline constexpr size_t kMaxFriendRequests = 100;
+
+/// Mail: the most headers one ClientUpdateMailHeaders chain carries (our page size: the client's data fixes none).
+inline constexpr size_t kMaxMailHeadersPerPage = 20;
+/// Mail: the most mails one ClientUpdateMailStatus chain carries (the store's live-mailbox cap of 200, so a whole mailbox's marks fit in one chain).
+inline constexpr size_t kMaxMailStatusUpdates = 200;
 /// Missing systems, step 1: how many triggers that carried the PvP flag are remembered for their ability items.
 inline constexpr size_t kMaxTriggerFlags = 64;
 
@@ -398,6 +403,41 @@ public:
     /// Social, step 9: the guild creation scroll's use: ClientOpenCreateGuildPanel on the PlayerController (reliable, no parameters), which opens the
     /// client's create panel.  The scroll is taken when ServerCreateGuild makes the guild (session/player_guild.inc).
     std::optional<Send> guild_create_panel();
+
+    // ---- mail (the mailbox's window, its list and detail, the claims, and the social component's unread count) ---------
+
+    /// The answer to the mailbox's use: ClientOpenMailUI on the PlayerController for the mailbox actor's guid (the FGuid's four
+    /// words as the actor carries them).  nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> open_mail_ui(const repl::GuidValue& mailbox);
+
+    /// The answer to ServerFetchMail: ClientUpdateMailHeaders on the PlayerController, one chain per page of at most
+    /// kMaxMailHeadersPerPage headers, in the order given.  Every page carries `version`; bComplete is 1 on the last page only.
+    /// An empty list is one page with no headers and bComplete 1.  nullopt before the pawn's second state, when the RPC does not
+    /// build or a header is refused (a NUL, over-long text).
+    std::optional<std::vector<Send>> mail_headers(std::span<const repl::MailHeader> headers, uint64_t version);
+
+    /// The answer to ServerGetMailData: ClientGetMailData on the SocialComponent, carrying `mail` whole (its message, its
+    /// items, the currency container and the status).  nullopt before the social component is on the PlayerController or
+    /// when the RPC does not build.
+    std::optional<Send> mail_data(const repl::MailPersistenceData& mail);
+
+    /// The answer to ServerClaimMailItem: ClientClaimMailItem on the SocialComponent: the mail's guid and the attachment's
+    /// index (the first attachment is 0, which the wire leaves to the parameter's default).  nullopt before the component.
+    std::optional<Send> mail_item_claimed(const repl::GuidValue& mail, int32_t item_index);
+
+    /// The answer to ServerClaimMailCurrency: ClientClaimMailCurrency on the SocialComponent: the mail's guid.  It carries no
+    /// amount; the money piece changes what a mail holds, not this call.  nullopt before the component.
+    std::optional<Send> mail_currency_claimed(const repl::GuidValue& mail);
+
+    /// The answer to ServerUpdateMailStatus and ServerBulkUpdateMailStatus: one ClientUpdateMailStatus call per mail (its guid
+    /// and `status`), in order, in one chain on the PlayerController's channel, every call on the SocialComponent.  nullopt
+    /// before the component, for no mail, for more than kMaxMailStatusUpdates mails or when a call does not build.
+    std::optional<Send> mail_status_update(std::span<const repl::GuidValue> mails, uint32_t status);
+
+    /// The SocialComponent's NumUnreadMail: the count the mailbox window shows.  False before the social component is on the
+    /// PlayerController (call it after the join's last chain) or for a count below 0.  The caller sends the change with
+    /// friends_update().
+    bool set_num_unread_mail(int32_t count);
 
     // ---- replies ----------------------------------------------------------------------------------------------------
 

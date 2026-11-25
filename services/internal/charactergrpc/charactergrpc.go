@@ -120,6 +120,16 @@ type GuildStore interface {
 
 var _ GuildStore = (*character.Store)(nil)
 
+// MailStore is the part of character.Store that keeps a character's mails (migration 0027). A store without it keeps none: the three mail calls are refused.
+type MailStore interface {
+	Mails(ctx context.Context, id string) ([]character.Mail, error)
+	SaveMail(ctx context.Context, id string, mail character.Mail) error
+	CreateMail(ctx context.Context, id string, mail character.NewMail) (character.Mail, error)
+	UnreadMails(ctx context.Context, id string) (int32, error)
+}
+
+var _ MailStore = (*character.Store)(nil)
+
 // NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
 // character). A store without it cannot answer GetCharacterByName.
 type NameStore interface {
@@ -373,6 +383,16 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 				out.Guild = &characterv1.Guild{SelfRank: -1, CooldownUntilMs: guild.CooldownUntilMs}
 			}
 		}
+		// Mail (migration 0027): the live, unread mails, for the social component's unread count at the login.  One count query: a
+		// store that cannot answer it logs and leaves the count at 0; the login is never failed for it.
+		if ms, ok := s.store.(MailStore); ok {
+			unread, err := ms.UnreadMails(ctx, c.ID)
+			if err != nil {
+				slog.Warn("character: the unread mail count could not be read; the login goes on with 0", "character_id", c.ID, "err", err)
+			} else {
+				out.UnreadMailCount = unread
+			}
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -502,6 +522,51 @@ func (s *Server) SaveGuildCooldown(ctx context.Context, r *characterv1.SaveGuild
 		return nil, toStatus(ctx, err)
 	}
 	return &characterv1.SaveGuildCooldownResponse{}, nil
+}
+
+// GetMails returns a character's live mails, newest first, with their attachments and status (migration 0027). A store that keeps no mails answers
+// Unimplemented; NotFound for an unknown character.
+func (s *Server) GetMails(ctx context.Context, r *characterv1.GetMailsRequest) (*characterv1.GetMailsResponse, error) {
+	ms, ok := s.store.(MailStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no mails")
+	}
+	mails, err := ms.Mails(ctx, r.GetCharacterId())
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.GetMailsResponse{Mails: toProtoMails(mails)}, nil
+}
+
+// SaveMail writes one mail whole: its content, its status and its attachments' claimed flags. FailedPrecondition for a stale save that would clear a stored
+// mark or claim; NotFound for an unknown character or mail; InvalidArgument, with nothing changed, for a mail the rules refuse.
+func (s *Server) SaveMail(ctx context.Context, r *characterv1.SaveMailRequest) (*characterv1.SaveMailResponse, error) {
+	ms, ok := s.store.(MailStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no mails")
+	}
+	if r.GetMail() == nil {
+		return nil, status.Error(codes.InvalidArgument, "no mail is given")
+	}
+	if err := ms.SaveMail(ctx, r.GetCharacterId(), fromProtoMail(r.GetMail())); err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.SaveMailResponse{}, nil
+}
+
+// CreateMail adds one mail for the admin send and returns the stored mail with its id, issue time and absolute expiry (migration 0027). NotFound for an unknown
+// character; InvalidArgument, with nothing changed, for a mail the rules refuse or a full mailbox.
+func (s *Server) CreateMail(ctx context.Context, r *characterv1.CreateMailRequest) (*characterv1.CreateMailResponse, error) {
+	ms, ok := s.store.(MailStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no mails")
+	}
+	mail, err := ms.CreateMail(ctx, r.GetCharacterId(), character.NewMail{Sender: r.GetSender(), Subject: r.GetSubject(), Body: r.GetBody(),
+		ExpiresInMs: r.GetExpiresInMs(), Items: fromProtoMailItems(r.GetItems())})
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.CreateMailResponse{Mail: toProtoMail(mail)}, nil
 }
 
 // addTalents puts the character's bought ranks and its action bar (plan D1, stage 2) into a reply.
@@ -702,7 +767,7 @@ func toStatus(ctx context.Context, err error) error {
 		return status.Error(codes.ResourceExhausted, err.Error())
 	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken), errors.Is(err, character.ErrGuildNameTaken):
 		return status.Error(codes.AlreadyExists, err.Error())
-	case errors.Is(err, character.ErrGuildVersion):
+	case errors.Is(err, character.ErrGuildVersion), errors.Is(err, character.ErrMailStale):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, character.ErrNotFound):
 		return status.Error(codes.NotFound, err.Error())
@@ -767,6 +832,54 @@ func fromProtoFriendRequests(rs []*characterv1.FriendRequest) []character.Friend
 	out := make([]character.FriendRequest, 0, len(rs))
 	for _, r := range rs {
 		out = append(out, character.FriendRequest{SenderGUID: r.GetSenderGuid(), SenderName: r.GetSenderName(), RecipientGUID: r.GetRecipientGuid(), ExpiresAtMs: r.GetExpiresAtMs()})
+	}
+	return out
+}
+
+// Mail (migration 0027): a character's mails and their attachments, as the three calls send and take them.
+func toProtoMails(mails []character.Mail) []*characterv1.Mail {
+	if len(mails) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.Mail, 0, len(mails))
+	for _, m := range mails {
+		out = append(out, toProtoMail(m))
+	}
+	return out
+}
+
+func toProtoMail(m character.Mail) *characterv1.Mail {
+	return &characterv1.Mail{Id: m.ID, Sender: m.Sender, Subject: m.Subject, Body: m.Body, Status: m.Status, IssuedAtMs: m.IssuedAtMs,
+		ExpiresAtMs: m.ExpiresAtMs, Items: toProtoMailItems(m.Items)}
+}
+
+func fromProtoMail(m *characterv1.Mail) character.Mail {
+	return character.Mail{ID: m.GetId(), Sender: m.GetSender(), Subject: m.GetSubject(), Body: m.GetBody(), Status: m.GetStatus(), IssuedAtMs: m.GetIssuedAtMs(),
+		ExpiresAtMs: m.GetExpiresAtMs(), Items: fromProtoMailItems(m.GetItems())}
+}
+
+func toProtoMailItems(items []character.MailItem) []*characterv1.MailItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.MailItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, &characterv1.MailItem{ItemRecordId: it.ItemRecordID, InstanceGuid: it.InstanceGUID, Quantity: it.Quantity, Quality: it.Quality,
+			Durability: it.Durability, CreatedAtMs: unixMilli(it.CreatedAt), PersistedHealth: it.PersistedHealth, PersistedMana: it.PersistedMana,
+			LockExpiration: it.LockExpiration, Claimed: it.Claimed})
+	}
+	return out
+}
+
+func fromProtoMailItems(items []*characterv1.MailItem) []character.MailItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]character.MailItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, character.MailItem{ItemRecordID: it.GetItemRecordId(), InstanceGUID: it.GetInstanceGuid(), Quantity: it.GetQuantity(), Quality: it.GetQuality(),
+			Durability: it.GetDurability(), CreatedAt: time.UnixMilli(it.GetCreatedAtMs()), PersistedHealth: it.PersistedHealth, PersistedMana: it.PersistedMana,
+			LockExpiration: it.GetLockExpiration(), Claimed: it.GetClaimed()})
 	}
 	return out
 }

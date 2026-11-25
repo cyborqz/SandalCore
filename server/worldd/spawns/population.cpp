@@ -85,7 +85,8 @@ const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool
         Verdict v = Verdict::NoTable;
         const OpenTemplate* t = generic->template_for(asset, &v, instance != nullptr && NpcLooks::talks(asset, instance));
         // quests part 3, slice 1: a Blueprint that is no pawn and whose instance names the interactable definition of a quest object is a quest object
-        if (!t && v == Verdict::NotPawn && instance != nullptr && generic->is_prop_component(instance->interact_component != 0 ? instance->interact_component : asset.interact_component)) {
+        const bool quest_component = instance != nullptr && generic->is_prop_component(instance->interact_component != 0 ? instance->interact_component : asset.interact_component);
+        if (!t && v == Verdict::NotPawn && instance != nullptr && (quest_component || is_mailbox_path(asset.archetype_path))) {
             t = generic->prop_template(asset, &v);
         }
         if (why) *why = v;

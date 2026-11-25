@@ -780,6 +780,100 @@ struct WarehouseSummaryEntry {
     bool operator==(const WarehouseSummaryEntry&) const = default;
 };
 
+// ---- Mail (lane 13): the header, the persistence data and the currency container ---------------
+
+/// FMailHeader (the list row's mail): the mail's guid, the sender and the subject as FStrings, the
+/// localized subject, the attachment flag (it shows the list's attachment icon), the status (bit 4
+/// read, bit 2 deleted), the expiration time and the issue time (Unix ms).
+struct MailHeader {
+    GuidValue        guid;                    // the mail's id
+    std::string      sender;                  // the list's sender
+    std::string      subject;                 // the list's subject
+    LocalizedMessage localized_subject;       // a localized subject (its argument list is refused)
+    bool             has_attachments = false; // shows the list's attachment icon
+    int32_t          status = 0;              // bit 4 read, bit 2 deleted
+    int64_t          expiration_time = 0;     // Unix ms; the list's countdown counts to it
+    int64_t          issue_time = 0;          // Unix ms, the date the list shows
+    bool operator==(const MailHeader&) const = default;
+};
+
+/// FMailMessage (the detail's message): the title and the body as FStrings, each with a localized
+/// form, and a system flag.
+struct MailMessage {
+    std::string      title;                   // the message's title
+    LocalizedMessage localized_title;         // a localized title (its argument list is refused)
+    std::string      body;                    // the detail's body
+    LocalizedMessage localized_message;       // a localized body (its argument list is refused)
+    bool             system = false;          // a system mail (inferred)
+    bool operator==(const MailMessage&) const = default;
+};
+
+/// FMailItem: one attached item and whether it was claimed.
+struct MailItem {
+    ItemInstance item;                        // the attached item
+    bool         claimed = false;             // claimed already
+    bool operator==(const MailItem&) const = default;
+};
+
+/// One currency of an FCurrencyContainer: the currency's record (its guid and record type id) and
+/// the amount, 8 bytes held as a double as the warehouse cost map holds it.
+struct MailCurrencyEntry {
+    int64_t currency = 0;
+    int64_t type_id = 0;
+    double  value = 0;
+    bool operator==(const MailCurrencyEntry& o) const {
+        return currency == o.currency && type_id == o.type_id && same_bits(value, o.value);
+    }
+};
+
+/// FCurrencyContainer: the currencies of a mail, each key once (a TMap's count and pairs).
+struct CurrencyContainer {
+    std::vector<MailCurrencyEntry> entries;
+    bool operator==(const CurrencyContainer&) const = default;
+};
+
+/// FMailPersistenceData (the detail): the mail's three guids, its subject, type, batch, times, node
+/// and sender, the message, the attached items, the currencies, whether the currency was claimed
+/// and the status (bit 4 read, bit 2 deleted).
+struct MailPersistenceData {
+    GuidValue         guid;                   // the mail's id
+    GuidValue         sender_guid;            // the sender's character guid (inferred)
+    GuidValue         recipient_guid;         // the recipient's character guid (inferred)
+    std::string       subject;                // inferred: the detail copies it; P5 fills it with the message's title
+    uint8_t           type = 0;               // the mail's type; its use is not known
+    int32_t           batch_num = 0;          // the send batch
+    int64_t           created_time = 0;       // when the mail was made (inferred)
+    int64_t           expiration_time = 0;    // Unix ms, the expiry the detail shows
+    int64_t           node = 0;               // the node the mail belongs to (inferred)
+    std::string       sender;                 // the detail's sender name
+    MailMessage       message;                // the message the detail shows
+    std::vector<MailItem> items;              // the attached items
+    CurrencyContainer currency;               // the attached currencies
+    bool              currency_claimed = false;  // the client claims the currency only when false
+    int32_t           status = 0;             // bit 4 read, bit 2 deleted
+    bool operator==(const MailPersistenceData&) const = default;
+};
+
+/// The persistence data is about 400 bytes and a Value is copied for every replicated property;
+/// like EventBox, this keeps it on the heap and a Value at the size of its largest small
+/// alternative.  Copies are deep; equality compares the data.
+class MailPersistenceBox {
+public:
+    MailPersistenceBox(MailPersistenceData d) : p_(std::make_unique<MailPersistenceData>(std::move(d))) {}
+    MailPersistenceBox(const MailPersistenceBox& o) : p_(o.p_ ? std::make_unique<MailPersistenceData>(*o.p_) : nullptr) {}
+    MailPersistenceBox(MailPersistenceBox&&) noexcept = default;
+    MailPersistenceBox& operator=(const MailPersistenceBox& o) {
+        p_ = o.p_ ? std::make_unique<MailPersistenceData>(*o.p_) : nullptr;
+        return *this;
+    }
+    MailPersistenceBox& operator=(MailPersistenceBox&&) noexcept = default;
+    const MailPersistenceData* get() const { return p_.get(); }
+    MailPersistenceData*       get() { return p_.get(); }
+    bool operator==(const MailPersistenceBox& o) const { return p_ && o.p_ ? *p_ == *o.p_ : !p_ && !o.p_; }
+private:
+    std::unique_ptr<MailPersistenceData> p_;
+};
+
 // ---- Value -----------------------------------------------------------------
 
 struct ElementState;
@@ -804,7 +898,8 @@ public:
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
         GuildData,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
-        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection>;
+        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection,
+        MailHeader, CurrencyContainer, MailPersistenceBox>;
 
     Value() = default;
 // built by C | Y | B with C | O | A
@@ -829,6 +924,9 @@ public:
         if constexpr (std::is_same_v<T, ItemStorageEvent>) {
             const EventBox* b = std::get_if<EventBox>(&v_);
             return b ? b->get() : nullptr;
+        } else if constexpr (std::is_same_v<T, MailPersistenceData>) {
+            const MailPersistenceBox* b = std::get_if<MailPersistenceBox>(&v_);
+            return b ? b->get() : nullptr;
         } else {
             return std::get_if<T>(&v_);
         }
@@ -836,6 +934,9 @@ public:
     template <class T> T* get_if() {
         if constexpr (std::is_same_v<T, ItemStorageEvent>) {
             EventBox* b = std::get_if<EventBox>(&v_);
+            return b ? b->get() : nullptr;
+        } else if constexpr (std::is_same_v<T, MailPersistenceData>) {
+            MailPersistenceBox* b = std::get_if<MailPersistenceBox>(&v_);
             return b ? b->get() : nullptr;
         } else {
             return std::get_if<T>(&v_);

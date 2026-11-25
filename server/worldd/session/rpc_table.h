@@ -28,8 +28,8 @@ namespace aoc { namespace worldd {
 class PlayerSession;
 
 /// The places a client call can come from: the PlayerController's own calls, the pawn's own calls, the calls on the pawn's ability component, on the
-/// PlayerController's tutorial component and on the pawn's guild component.
-enum class RpcScope : uint8_t { PlayerController, Pawn, AbilityComponent, FtueComponent, GuildComponent };
+/// PlayerController's tutorial component, on the pawn's guild component and on the PlayerController's social component.
+enum class RpcScope : uint8_t { PlayerController, Pawn, AbilityComponent, FtueComponent, GuildComponent, SocialComponent };
 
 /// What one call brings to its handler.
 struct RpcContext {
@@ -74,5 +74,12 @@ private:
     };
     std::vector<Entry> names_, prefixes_;
 };
+
+/// The table the sessions build, for the tests only: player_session.cpp writes it once, when it builds the table, and never reads it; a test
+/// registers a handler of its own on it and checks that a call reached it.
+inline RpcTable*& rpc_table_for_test() {
+    static RpcTable* table = nullptr;
+    return table;
+}
 
 }}  // namespace aoc::worldd

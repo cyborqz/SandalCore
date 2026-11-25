@@ -33,6 +33,9 @@ const (
 	CharacterService_SaveProgress_FullMethodName       = "/aoc.character.v1.CharacterService/SaveProgress"
 	CharacterService_SaveGuild_FullMethodName          = "/aoc.character.v1.CharacterService/SaveGuild"
 	CharacterService_SaveGuildCooldown_FullMethodName  = "/aoc.character.v1.CharacterService/SaveGuildCooldown"
+	CharacterService_GetMails_FullMethodName           = "/aoc.character.v1.CharacterService/GetMails"
+	CharacterService_SaveMail_FullMethodName           = "/aoc.character.v1.CharacterService/SaveMail"
+	CharacterService_CreateMail_FullMethodName         = "/aoc.character.v1.CharacterService/CreateMail"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -85,6 +88,19 @@ type CharacterServiceClient interface {
 	SaveGuild(ctx context.Context, in *SaveGuildRequest, opts ...grpc.CallOption) (*SaveGuildResponse, error)
 	// Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). NotFound for an unknown id, InvalidArgument for a negative time.
 	SaveGuildCooldown(ctx context.Context, in *SaveGuildCooldownRequest, opts ...grpc.CallOption) (*SaveGuildCooldownResponse, error)
+	// Mail (migration 0027): the character's live mails (status bit 2 clear), newest first by issued_at_ms with the mail id breaking a tie, with their attachments
+	// and status. NotFound for an unknown character; a character with no mail has none.
+	GetMails(ctx context.Context, in *GetMailsRequest, opts ...grpc.CallOption) (*GetMailsResponse, error)
+	// Mail: writes one mail whole (its sender, subject, body, status and times, and its items with their claimed flags). A mail with the delete bit stays as a row
+	// but is not returned by GetMails again. A save that clears a stored status bit, or that sends a stored claimed item back unclaimed or drops it, is a stale
+	// save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse; NotFound for an unknown
+	// character or mail.
+	SaveMail(ctx context.Context, in *SaveMailRequest, opts ...grpc.CallOption) (*SaveMailResponse, error)
+	// Mail: the admin send. It takes the expiry as a duration (the client's FMailData carries ExpirationDurationMs; 0: none) and stores one mail with the sender,
+	// subject, body and attachments given; the service gives it its id, its issue time and its absolute expiry (the issue time plus the duration) and returns the
+	// stored mail. The store gives every new attachment its instance guid and creation time. InvalidArgument, with nothing changed, for a mail the rules refuse
+	// (an attachment sent as claimed included) or a full mailbox (200 live mails); NotFound for an unknown character.
+	CreateMail(ctx context.Context, in *CreateMailRequest, opts ...grpc.CallOption) (*CreateMailResponse, error)
 }
 
 type characterServiceClient struct {
@@ -195,6 +211,36 @@ func (c *characterServiceClient) SaveGuildCooldown(ctx context.Context, in *Save
 	return out, nil
 }
 
+func (c *characterServiceClient) GetMails(ctx context.Context, in *GetMailsRequest, opts ...grpc.CallOption) (*GetMailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMailsResponse)
+	err := c.cc.Invoke(ctx, CharacterService_GetMails_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) SaveMail(ctx context.Context, in *SaveMailRequest, opts ...grpc.CallOption) (*SaveMailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveMailResponse)
+	err := c.cc.Invoke(ctx, CharacterService_SaveMail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) CreateMail(ctx context.Context, in *CreateMailRequest, opts ...grpc.CallOption) (*CreateMailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateMailResponse)
+	err := c.cc.Invoke(ctx, CharacterService_CreateMail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -245,6 +291,19 @@ type CharacterServiceServer interface {
 	SaveGuild(context.Context, *SaveGuildRequest) (*SaveGuildResponse, error)
 	// Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). NotFound for an unknown id, InvalidArgument for a negative time.
 	SaveGuildCooldown(context.Context, *SaveGuildCooldownRequest) (*SaveGuildCooldownResponse, error)
+	// Mail (migration 0027): the character's live mails (status bit 2 clear), newest first by issued_at_ms with the mail id breaking a tie, with their attachments
+	// and status. NotFound for an unknown character; a character with no mail has none.
+	GetMails(context.Context, *GetMailsRequest) (*GetMailsResponse, error)
+	// Mail: writes one mail whole (its sender, subject, body, status and times, and its items with their claimed flags). A mail with the delete bit stays as a row
+	// but is not returned by GetMails again. A save that clears a stored status bit, or that sends a stored claimed item back unclaimed or drops it, is a stale
+	// save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse; NotFound for an unknown
+	// character or mail.
+	SaveMail(context.Context, *SaveMailRequest) (*SaveMailResponse, error)
+	// Mail: the admin send. It takes the expiry as a duration (the client's FMailData carries ExpirationDurationMs; 0: none) and stores one mail with the sender,
+	// subject, body and attachments given; the service gives it its id, its issue time and its absolute expiry (the issue time plus the duration) and returns the
+	// stored mail. The store gives every new attachment its instance guid and creation time. InvalidArgument, with nothing changed, for a mail the rules refuse
+	// (an attachment sent as claimed included) or a full mailbox (200 live mails); NotFound for an unknown character.
+	CreateMail(context.Context, *CreateMailRequest) (*CreateMailResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -284,6 +343,15 @@ func (UnimplementedCharacterServiceServer) SaveGuild(context.Context, *SaveGuild
 }
 func (UnimplementedCharacterServiceServer) SaveGuildCooldown(context.Context, *SaveGuildCooldownRequest) (*SaveGuildCooldownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SaveGuildCooldown not implemented")
+}
+func (UnimplementedCharacterServiceServer) GetMails(context.Context, *GetMailsRequest) (*GetMailsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMails not implemented")
+}
+func (UnimplementedCharacterServiceServer) SaveMail(context.Context, *SaveMailRequest) (*SaveMailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveMail not implemented")
+}
+func (UnimplementedCharacterServiceServer) CreateMail(context.Context, *CreateMailRequest) (*CreateMailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateMail not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -486,6 +554,60 @@ func _CharacterService_SaveGuildCooldown_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_GetMails_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).GetMails(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_GetMails_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).GetMails(ctx, req.(*GetMailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_SaveMail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveMailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).SaveMail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_SaveMail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).SaveMail(ctx, req.(*SaveMailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_CreateMail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateMailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).CreateMail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_CreateMail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).CreateMail(ctx, req.(*CreateMailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -532,6 +654,18 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SaveGuildCooldown",
 			Handler:    _CharacterService_SaveGuildCooldown_Handler,
+		},
+		{
+			MethodName: "GetMails",
+			Handler:    _CharacterService_GetMails_Handler,
+		},
+		{
+			MethodName: "SaveMail",
+			Handler:    _CharacterService_SaveMail_Handler,
+		},
+		{
+			MethodName: "CreateMail",
+			Handler:    _CharacterService_CreateMail_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

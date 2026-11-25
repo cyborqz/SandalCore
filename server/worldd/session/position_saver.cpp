@@ -302,6 +302,68 @@ void CharacterSaver::save_friend_lists(const std::string& character_id, std::vec
     save_progress(character_id, std::move(p));
 }
 
+svc::MailsResult CharacterSaver::load_mails(const std::string& character_id) {
+    try {
+        return api_.load_mails(character_id);
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] loading the mail of {} threw {}", character_id, e.what());
+        return {};
+    }
+}
+
+svc::MailSaveResult CharacterSaver::save_mail(const std::string& character_id, const svc::Mail& mail) {
+    try {
+        return api_.save_mail(character_id, mail);
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] saving the mail {} of {} threw {}", mail.id, character_id, e.what());
+        return {};
+    }
+}
+
+svc::MailResult CharacterSaver::create_mail(const std::string& character_id, const svc::NewMail& mail) {
+    try {
+        return api_.create_mail(character_id, mail);
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] creating the mail of {} threw {}", character_id, e.what());
+        return {};
+    }
+}
+
+svc::CallStatus CharacterSaver::save_inventory_now(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
+                                                   std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                                   std::vector<svc::WarehouseItem> warehouse) {
+    {
+        std::unique_lock<std::mutex> lock(mu_);
+        if (stop_ || abandon_) return svc::CallStatus::Unavailable;
+        // only an inventory write of this character can overwrite the claim; a position or progress write does not wait
+        idle_cv_.wait(lock, [this, &character_id] {
+            return stop_ || abandon_ || !(in_flight_ && in_flight_inventory_ && in_flight_character_ == character_id);
+        });
+        if (stop_ || abandon_) return svc::CallStatus::Unavailable;
+        // the caller's bag is the newer one: a queued inventory of this character is dropped, so the worker cannot write it after this save
+        const auto it = entries_.find(character_id);
+        if (it != entries_.end()) {
+            it->second.inventory.reset();
+            it->second.wallet.reset();
+            it->second.jobs.reset();
+            it->second.known_recipes.reset();
+            it->second.warehouse.reset();
+            it->second.inventory_attempts = 0;
+        }
+    }
+    try {
+        const svc::CallStatus status = api_.save_inventory(character_id, items, wallet, jobs, known_recipes, warehouse);
+        if (status == svc::CallStatus::Ok) {
+            std::lock_guard<std::mutex> lock(mu_);
+            ++inventories_saved_;
+        }
+        return status;
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] the direct inventory save of {} threw {}", character_id, e.what());
+        return svc::CallStatus::Unavailable;
+    }
+}
+
 bool CharacterSaver::flush(std::chrono::milliseconds max_wait) {
     std::unique_lock<std::mutex> lock(mu_);
     return idle_cv_.wait_for(lock, max_wait, [this] { return (order_.empty() && !in_flight_) || abandon_; }) && order_.empty() && !in_flight_;
@@ -328,6 +390,7 @@ void CharacterSaver::run() {
         in_flight_ = true;
         in_flight_character_ = id;
         in_flight_progress_ = entry.progress.has_value();
+        in_flight_inventory_ = entry.inventory.has_value();
         lock.unlock();
         svc::CallStatus position_status = svc::CallStatus::Ok, inventory_status = svc::CallStatus::Ok, progress_status = svc::CallStatus::Ok;
         if (entry.position) {
@@ -552,6 +615,7 @@ void CharacterSaver::run() {
         in_flight_ = false;
         in_flight_character_.clear();
         in_flight_progress_ = false;
+        in_flight_inventory_ = false;
         idle_cv_.notify_all();
     }
 }

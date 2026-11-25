@@ -26,6 +26,7 @@ enum class CallStatus {
     NotFound,
     Unavailable,  // unreachable, timed out, or shutting down: worth retrying
     Failed,       // anything else
+    Unsupported,  // the service does not serve this call at all (Unimplemented): its store keeps none of it
 };
 
 struct RedeemResult {
@@ -301,6 +302,70 @@ struct GuildResult {
     Guild      guild;
 };
 
+/// Mail: the client's own status bits of a mail: bit 2 is a delete, bit 4 a read.
+inline constexpr int32_t kMailStatusDeleted = 2;
+inline constexpr int32_t kMailStatusRead = 4;
+
+/// Mail: one item attached to a mail (aoc.character.v1.MailItem): the item's own data as an InventoryItem, and whether it is claimed. The item's container and
+/// slot are not used until a claim moves it into the bags.
+struct MailItem {
+    InventoryItem item;
+    bool          claimed = false;
+    bool operator==(const MailItem&) const = default;
+};
+
+/// Mail: one mail of a character (aoc.character.v1.Mail): its sender, subject and body, its status (kMailStatusDeleted, kMailStatusRead and any other bit the
+/// client sent), when it was issued and when it expires (0: none) and its attachments in the mail's order. A deleted mail is not sent by the character service.
+struct Mail {
+    std::string id;            // 32 lowercase hex digits
+    std::string sender;
+    std::string subject;       // the title the list shows
+    std::string body;
+    int32_t     status = 0;
+    int64_t     issued_at_ms = 0;
+    int64_t     expires_at_ms = 0;  // 0: no expiry
+    std::vector<MailItem> items;
+    bool operator==(const Mail&) const = default;
+};
+
+/// Mail: what CreateMail takes (aoc.character.v1.CreateMailRequest). The client's mail send data gives the expiry as a duration (ExpirationDurationMs); 0 means
+/// no expiry and the service returns the stored mail with its absolute expires_at_ms. The store gives every new attachment its instance guid and creation time,
+/// and refuses one sent as claimed.
+struct NewMail {
+    std::string sender;
+    std::string subject;
+    std::string body;
+    int64_t     expires_in_ms = 0;
+    std::vector<MailItem> items;
+    bool operator==(const NewMail&) const = default;
+};
+
+struct MailsResult {
+    CallStatus status = CallStatus::Failed;
+    std::string reason;   // the service's message when status is not Ok; empty for Ok
+    std::vector<Mail> mails;
+};
+
+struct MailSaveResult {
+    CallStatus status = CallStatus::Failed;
+    std::string reason;   // the service's message when status is not Ok; empty for Ok
+};
+
+struct MailResult {
+    CallStatus status = CallStatus::Failed;
+    std::string reason;
+    Mail mail;
+};
+
+/// Mail: the mails the window counts as unread: live (no delete bit) and without the read bit.
+inline int32_t unread_count(const std::vector<Mail>& mails) {
+    int32_t n = 0;
+    for (const Mail& m : mails) {
+        if ((m.status & (kMailStatusDeleted | kMailStatusRead)) == 0) ++n;
+    }
+    return n;
+}
+
 struct Character {
     std::string id;
     int64_t account_id = 0;
@@ -351,6 +416,9 @@ struct Character {
     /// Social, step 9: the guild the character is in, read with the character (GetCharacter): its ranks, its members and the character's rank and join
     /// cooldown.  Empty: the character is in no guild (or the service is of an older version).
     std::optional<Guild> guild;
+    /// Mail: how many of the character's live mails are unread, read with the character at the login (GetCharacter with the items): the social component's
+    /// unread count.  0 for a character with no mail, or from a service of an older version.
+    int32_t unread_mail_count = 0;
     // PvP: contributed by MrJambix in #23.
     /// PvP (migration 0025): the character's Corruption and Corruption_Blight between sessions (with the items).  Both 0 for a character with neither, or from a service of an older
     /// version.
@@ -509,6 +577,28 @@ public:
         (void)until_ms;
         return CallStatus::Failed;
     }
+    /// Mail: the character's live mails with their attachments and status, newest first (the character service's order). A fake that does not care answers Failed.
+    /// The call blocks and carries the read deadline; the caller may make it from the network thread, as get_character_by_name and create_guild_now are.
+    virtual MailsResult load_mails(const std::string& character_id) {
+        (void)character_id;
+        return {};
+    }
+    /// Mail: SaveMail writes one mail whole: its content, its status (kMailStatusDeleted and kMailStatusRead among the bits) and its attachments with their
+    /// claimed flags. Ok; Refused: a mail the store's rules refuse; NotFound: no such character or mail; Failed: a stale save that would clear a mark or a claim
+    /// (the reason carries the service's text); Unsupported: the service keeps no mails. Blocks; the caller may make it from the network thread.
+    virtual MailSaveResult save_mail(const std::string& character_id, const Mail& mail) {
+        (void)character_id;
+        (void)mail;
+        return {};
+    }
+    /// Mail: CreateMail adds one mail for the character (the admin send); the service gives it its id and issue time. `mail.expires_in_ms` 0 means no expiry.
+    /// Refused: a mail the rules refuse or a full mailbox (200 live mails); NotFound: no such character; Unsupported: the service keeps no mails. Blocks; the
+    /// caller may make it from the network thread.
+    virtual MailResult create_mail(const std::string& character_id, const NewMail& mail) {
+        (void)character_id;
+        (void)mail;
+        return {};
+    }
 };
 
 /// Quests, slice 1: the quest service (aoc.quest.v1.QuestService).  A world server that cannot reach it plays without quests.
@@ -538,6 +628,7 @@ inline const char* call_status_name(CallStatus s) {
     case CallStatus::NotFound: return "not found";
     case CallStatus::Unavailable: return "unavailable";
     case CallStatus::Failed: return "failed";
+    case CallStatus::Unsupported: return "unsupported";
     }
     return "?";
 }

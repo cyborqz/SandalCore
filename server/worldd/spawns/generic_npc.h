@@ -204,6 +204,16 @@ private:
     mutable std::map<std::string, repl::ExportChain> exports_;   // the archetype exports, by archetype path (stable addresses)
 };
 
+/// Whether `archetype_path` is the warehouse mailbox's package: the one quest object the allowlist takes by its path.
+bool is_mailbox_path(const std::string& archetype_path);
+
+/// The last actor handle a mailbox reads: the recorded quest object's `AActor` properties (1 to 18) and its four `InteractableBaseGuid` words (19 to 22).
+constexpr uint16_t kMailboxLastActorHandle = 22;
+
+/// Erases the recorded quest object's own actor properties (handle 23 up: its actor definition, its component reference and its montage and stats) from a mailbox's actor block, which its
+/// class does not carry.
+void keep_mailbox_actor_properties(repl::ObjectState& state);
+
 /// A NetGUID ObjectId for the static object at `path`: a hash of it with the low bit set (retail's static ids are odd), moved on while `taken` says
 /// it is in use.  Exposed for the tests.
 uint64_t static_object_id(const std::string& path, const std::function<bool(uint64_t)>& taken);

@@ -167,7 +167,9 @@ static std::unique_ptr<world::CityNodes> fresh_nodes(bool with_plots = false) {
 }
 
 /// What the nodes' people hold in a registry: their NPCs and (crafting, step 0) their crafting stations, which the same selection places.
-static size_t people_of(const world::ActorRegistry& registry) { return registry.count(world::ActorKind::Npc) + registry.count(world::ActorKind::Station); }
+static size_t people_of(const world::ActorRegistry& registry) {
+    return registry.count(world::ActorKind::Npc) + registry.count(world::ActorKind::Station) + registry.count(world::ActorKind::Prop);
+}
 
 static void set_level(world::CityNodes& nodes, int64_t guid, int level) {
     world::LiveNode ln;
@@ -186,6 +188,52 @@ static std::vector<spawns::NodeSpawn> select(const world::CityNodes& nodes, cons
 
 static std::vector<spawns::NodeSpawn> select_real(const world::CityNodeInfo& info, int level, spawns::NodePopStats& st) {
     return select(*g_env.nodes, *g_env.wire, info, level, st, spawns::AreaConfig::riverlands());
+}
+
+/// Which node level stands the warehouse mailbox: the L3 and L4 warehouses at Joeva, the station at Lionhold and the layout at Samia's Hope at
+/// level 0; the levels above them stand none.
+static void test_mailbox_levels() {
+    std::printf("the mailbox: the node level that stands it\n");
+    constexpr int64_t kIcd = 6064634013971120329ll;
+    const world::CityNodeInfo* joeva = g_env.nodes->by_guid(kJoeva);
+    const world::CityNodeInfo* lionhold = g_env.nodes->by_name("Verra_RVR_Lionhold");
+    const world::CityNodeInfo* samia = g_env.nodes->by_name("Verra_RVR_SamiasHope");
+    CHECK(joeva && lionhold && samia, "Joeva, Lionhold and Samia's Hope are city nodes");
+    if (!joeva || !lionhold || !samia) return;
+    spawns::GenericConfig config;
+    config.prop_components.insert(kIcd);
+    spawns::GenericNpcs generic(*g_env.captured, &g_env.table, config);
+    const spawns::TemplateSource templates{&*g_env.captured, &generic};
+    const auto count_at = [&](const world::CityNodeInfo& info, int level) {
+        const spawns::NodeSite site = spawns::node_site_of(*g_env.nodes, *g_env.wire, info, level);
+        const spawns::SpawnContext ctx = spawns::node_spawn_context(g_env.base, site, g_env.shown);
+        const spawns::SpawnFilter filter(ctx, &g_env.table);
+        spawns::AreaConfig area;
+        area.center_x = info.x;
+        area.center_y = info.y;
+        area.radius_cm = 200000.0;
+        spawns::NodePopStats stats;
+        size_t n = 0;
+        for (const spawns::NodeSpawn& s : spawns::select_node_spawns(*g_env.pop, templates, *g_env.data, *g_env.wire, site, area, filter, stats)) {
+            if (s.spawn.open && spawns::is_mailbox_path(s.spawn.open->archetype_path)) ++n;
+        }
+        return n;
+    };
+    const auto set_at = [&](const world::CityNodeInfo& info, int level, const char* name) {
+        const spawns::NodeSite site = spawns::node_site_of(*g_env.nodes, *g_env.wire, info, level);
+        for (const spawns::PlacedSet& p : spawns::placed_sets(*g_env.data, *g_env.wire, site)) {
+            const auto it = g_env.pop->sets.find(p.set);
+            if (it != g_env.pop->sets.end() && it->second.name == name) return true;
+        }
+        return false;
+    };
+    CHECK(count_at(*joeva, 3) == 1 && set_at(*joeva, 3, "ServiceBuilding_L3_Warehouse_Operational"), "Joeva at level 3 stands the L3 warehouse's mailbox");
+    CHECK(count_at(*joeva, 4) == 1 && set_at(*joeva, 4, "ServiceBuilding_L4_Warehouse_Operational"), "Joeva at level 4 stands the L4 warehouse's mailbox");
+    CHECK(count_at(*joeva, 5) == 0 && count_at(*joeva, 6) == 0, "Joeva at levels 5 and 6 stands no warehouse mailbox");
+    CHECK(count_at(*lionhold, 0) == 1 && set_at(*lionhold, 0, "LionholdStation Location"), "Lionhold at level 0 stands the station's mailbox");
+    CHECK(count_at(*lionhold, 1) == 0, "Lionhold at level 1 stands no mailbox");
+    CHECK(count_at(*samia, 0) == 1 && set_at(*samia, 0, "NodeHelper_Layout_Building_SamiasHope"), "Samia's Hope at level 0 stands the layout's mailbox");
+    CHECK(count_at(*samia, 1) == 0, "Samia's Hope at level 1 stands no mailbox");
 }
 
 static const char* why_id(Why w) {
@@ -1195,8 +1243,12 @@ static void test_world() {
         CHECK(world.load_roads(NODES_ROADS_LEVELS_PATH, error) && world.roads().level_roads() == roads.roads.size() && roads.roads.size() > 100, "the by-level roads load into the world (145 roads)");
     }
     const auto circle_npcs = [&](int level) {
+        const spawns::NodeSite site = spawns::node_site_of(*nodes, *g_env.wire, *joeva, level);
+        const spawns::SpawnContext ctx = spawns::node_spawn_context(g_env.base, site, g_env.shown);
+        const spawns::SpawnFilter filter(ctx, &g_env.table);
+        const spawns::TemplateSource real{&*g_env.captured, world.generic_npcs()};
         spawns::NodePopStats st;
-        return select(*nodes, *g_env.wire, *joeva, level, st, circle).size();
+        return spawns::select_node_spawns(*g_env.pop, real, *g_env.data, *g_env.wire, site, circle, filter, st).size();
     };
     const size_t before_npcs = people_of(world.registry());
     const size_t made = world.start_node_people(cfg);
@@ -1251,7 +1303,7 @@ static void test_world() {
     uint64_t victim = 0;
     uint32_t ref = 0;
     world.registry().for_each([&](const world::WorldActor& a) {
-        if (a.npc.spawn_ref >= spawns::kNodeRefBase && victim == 0 && a.npc.vendor_guid == 0) {
+        if (a.kind == world::ActorKind::Npc && a.npc.spawn_ref >= spawns::kNodeRefBase && victim == 0 && a.npc.vendor_guid == 0) {
             victim = a.id;
             ref = a.npc.spawn_ref;
         }
@@ -1526,7 +1578,14 @@ static void test_bowl_world() {
     CHECK(!world.town_ground_at(500, 500) && world.town_floor().towns() == 0, "before the node people exist, no point is in a bowl");
     spawns::NodePopulations::Config cfg;
     const size_t made = world.start_node_people(cfg);
-    CHECK(made == golden_npcs("Verra_RVR_Joeva", 4), "the town's people are made on the adopted ground");
+    size_t props = 0;
+    const world::WorldActor* mailbox = nullptr;
+    world.registry().for_each([&](const world::WorldActor& a) {
+        if (a.kind != world::ActorKind::Prop || a.npc.spawn_ref < spawns::kNodeRefBase) return;
+        ++props;
+        if (spawns::is_mailbox_path(a.npc.archetype)) mailbox = &a;
+    });
+    CHECK(made == golden_npcs("Verra_RVR_Joeva", 4) + props && props == 1 && mailbox != nullptr, "the town's people are made on the adopted ground, and the warehouse mailbox with them");
     // what the floor must be, worked out here from the people: their heights over the baked ground under them (the town's z is 11,000 + the layout's)
     const auto terrain = [&](double x, double y) {
         double t = 0;
@@ -1811,8 +1870,22 @@ static void test_real_town_buildings() {
             continue;
         }
         const size_t made = world.start_node_people({});
-        CHECK(made == golden_npcs(real->name, rt.level), "the town's people are made");
         const std::vector<uint64_t> ids = world.node_people()->actors_of(rt.node);
+        size_t props = 0, mailboxes = 0;
+        const world::WorldActor* mailbox = nullptr;
+        for (const uint64_t id : ids) {
+            const world::WorldActor* a = world.registry().find(id);
+            if (!a || a->kind != world::ActorKind::Prop) continue;
+            ++props;
+            if (spawns::is_mailbox_path(a->npc.archetype)) {
+                ++mailboxes;
+                mailbox = a;
+            }
+        }
+        std::printf("    %s level %d: made %zu, oracle %zu, props %zu (%zu mailbox)\n", real->name.c_str(), rt.level, made, golden_npcs(real->name, rt.level), props, mailboxes);
+        // both towns' level sets hold one warehouse mailbox in the data (Halcyon's at level 3 comes from its layout prop), so the count is the golden's plus one each
+        CHECK(made == golden_npcs(real->name, rt.level) + mailboxes && mailboxes == 1 && mailbox != nullptr,
+              "the town's people are made, and Joeva's warehouse mailbox with them");
         npc::NpcWorld& npcs = *world.npcs();
         const nav::AreaNav& map = *world.nav();
 
@@ -1820,7 +1893,7 @@ static void test_real_town_buildings() {
         const npc::NpcWorld::StandReport rep = npcs.stand_report(ids);
         std::printf("    %zu people: %zu on a floor within %.0f cm of where the data puts them, %zu on a floor up to %.0f cm from it, %zu with none (%zu of them with no walkable ground within %.0f cm; %zu would walk), %zu waiting\n",
                     rep.people, rep.on_floor, npc::NpcWorld::kStandNearCm, rep.moved, rep.max_moved_cm, rep.no_floor, rep.blocked, npc::NpcWorld::kBlockedCm, rep.stuck, rep.waiting);
-        CHECK(rep.people == made && rep.waiting == 0, "all of them have their ground (the area's chunks are resident)");
+        CHECK(rep.people == made - props && rep.waiting == 0, "all of them have their ground (the area's chunks are resident)");
         {
             // who has no floor and would walk (a person the data gives a life, left standing for want of ground)
             std::map<std::string, size_t> stuck_by_kind;
@@ -2066,6 +2139,7 @@ int main() {
     }
     test_filter();
     test_data();
+    test_mailbox_levels();
     test_workshops();
     test_walkers();
     test_anchors();

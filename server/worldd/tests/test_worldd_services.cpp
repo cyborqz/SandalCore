@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <fstream>
 #include <thread>
+#include <utility>
 
 using namespace aoc::worldd;
 namespace gatewayv1 = aoc::gateway::v1;
@@ -65,6 +66,85 @@ struct SavedState {
 };
 // C.O.A with C Y B
 
+/// Mail (migration 0027): a mail as the character service sends it, written from worldd's form.
+static void set_proto_mail(characterv1::Mail* out, const svc::Mail& m) {
+    out->set_id(m.id);
+    out->set_sender(m.sender);
+    out->set_subject(m.subject);
+    out->set_body(m.body);
+    out->set_status(m.status);
+    out->set_issued_at_ms(m.issued_at_ms);
+    out->set_expires_at_ms(m.expires_at_ms);
+    for (const svc::MailItem& it : m.items) {
+        auto* p = out->add_items();
+        p->set_item_record_id(it.item.item_record_id);
+        p->set_instance_guid(it.item.instance_guid);
+        p->set_quantity(it.item.quantity);
+        p->set_quality(it.item.quality);
+        p->set_durability(it.item.durability);
+        p->set_created_at_ms(it.item.created_at_ms);
+        if (it.item.persisted_health) p->set_persisted_health(*it.item.persisted_health);
+        if (it.item.persisted_mana) p->set_persisted_mana(*it.item.persisted_mana);
+        p->set_lock_expiration(it.item.lock_expiration);
+        p->set_claimed(it.claimed);
+    }
+}
+
+/// Mail (migration 0027): the service's mail as worldd reads it; an attachment's container and slot are the placeholders until a claim moves it into the bags.
+static svc::Mail mail_from_proto(const characterv1::Mail& m) {
+    svc::Mail out;
+    out.id = m.id();
+    out.sender = m.sender();
+    out.subject = m.subject();
+    out.body = m.body();
+    out.status = m.status();
+    out.issued_at_ms = m.issued_at_ms();
+    out.expires_at_ms = m.expires_at_ms();
+    for (const auto& i : m.items()) {
+        svc::MailItem it;
+        it.item.container = svc::ItemContainer::Backpack;
+        it.item.slot = 0;
+        it.item.item_record_id = i.item_record_id();
+        it.item.instance_guid = i.instance_guid();
+        it.item.quantity = i.quantity();
+        it.item.quality = i.quality();
+        it.item.durability = i.durability();
+        it.item.created_at_ms = i.created_at_ms();
+        if (i.has_persisted_health()) it.item.persisted_health = i.persisted_health();
+        if (i.has_persisted_mana()) it.item.persisted_mana = i.persisted_mana();
+        it.item.lock_expiration = i.lock_expiration();
+        it.claimed = i.claimed();
+        out.items.push_back(std::move(it));
+    }
+    return out;
+}
+
+/// Mail (migration 0027): the create request as worldd reads it.
+static svc::NewMail new_mail_from_proto(const characterv1::CreateMailRequest& r) {
+    svc::NewMail out;
+    out.sender = r.sender();
+    out.subject = r.subject();
+    out.body = r.body();
+    out.expires_in_ms = r.expires_in_ms();
+    for (const auto& i : r.items()) {
+        svc::MailItem it;
+        it.item.container = svc::ItemContainer::Backpack;
+        it.item.slot = 0;
+        it.item.item_record_id = i.item_record_id();
+        it.item.instance_guid = i.instance_guid();
+        it.item.quantity = i.quantity();
+        it.item.quality = i.quality();
+        it.item.durability = i.durability();
+        it.item.created_at_ms = i.created_at_ms();
+        if (i.has_persisted_health()) it.item.persisted_health = i.persisted_health();
+        if (i.has_persisted_mana()) it.item.persisted_mana = i.persisted_mana();
+        it.item.lock_expiration = i.lock_expiration();
+        it.claimed = i.claimed();
+        out.items.push_back(std::move(it));
+    }
+    return out;
+}
+
 struct Characters final : characterv1::CharacterService::Service {
     grpc::StatusCode code = grpc::StatusCode::OK;
     grpc::StatusCode save_code = grpc::StatusCode::OK;
@@ -92,6 +172,40 @@ struct Characters final : characterv1::CharacterService::Service {
     grpc::StatusCode name_code = grpc::StatusCode::OK;
     std::string got_name;
     int name_calls = 0;
+    // Mail (migration 0027): the answers of GetMails, SaveMail and CreateMail, and what each call carried
+    grpc::StatusCode mails_code = grpc::StatusCode::OK, save_mail_code = grpc::StatusCode::OK, create_mail_code = grpc::StatusCode::OK;
+    std::string mails_reason = "no mails", save_mail_reason = "the mail save is stale", create_mail_reason = "the mail is refused";
+    std::vector<svc::Mail> reply_mails;
+    svc::Mail reply_created, got_mail;
+    svc::NewMail got_new_mail;
+    std::string got_mails_character, got_save_mail_character, got_create_mail_character;
+    int32_t reply_unread_mail_count = 0;
+    int mails_calls = 0, save_mail_calls = 0, create_mail_calls = 0;
+    grpc::Status GetMails(grpc::ServerContext* ctx, const characterv1::GetMailsRequest* req, characterv1::GetMailsResponse* resp) override {
+        auth = auth_of(ctx);
+        ++mails_calls;
+        got_mails_character = req->character_id();
+        if (mails_code != grpc::StatusCode::OK) return grpc::Status(mails_code, mails_reason);
+        for (const svc::Mail& m : reply_mails) set_proto_mail(resp->add_mails(), m);
+        return grpc::Status::OK;
+    }
+    grpc::Status SaveMail(grpc::ServerContext* ctx, const characterv1::SaveMailRequest* req, characterv1::SaveMailResponse*) override {
+        auth = auth_of(ctx);
+        ++save_mail_calls;
+        got_save_mail_character = req->character_id();
+        got_mail = mail_from_proto(req->mail());
+        if (save_mail_code != grpc::StatusCode::OK) return grpc::Status(save_mail_code, save_mail_reason);
+        return grpc::Status::OK;
+    }
+    grpc::Status CreateMail(grpc::ServerContext* ctx, const characterv1::CreateMailRequest* req, characterv1::CreateMailResponse* resp) override {
+        auth = auth_of(ctx);
+        ++create_mail_calls;
+        got_create_mail_character = req->character_id();
+        got_new_mail = new_mail_from_proto(*req);
+        if (create_mail_code != grpc::StatusCode::OK) return grpc::Status(create_mail_code, create_mail_reason);
+        set_proto_mail(resp->mutable_mail(), reply_created);
+        return grpc::Status::OK;
+    }
     grpc::Status GetCharacterByName(grpc::ServerContext* ctx, const characterv1::GetCharacterByNameRequest* req,
                                     characterv1::GetCharacterByNameResponse* resp) override {
         auth = auth_of(ctx);
@@ -190,6 +304,7 @@ struct Characters final : characterv1::CharacterService::Service {
             c->mutable_position()->set_z(3.0);
             c->mutable_position()->set_yaw(90.0f);
         }
+        c->set_unread_mail_count(reply_unread_mail_count);
         return grpc::Status::OK;
     }
 };
@@ -292,6 +407,151 @@ static void test_name_lookup(svc::GrpcServices& s, Characters& ch) {
     std::printf("    one by-name call: %.1f us (loopback, in-process service); a 33.3 ms tick carries %.0f of them\n", us, per_tick);
     CHECK(last == svc::CallStatus::Ok && us > 0.0 && us < (1000.0 / 30.0) * 1000.0, "one by-name call costs less than one tick");
     ch.name_calls = 0;
+}
+
+/// Mail (migration 0027): the three calls map every field, attachment, status and claimed flag; a stale save and a store that keeps no mails end with different
+/// statuses (the caller tells them apart by the status, never by the reason's words); and the unread count helper counts live, unread mails.
+static void test_mail_mapping(svc::GrpcServices& s, Characters& ch) {
+    std::printf("mail (migration 0027)\n");
+    CHECK(svc::kMailStatusDeleted == 2 && svc::kMailStatusRead == 4, "the mail status bits are 2 (deleted) and 4 (read)");
+
+    svc::Mail full;
+    full.id = "11112222333344445555666677778888";
+    full.sender = "Brannoc";
+    full.subject = "Welcome";
+    full.body = "Line one.\nLine two.";
+    full.status = svc::kMailStatusRead | svc::kMailStatusDeleted;
+    full.issued_at_ms = 1771000000123;
+    full.expires_at_ms = 1771600000123;
+    svc::MailItem first;
+    first.item.container = svc::ItemContainer::Backpack;
+    first.item.slot = 0;
+    first.item.item_record_id = 6064630214426886486;
+    first.item.instance_guid = "0123456789abcdef0123456789abcdef";
+    first.item.quantity = 3;
+    first.item.quality = 7;
+    first.item.durability = 42.5f;
+    first.item.created_at_ms = 1780000000123;
+    first.item.persisted_health = 3210.5f;
+    first.item.persisted_mana = 120.5f;
+    first.item.lock_expiration = 1772000000;
+    first.claimed = true;
+    svc::MailItem second;
+    second.item.item_record_id = 6064631131688402948;
+    second.item.instance_guid = "fedcba9876543210fedcba9876543210";
+    second.item.quantity = 1;
+    second.item.quality = 1;
+    second.item.durability = 0;
+    second.item.created_at_ms = 1780000000124;
+    second.item.lock_expiration = 0;
+    second.claimed = false;
+    full.items = {first, second};
+
+    svc::Mail other;
+    other.id = "88887777666655554444333322221111";
+    other.sender = "Mirelle";
+    other.subject = "No attachments";
+    other.body = "";
+    other.status = 0;
+    other.issued_at_ms = 1770000000000;
+    other.expires_at_ms = 0;
+
+    ch.reply_mails = {full, other};
+    ch.mails_code = grpc::StatusCode::OK;
+    ch.auth.clear();
+    const auto loaded = s.load_mails("char-a");
+    CHECK(loaded.status == svc::CallStatus::Ok && loaded.reason.empty() && ch.auth == "Bearer " + kToken && ch.got_mails_character == "char-a",
+          "load_mails carries the character id and the token, and an Ok result carries no reason");
+    CHECK(loaded.mails.size() == 2, "load_mails maps the two mails the service returned");
+    if (loaded.mails.size() == 2) {
+        CHECK(loaded.mails[0] == full, "load_mails maps every field of a mail: id, sender, subject, body, status, times and its attachments in order");
+        CHECK(loaded.mails[0].items.size() == 2 && loaded.mails[0].items[0].item.container == svc::ItemContainer::Backpack && loaded.mails[0].items[0].item.slot == 0,
+              "an attachment's container and slot are the placeholders until a claim moves it into the bags");
+        CHECK(loaded.mails[1] == other, "load_mails maps a mail with no attachments and no expiry");
+    }
+    ch.mails_code = grpc::StatusCode::NOT_FOUND;
+    const auto missing = s.load_mails("nobody");
+    CHECK(missing.status == svc::CallStatus::NotFound && missing.reason == "no mails", "load_mails: NotFound carries the service's reason");
+    ch.mails_code = grpc::StatusCode::UNIMPLEMENTED;
+    const auto noStore = s.load_mails("nobody");
+    CHECK(noStore.status == svc::CallStatus::Unsupported && noStore.reason == "no mails", "load_mails: Unimplemented (a store that keeps no mails) -> Unsupported");
+    ch.mails_code = grpc::StatusCode::OK;
+
+    ch.auth.clear();
+    const auto saved = s.save_mail("char-a", full);
+    CHECK(saved.status == svc::CallStatus::Ok && saved.reason.empty() && ch.auth == "Bearer " + kToken && ch.got_save_mail_character == "char-a",
+          "save_mail carries the character id and the token, and Ok carries no reason");
+    CHECK(ch.got_mail == full, "save_mail sends every field and every attachment with its persisted state and claimed flag");
+    ch.save_mail_code = grpc::StatusCode::FAILED_PRECONDITION;
+    const auto stale = s.save_mail("char-a", full);
+    CHECK(stale.status == svc::CallStatus::Failed && stale.reason == "the mail save is stale", "a stale save is Failed with the service's reason");
+    ch.save_mail_code = grpc::StatusCode::INVALID_ARGUMENT;
+    CHECK(s.save_mail("char-a", full).status == svc::CallStatus::Refused, "save_mail: InvalidArgument (a refused mail) -> Refused");
+    ch.save_mail_code = grpc::StatusCode::NOT_FOUND;
+    CHECK(s.save_mail("char-a", full).status == svc::CallStatus::NotFound, "save_mail: NotFound -> NotFound");
+    ch.save_mail_code = grpc::StatusCode::UNIMPLEMENTED;
+    CHECK(s.save_mail("char-a", full).status == svc::CallStatus::Unsupported, "save_mail: Unimplemented (a store that keeps no mails) -> Unsupported");
+    ch.save_mail_code = grpc::StatusCode::OK;
+
+    svc::NewMail fresh;
+    fresh.sender = "Mirelle";
+    fresh.subject = "For you";
+    fresh.body = "Two things.";
+    fresh.expires_in_ms = 3600000000LL;
+    fresh.items = {first, second};
+    fresh.items[0].claimed = false;
+    ch.reply_created = full;
+    ch.auth.clear();
+    const auto made = s.create_mail("char-a", fresh);
+    CHECK(made.status == svc::CallStatus::Ok && made.reason.empty() && ch.auth == "Bearer " + kToken && ch.got_create_mail_character == "char-a",
+          "create_mail carries the character id and the token, and an Ok result carries no reason");
+    CHECK(ch.got_new_mail == fresh, "create_mail sends the sender, subject, body, duration and the attachments");
+    CHECK(made.mail == full, "create_mail maps the stored mail the service returns");
+    ch.create_mail_code = grpc::StatusCode::INVALID_ARGUMENT;
+    CHECK(s.create_mail("char-a", fresh).status == svc::CallStatus::Refused, "create_mail: InvalidArgument (a refused mail or a full mailbox) -> Refused");
+    ch.create_mail_code = grpc::StatusCode::NOT_FOUND;
+    CHECK(s.create_mail("char-a", fresh).status == svc::CallStatus::NotFound, "create_mail: NotFound -> NotFound");
+    ch.create_mail_code = grpc::StatusCode::UNIMPLEMENTED;
+    CHECK(s.create_mail("char-a", fresh).status == svc::CallStatus::Unsupported, "create_mail: Unimplemented (a store that keeps no mails) -> Unsupported");
+    ch.create_mail_code = grpc::StatusCode::OK;
+
+    std::vector<svc::Mail> statuses(4);
+    statuses[0].status = 0;
+    statuses[1].status = svc::kMailStatusRead;
+    statuses[2].status = svc::kMailStatusRead | svc::kMailStatusDeleted;
+    statuses[3].status = svc::kMailStatusDeleted;
+    CHECK(svc::unread_count(statuses) == 1, "unread_count counts the live mails without the read bit (0, 4, 6 and 2 give 1)");
+    CHECK(svc::unread_count(std::vector<svc::Mail>{}) == 0, "unread_count of no mails is 0");
+
+    svc::Mail same = full;
+    CHECK(same == full, "equal mails compare equal");
+    same.subject = "Another title";
+    CHECK(!(same == full), "mails that differ in the subject are not equal");
+    same = full;
+    same.items[1].claimed = true;
+    CHECK(!(same == full), "mails that differ in an attachment's claimed flag are not equal");
+    same = full;
+    same.items[0].item.persisted_health = 1.0f;
+    CHECK(!(same == full), "mails that differ in an attachment's persisted health are not equal");
+    same = full;
+    same.expires_at_ms += 1;
+    CHECK(!(same == full), "mails that differ in their expiry are not equal");
+    svc::NewMail a = fresh, b = fresh;
+    CHECK(a == b, "equal new mails compare equal");
+    b.expires_in_ms = 0;
+    CHECK(!(a == b), "new mails that differ in the duration are not equal");
+    ch.reply_mails.clear();
+    ch.reply_created = {};
+}
+
+/// Mail (migration 0027): the unread count at the login comes with the character load (GetCharacter with the items).
+static void test_unread_mail_count_at_login(svc::GrpcServices& s, Characters& ch) {
+    std::printf("mail unread count at login\n");
+    ch.reply_unread_mail_count = 3;
+    const auto loaded = s.get_character("char-a");
+    CHECK(loaded.status == svc::CallStatus::Ok && loaded.character.unread_mail_count == 3, "GetCharacter maps the unread mail count for the login");
+    ch.reply_unread_mail_count = 0;
+    CHECK(s.get_character("char-a").character.unread_mail_count == 0, "a character with no unread mail carries 0");
 }
 
 int main() {
@@ -417,6 +677,8 @@ int main() {
 
     test_friends_mapping(s, ch);
     test_name_lookup(s, ch);
+    test_mail_mapping(s, ch);
+    test_unread_mail_count_at_login(s, ch);
 
     std::printf("save_position (plan A6)\n");
     ch.auth.clear();
@@ -466,8 +728,9 @@ int main() {
     CHECK(svc::map_grpc_status(grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "")) == svc::CallStatus::Unavailable &&
           svc::map_grpc_status(grpc::Status(grpc::StatusCode::UNAVAILABLE, "")) == svc::CallStatus::Unavailable &&
           svc::map_grpc_status(grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "")) == svc::CallStatus::Refused &&
+          svc::map_grpc_status(grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "")) == svc::CallStatus::Unsupported &&
           svc::map_grpc_status(grpc::Status(grpc::StatusCode::INTERNAL, "")) == svc::CallStatus::Failed,
-          "deadline and unavailable retry; invalid argument is a refusal; internal fails");
+          "deadline and unavailable retry; invalid argument is a refusal; unimplemented is unsupported; internal fails");
     svc::GrpcServices down({"127.0.0.1:1", "127.0.0.1:1", "127.0.0.1:1"}, kToken, std::chrono::milliseconds(300));
     CHECK(down.redeem_ticket("x", "y", 1).status == svc::CallStatus::Unavailable, "an unreachable service -> Unavailable");
     server->Shutdown();

@@ -228,9 +228,12 @@ type Character struct {
 	Pvp *PvpState `protobuf:"bytes,38,opt,name=pvp,proto3" json:"pvp,omitempty"`
 	// Social, step 9: the guild the character is in (migration 0026), with the items (include_items): its ranks, its member rows, the character's rank and
 	// its join cooldown (Unix milliseconds; 0: none). Unset when the character is in no guild.
-	Guild         *Guild `protobuf:"bytes,39,opt,name=guild,proto3" json:"guild,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Guild *Guild `protobuf:"bytes,39,opt,name=guild,proto3" json:"guild,omitempty"`
+	// Mail (migration 0027): how many of the character's live mails are unread (no delete bit and no read bit), with the items (include_items), for the social
+	// component's unread count at the login. A character with no mail has 0.
+	UnreadMailCount int32 `protobuf:"varint,40,opt,name=unread_mail_count,json=unreadMailCount,proto3" json:"unread_mail_count,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Character) Reset() {
@@ -492,6 +495,13 @@ func (x *Character) GetGuild() *Guild {
 		return x.Guild
 	}
 	return nil
+}
+
+func (x *Character) GetUnreadMailCount() int32 {
+	if x != nil {
+		return x.UnreadMailCount
+	}
+	return 0
 }
 
 // A character's PvP state between sessions (migration 0025): the Corruption stat (GameStatProfile.CorruptionId, every client is told it) and Corruption_Blight
@@ -3186,6 +3196,536 @@ func (*SaveGuildCooldownResponse) Descriptor() ([]byte, []int) {
 	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{37}
 }
 
+// Mail (migration 0027): one item attached to a mail, in the mail's order: the item's own data and whether the client has claimed it. An attachment has no
+// container or slot until a claim moves it into the bags. A new mail's attachments get their instance guid and creation time from the store: what a create
+// request carries there is ignored.
+type MailItem struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ItemRecordId    int64                  `protobuf:"varint,1,opt,name=item_record_id,json=itemRecordId,proto3" json:"item_record_id,omitempty"`               // the design database's ItemRecord Guid
+	InstanceGuid    string                 `protobuf:"bytes,2,opt,name=instance_guid,json=instanceGuid,proto3" json:"instance_guid,omitempty"`                  // 32 lowercase hex digits, not all zero
+	Quantity        int32                  `protobuf:"varint,3,opt,name=quantity,proto3" json:"quantity,omitempty"`                                             // 1 to 1000000
+	Quality         int32                  `protobuf:"varint,4,opt,name=quality,proto3" json:"quality,omitempty"`                                               // 1 to 200
+	Durability      float32                `protobuf:"fixed32,5,opt,name=durability,proto3" json:"durability,omitempty"`                                        // 0 to 1e9
+	CreatedAtMs     int64                  `protobuf:"varint,6,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`                  // Unix milliseconds
+	PersistedHealth *float32               `protobuf:"fixed32,7,opt,name=persisted_health,json=persistedHealth,proto3,oneof" json:"persisted_health,omitempty"` // the mount state (migration 0007); absent for every other item
+	PersistedMana   *float32               `protobuf:"fixed32,8,opt,name=persisted_mana,json=persistedMana,proto3,oneof" json:"persisted_mana,omitempty"`       // the mount state (migration 0007); absent for every other item
+	LockExpiration  int64                  `protobuf:"varint,9,opt,name=lock_expiration,json=lockExpiration,proto3" json:"lock_expiration,omitempty"`           // Unix seconds; 0: not locked
+	Claimed         bool                   `protobuf:"varint,10,opt,name=claimed,proto3" json:"claimed,omitempty"`                                              // true: the client has claimed it
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *MailItem) Reset() {
+	*x = MailItem{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MailItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MailItem) ProtoMessage() {}
+
+func (x *MailItem) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MailItem.ProtoReflect.Descriptor instead.
+func (*MailItem) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *MailItem) GetItemRecordId() int64 {
+	if x != nil {
+		return x.ItemRecordId
+	}
+	return 0
+}
+
+func (x *MailItem) GetInstanceGuid() string {
+	if x != nil {
+		return x.InstanceGuid
+	}
+	return ""
+}
+
+func (x *MailItem) GetQuantity() int32 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+func (x *MailItem) GetQuality() int32 {
+	if x != nil {
+		return x.Quality
+	}
+	return 0
+}
+
+func (x *MailItem) GetDurability() float32 {
+	if x != nil {
+		return x.Durability
+	}
+	return 0
+}
+
+func (x *MailItem) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *MailItem) GetPersistedHealth() float32 {
+	if x != nil && x.PersistedHealth != nil {
+		return *x.PersistedHealth
+	}
+	return 0
+}
+
+func (x *MailItem) GetPersistedMana() float32 {
+	if x != nil && x.PersistedMana != nil {
+		return *x.PersistedMana
+	}
+	return 0
+}
+
+func (x *MailItem) GetLockExpiration() int64 {
+	if x != nil {
+		return x.LockExpiration
+	}
+	return 0
+}
+
+func (x *MailItem) GetClaimed() bool {
+	if x != nil {
+		return x.Claimed
+	}
+	return false
+}
+
+// Mail (migration 0027): one mail of a character: its id, sender, subject (the list's title), body (the detail), the client's status bits, when it was issued and
+// when it expires, and its attachments in the mail's order.
+type Mail struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                         // 32 lowercase hex digits, not all zero
+	Sender        string                 `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`                                 // at most 64 UTF-8 bytes
+	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`                               // the title; at most 128 UTF-8 bytes
+	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`                                     // at most 4096 UTF-8 bytes
+	Status        int32                  `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`                                // 2 deleted, 4 read; other bits are kept
+	IssuedAtMs    int64                  `protobuf:"varint,6,opt,name=issued_at_ms,json=issuedAtMs,proto3" json:"issued_at_ms,omitempty"`    // Unix milliseconds
+	ExpiresAtMs   int64                  `protobuf:"varint,7,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"` // Unix milliseconds; 0: none
+	Items         []*MailItem            `protobuf:"bytes,8,rep,name=items,proto3" json:"items,omitempty"`                                   // in the mail's order
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Mail) Reset() {
+	*x = Mail{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Mail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Mail) ProtoMessage() {}
+
+func (x *Mail) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Mail.ProtoReflect.Descriptor instead.
+func (*Mail) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *Mail) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Mail) GetSender() string {
+	if x != nil {
+		return x.Sender
+	}
+	return ""
+}
+
+func (x *Mail) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *Mail) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *Mail) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *Mail) GetIssuedAtMs() int64 {
+	if x != nil {
+		return x.IssuedAtMs
+	}
+	return 0
+}
+
+func (x *Mail) GetExpiresAtMs() int64 {
+	if x != nil {
+		return x.ExpiresAtMs
+	}
+	return 0
+}
+
+func (x *Mail) GetItems() []*MailItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// Mail: the live mails of one character, newest first. NotFound for an unknown character.
+type GetMailsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId   string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMailsRequest) Reset() {
+	*x = GetMailsRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMailsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMailsRequest) ProtoMessage() {}
+
+func (x *GetMailsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMailsRequest.ProtoReflect.Descriptor instead.
+func (*GetMailsRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *GetMailsRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+type GetMailsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mails         []*Mail                `protobuf:"bytes,1,rep,name=mails,proto3" json:"mails,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMailsResponse) Reset() {
+	*x = GetMailsResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMailsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMailsResponse) ProtoMessage() {}
+
+func (x *GetMailsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMailsResponse.ProtoReflect.Descriptor instead.
+func (*GetMailsResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *GetMailsResponse) GetMails() []*Mail {
+	if x != nil {
+		return x.Mails
+	}
+	return nil
+}
+
+// Mail: one mail written whole, with the character it belongs to (see SaveMail).
+type SaveMailRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId   string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"`
+	Mail          *Mail                  `protobuf:"bytes,2,opt,name=mail,proto3" json:"mail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveMailRequest) Reset() {
+	*x = SaveMailRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveMailRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveMailRequest) ProtoMessage() {}
+
+func (x *SaveMailRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveMailRequest.ProtoReflect.Descriptor instead.
+func (*SaveMailRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *SaveMailRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *SaveMailRequest) GetMail() *Mail {
+	if x != nil {
+		return x.Mail
+	}
+	return nil
+}
+
+type SaveMailResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveMailResponse) Reset() {
+	*x = SaveMailResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveMailResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveMailResponse) ProtoMessage() {}
+
+func (x *SaveMailResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveMailResponse.ProtoReflect.Descriptor instead.
+func (*SaveMailResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{43}
+}
+
+// Mail: the admin send. expires_in_ms is the duration the client's FMailData carries (ExpirationDurationMs); 0: none. The service gives the stored mail its id,
+// its issue time and its absolute expiry (the issue time plus the duration), and gives every attachment its instance guid and creation time. An attachment must
+// not be sent as claimed.
+type CreateMailRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId   string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"`
+	Sender        string                 `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`
+	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`
+	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
+	Items         []*MailItem            `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
+	ExpiresInMs   int64                  `protobuf:"varint,6,opt,name=expires_in_ms,json=expiresInMs,proto3" json:"expires_in_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateMailRequest) Reset() {
+	*x = CreateMailRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateMailRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateMailRequest) ProtoMessage() {}
+
+func (x *CreateMailRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateMailRequest.ProtoReflect.Descriptor instead.
+func (*CreateMailRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *CreateMailRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *CreateMailRequest) GetSender() string {
+	if x != nil {
+		return x.Sender
+	}
+	return ""
+}
+
+func (x *CreateMailRequest) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *CreateMailRequest) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *CreateMailRequest) GetItems() []*MailItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *CreateMailRequest) GetExpiresInMs() int64 {
+	if x != nil {
+		return x.ExpiresInMs
+	}
+	return 0
+}
+
+type CreateMailResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mail          *Mail                  `protobuf:"bytes,1,opt,name=mail,proto3" json:"mail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateMailResponse) Reset() {
+	*x = CreateMailResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateMailResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateMailResponse) ProtoMessage() {}
+
+func (x *CreateMailResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateMailResponse.ProtoReflect.Descriptor instead.
+func (*CreateMailResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *CreateMailResponse) GetMail() *Mail {
+	if x != nil {
+		return x.Mail
+	}
+	return nil
+}
+
 var File_aoc_character_v1_character_proto protoreflect.FileDescriptor
 
 const file_aoc_character_v1_character_proto_rawDesc = "" +
@@ -3195,7 +3735,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
 	"\x01z\x18\x03 \x01(\x01R\x01z\x12\x10\n" +
-	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xbf\v\n" +
+	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xeb\v\n" +
 	"\tCharacter\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -3238,7 +3778,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\afriends\x18! \x03(\v2\x18.aoc.character.v1.FriendR\afriends\x12H\n" +
 	"\x0ffriend_requests\x18\" \x03(\v2\x1f.aoc.character.v1.FriendRequestR\x0efriendRequests\x12,\n" +
 	"\x03pvp\x18& \x01(\v2\x1a.aoc.character.v1.PvpStateR\x03pvp\x12-\n" +
-	"\x05guild\x18' \x01(\v2\x17.aoc.character.v1.GuildR\x05guild\"B\n" +
+	"\x05guild\x18' \x01(\v2\x17.aoc.character.v1.GuildR\x05guild\x12*\n" +
+	"\x11unread_mail_count\x18( \x01(\x05R\x0funreadMailCount\"B\n" +
 	"\bPvpState\x12\x1e\n" +
 	"\n" +
 	"corruption\x18\x01 \x01(\x01R\n" +
@@ -3485,7 +4026,50 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x18SaveGuildCooldownRequest\x12!\n" +
 	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x12\x19\n" +
 	"\buntil_ms\x18\x02 \x01(\x03R\auntilMs\"\x1b\n" +
-	"\x19SaveGuildCooldownResponse*\xde\x01\n" +
+	"\x19SaveGuildCooldownResponse\"\x96\x03\n" +
+	"\bMailItem\x12$\n" +
+	"\x0eitem_record_id\x18\x01 \x01(\x03R\fitemRecordId\x12#\n" +
+	"\rinstance_guid\x18\x02 \x01(\tR\finstanceGuid\x12\x1a\n" +
+	"\bquantity\x18\x03 \x01(\x05R\bquantity\x12\x18\n" +
+	"\aquality\x18\x04 \x01(\x05R\aquality\x12\x1e\n" +
+	"\n" +
+	"durability\x18\x05 \x01(\x02R\n" +
+	"durability\x12\"\n" +
+	"\rcreated_at_ms\x18\x06 \x01(\x03R\vcreatedAtMs\x12.\n" +
+	"\x10persisted_health\x18\a \x01(\x02H\x00R\x0fpersistedHealth\x88\x01\x01\x12*\n" +
+	"\x0epersisted_mana\x18\b \x01(\x02H\x01R\rpersistedMana\x88\x01\x01\x12'\n" +
+	"\x0flock_expiration\x18\t \x01(\x03R\x0elockExpiration\x12\x18\n" +
+	"\aclaimed\x18\n" +
+	" \x01(\bR\aclaimedB\x13\n" +
+	"\x11_persisted_healthB\x11\n" +
+	"\x0f_persisted_mana\"\xec\x01\n" +
+	"\x04Mail\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
+	"\x06sender\x18\x02 \x01(\tR\x06sender\x12\x18\n" +
+	"\asubject\x18\x03 \x01(\tR\asubject\x12\x12\n" +
+	"\x04body\x18\x04 \x01(\tR\x04body\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\x05R\x06status\x12 \n" +
+	"\fissued_at_ms\x18\x06 \x01(\x03R\n" +
+	"issuedAtMs\x12\"\n" +
+	"\rexpires_at_ms\x18\a \x01(\x03R\vexpiresAtMs\x120\n" +
+	"\x05items\x18\b \x03(\v2\x1a.aoc.character.v1.MailItemR\x05items\"4\n" +
+	"\x0fGetMailsRequest\x12!\n" +
+	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\"@\n" +
+	"\x10GetMailsResponse\x12,\n" +
+	"\x05mails\x18\x01 \x03(\v2\x16.aoc.character.v1.MailR\x05mails\"`\n" +
+	"\x0fSaveMailRequest\x12!\n" +
+	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x12*\n" +
+	"\x04mail\x18\x02 \x01(\v2\x16.aoc.character.v1.MailR\x04mail\"\x12\n" +
+	"\x10SaveMailResponse\"\xd2\x01\n" +
+	"\x11CreateMailRequest\x12!\n" +
+	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x12\x16\n" +
+	"\x06sender\x18\x02 \x01(\tR\x06sender\x12\x18\n" +
+	"\asubject\x18\x03 \x01(\tR\asubject\x12\x12\n" +
+	"\x04body\x18\x04 \x01(\tR\x04body\x120\n" +
+	"\x05items\x18\x05 \x03(\v2\x1a.aoc.character.v1.MailItemR\x05items\x12\"\n" +
+	"\rexpires_in_ms\x18\x06 \x01(\x03R\vexpiresInMs\"@\n" +
+	"\x12CreateMailResponse\x12*\n" +
+	"\x04mail\x18\x01 \x01(\v2\x16.aoc.character.v1.MailR\x04mail*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +
 	"\x1aITEM_CONTAINER_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ITEM_CONTAINER_BACKPACK\x10\x01\x12\x1c\n" +
@@ -3493,7 +4077,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x14ITEM_CONTAINER_QUEST\x10\x03\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE0\x10\x04\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE1\x10\x05\x12\x1c\n" +
-	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\x8d\b\n" +
+	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\x8c\n" +
+	"\n" +
 	"\x10CharacterService\x12f\n" +
 	"\x0fCreateCharacter\x12(.aoc.character.v1.CreateCharacterRequest\x1a).aoc.character.v1.CreateCharacterResponse\x12c\n" +
 	"\x0eListCharacters\x12'.aoc.character.v1.ListCharactersRequest\x1a(.aoc.character.v1.ListCharactersResponse\x12]\n" +
@@ -3504,7 +4089,11 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\rSaveInventory\x12&.aoc.character.v1.SaveInventoryRequest\x1a'.aoc.character.v1.SaveInventoryResponse\x12]\n" +
 	"\fSaveProgress\x12%.aoc.character.v1.SaveProgressRequest\x1a&.aoc.character.v1.SaveProgressResponse\x12T\n" +
 	"\tSaveGuild\x12\".aoc.character.v1.SaveGuildRequest\x1a#.aoc.character.v1.SaveGuildResponse\x12l\n" +
-	"\x11SaveGuildCooldown\x12*.aoc.character.v1.SaveGuildCooldownRequest\x1a+.aoc.character.v1.SaveGuildCooldownResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
+	"\x11SaveGuildCooldown\x12*.aoc.character.v1.SaveGuildCooldownRequest\x1a+.aoc.character.v1.SaveGuildCooldownResponse\x12Q\n" +
+	"\bGetMails\x12!.aoc.character.v1.GetMailsRequest\x1a\".aoc.character.v1.GetMailsResponse\x12Q\n" +
+	"\bSaveMail\x12!.aoc.character.v1.SaveMailRequest\x1a\".aoc.character.v1.SaveMailResponse\x12W\n" +
+	"\n" +
+	"CreateMail\x12#.aoc.character.v1.CreateMailRequest\x1a$.aoc.character.v1.CreateMailResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
 
 var (
 	file_aoc_character_v1_character_proto_rawDescOnce sync.Once
@@ -3519,7 +4108,7 @@ func file_aoc_character_v1_character_proto_rawDescGZIP() []byte {
 }
 
 var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_aoc_character_v1_character_proto_goTypes = []any{
 	(ItemContainer)(0),                 // 0: aoc.character.v1.ItemContainer
 	(*Position)(nil),                   // 1: aoc.character.v1.Position
@@ -3560,6 +4149,14 @@ var file_aoc_character_v1_character_proto_goTypes = []any{
 	(*SaveGuildResponse)(nil),          // 36: aoc.character.v1.SaveGuildResponse
 	(*SaveGuildCooldownRequest)(nil),   // 37: aoc.character.v1.SaveGuildCooldownRequest
 	(*SaveGuildCooldownResponse)(nil),  // 38: aoc.character.v1.SaveGuildCooldownResponse
+	(*MailItem)(nil),                   // 39: aoc.character.v1.MailItem
+	(*Mail)(nil),                       // 40: aoc.character.v1.Mail
+	(*GetMailsRequest)(nil),            // 41: aoc.character.v1.GetMailsRequest
+	(*GetMailsResponse)(nil),           // 42: aoc.character.v1.GetMailsResponse
+	(*SaveMailRequest)(nil),            // 43: aoc.character.v1.SaveMailRequest
+	(*SaveMailResponse)(nil),           // 44: aoc.character.v1.SaveMailResponse
+	(*CreateMailRequest)(nil),          // 45: aoc.character.v1.CreateMailRequest
+	(*CreateMailResponse)(nil),         // 46: aoc.character.v1.CreateMailResponse
 }
 var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	1,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
@@ -3599,31 +4196,42 @@ var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	3,  // 34: aoc.character.v1.SaveProgressRequest.pvp:type_name -> aoc.character.v1.PvpState
 	2,  // 35: aoc.character.v1.SaveProgressResponse.character:type_name -> aoc.character.v1.Character
 	8,  // 36: aoc.character.v1.SaveGuildRequest.guild:type_name -> aoc.character.v1.Guild
-	19, // 37: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
-	21, // 38: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
-	23, // 39: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
-	25, // 40: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
-	27, // 41: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
-	29, // 42: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
-	31, // 43: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
-	33, // 44: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
-	35, // 45: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
-	37, // 46: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
-	20, // 47: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
-	22, // 48: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
-	24, // 49: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
-	26, // 50: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
-	28, // 51: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
-	30, // 52: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
-	32, // 53: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
-	34, // 54: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
-	36, // 55: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
-	38, // 56: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
-	47, // [47:57] is the sub-list for method output_type
-	37, // [37:47] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	39, // 37: aoc.character.v1.Mail.items:type_name -> aoc.character.v1.MailItem
+	40, // 38: aoc.character.v1.GetMailsResponse.mails:type_name -> aoc.character.v1.Mail
+	40, // 39: aoc.character.v1.SaveMailRequest.mail:type_name -> aoc.character.v1.Mail
+	39, // 40: aoc.character.v1.CreateMailRequest.items:type_name -> aoc.character.v1.MailItem
+	40, // 41: aoc.character.v1.CreateMailResponse.mail:type_name -> aoc.character.v1.Mail
+	19, // 42: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
+	21, // 43: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
+	23, // 44: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
+	25, // 45: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
+	27, // 46: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
+	29, // 47: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
+	31, // 48: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
+	33, // 49: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
+	35, // 50: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
+	37, // 51: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
+	41, // 52: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
+	43, // 53: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
+	45, // 54: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
+	20, // 55: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
+	22, // 56: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
+	24, // 57: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
+	26, // 58: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
+	28, // 59: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
+	30, // 60: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
+	32, // 61: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
+	34, // 62: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
+	36, // 63: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
+	38, // 64: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
+	42, // 65: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
+	44, // 66: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
+	46, // 67: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
+	55, // [55:68] is the sub-list for method output_type
+	42, // [42:55] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_aoc_character_v1_character_proto_init() }
@@ -3633,13 +4241,14 @@ func file_aoc_character_v1_character_proto_init() {
 	}
 	file_aoc_character_v1_character_proto_msgTypes[8].OneofWrappers = []any{}
 	file_aoc_character_v1_character_proto_msgTypes[17].OneofWrappers = []any{}
+	file_aoc_character_v1_character_proto_msgTypes[38].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_character_v1_character_proto_rawDesc), len(file_aoc_character_v1_character_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   38,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

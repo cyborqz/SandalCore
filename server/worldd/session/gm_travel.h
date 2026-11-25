@@ -190,6 +190,8 @@ struct GmRunResult {
     std::string message;
     std::string command;
     std::string character;
+    bool        pending = false;   // the answer comes when a mail job lands (take_run)
+    uint64_t    ticket = 0;
 };
 
 /// One value a field of a command can take (WorldAdmin ListFieldOptions): the text RunCommand carries for it and the words a form shows.
@@ -266,7 +268,13 @@ public:
 
     /// Runs one admin command by its name with its fields as text: every field is held to the list's own rules first (session/admin_commands.h), then the command runs and the
     /// answer says in one line what was done, or why nothing was.  A character the command names must be in the world (NotFound, "not in the world").
-    GmRunResult run_command(const std::string& command, const std::map<std::string, std::string>& fields, const std::string& by);
+    /// The online send-mail's create runs on the world's mail worker; `when_done` gets its answer then, on the network thread.  Without
+    /// it the result is left for take_run.
+    using GmRunDone = std::function<void(const GmRunResult&)>;
+    GmRunResult run_command(const std::string& command, const std::map<std::string, std::string>& fields, const std::string& by,
+                            GmRunDone when_done = {});
+    /// Takes the answer of a run whose result was pending; false while it is not there.
+    bool take_run(uint64_t ticket, GmRunResult& out);
 
     /// The values the field `field` of the command `command` can take, read from the world's own data (session/gm_options.cpp), for a form's drop-down: the places, the city nodes, the free
     /// plots of a node and the stations a plot takes, the items (searched by `filter`, `limit` at a time from the `offset`th), the rarities one item can show, the recipes, the quests and the
@@ -281,6 +289,8 @@ private:
     PlayerWorld& world_;
     Directory    directory_;
     Now          now_;
+    std::map<uint64_t, GmRunResult> pending_runs_;   // the online send-mail answers a direct caller polls
+    uint64_t                        next_run_ticket_ = 1;
 };
 
 }}  // namespace aoc::worldd

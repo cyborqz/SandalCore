@@ -19,6 +19,7 @@
 #include "protocol/repl/quest_codec.h"
 #include "protocol/repl/warehouse_codec.h"
 #include "protocol/repl/item_codec.h"
+#include "protocol/repl/mail_codec.h"
 
 #include <algorithm>
 #include <climits>
@@ -115,7 +116,7 @@ enum class S {
     Unknown, Vec3, Vec2, Ticks, Rotator, Quantized, Normal, RepMovement, LoadTracker, UniqueId, Tag, TagContainer,
     StatInt32, Quat, GuidToBool, Alignment, AppearanceId, Customization, ItemInstance, ItemStorageEvent, HitConfirmations,
     MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData, CraftState, RewardInstance, HashedVariable,
-    WarehouseEntry, CraftTags, GuildData,
+    WarehouseEntry, CraftTags, GuildData, MailHeader, MailPersistence, Currency,
 };
 
 S find_struct(std::string_view n) {
@@ -151,6 +152,9 @@ S find_struct(std::string_view n) {
     if (n == "FWarehouseItemChunkSummary" || n == "FWarehouseMaterialTabSummary") return S::WarehouseEntry;
     if (n == "FCraftingResourceTagCostSelection") return S::CraftTags;
     if (n == "FGuildData") return S::GuildData;
+    if (n == "FMailHeader") return S::MailHeader;
+    if (n == "FMailPersistenceData") return S::MailPersistence;
+    if (n == "FCurrencyContainer") return S::Currency;
     return S::Unknown;
 }
 
@@ -765,6 +769,8 @@ bool customization_fits(const CharacterCustomization& c) {
 
 }  // namespace
 
+#include "protocol/repl/mail_codec.inc"
+
 // ---- primitives -------------------------------------------------------------
 
 bool valid_utf8(const std::string& s) {
@@ -1286,6 +1292,18 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
             const auto* g = v.get_if<GuildData>();
             return g && guild_data_fits(*g);
         }
+        case S::MailHeader: {
+            const auto* h = v.get_if<MailHeader>();
+            return h && mail_header_fits(*h);
+        }
+        case S::MailPersistence: {
+            const auto* d = v.get_if<MailPersistenceData>();
+            return d && mail_persistence_data_fits(*d);
+        }
+        case S::Currency: {
+            const auto* c = v.get_if<CurrencyContainer>();
+            return c && currency_container_fits(*c);
+        }
         case S::Unknown:     break;
     }
     return false;
@@ -1491,6 +1509,21 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
         }
         case S::GuildData:
             return read_guild_data(r);
+        case S::MailHeader: {
+            auto h = read_mail_header(r);
+            if (!h) return std::nullopt;
+            return Value(std::move(*h));
+        }
+        case S::MailPersistence: {
+            auto d = read_mail_persistence_data(r);
+            if (!d) return std::nullopt;
+            return Value(std::move(*d));
+        }
+        case S::Currency: {
+            auto c = read_currency_container(r);
+            if (!c) return std::nullopt;
+            return Value(std::move(*c));
+        }
         case S::Unknown:
             break;
     }
@@ -1604,6 +1637,12 @@ bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out
             return write_craft_tag_selection(out, *v.get_if<CraftTagSelection>());
         case S::GuildData:
             return write_guild_data(out, *v.get_if<GuildData>());
+        case S::MailHeader:
+            return write_mail_header(out, *v.get_if<MailHeader>());
+        case S::MailPersistence:
+            return write_mail_persistence_data(out, *v.get_if<MailPersistenceData>());
+        case S::Currency:
+            return write_currency_container(out, *v.get_if<CurrencyContainer>());
         case S::Unknown:
             break;
     }

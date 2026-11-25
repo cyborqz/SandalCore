@@ -55,6 +55,10 @@ public:
     /// Social, step 9: SaveGuild / SaveGuildCooldown (migration 0026).
     CallStatus save_guild(const Guild& guild) override;
     CallStatus save_guild_cooldown(const std::string& character_id, int64_t until_ms) override;
+    /// Mail (migration 0027): GetMails, SaveMail and CreateMail.
+    MailsResult load_mails(const std::string& character_id) override;
+    MailSaveResult save_mail(const std::string& character_id, const Mail& mail) override;
+    MailResult create_mail(const std::string& character_id, const NewMail& mail) override;
     RegisterResult register_server(const std::string& address,
                                    const std::vector<std::string>& regions) override;
     CallStatus heartbeat(uint32_t server_id) override;

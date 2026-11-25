@@ -8,6 +8,7 @@
 #include "session/world_data.h"
 #include "net/tick_profile.h"
 #include "session/friend_lookups.inc"
+#include "session/mail_jobs.inc"
 
 #include "combat/npc_replicator.h"
 #include "world/interaction_state.h"

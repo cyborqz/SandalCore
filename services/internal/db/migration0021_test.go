@@ -38,7 +38,7 @@ func before21(t *testing.T) *pgxpool.Pool {
 // change.
 func schemaWithoutIgnoredNames(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns')`   // #23 (MrJambix)
+	const skip = `('character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items')`   // #23 (MrJambix)
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

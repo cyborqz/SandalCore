@@ -53,6 +53,19 @@ service CharacterService {
   rpc SaveGuild(SaveGuildRequest) returns (SaveGuildResponse);
   // Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). NotFound for an unknown id, InvalidArgument for a negative time.
   rpc SaveGuildCooldown(SaveGuildCooldownRequest) returns (SaveGuildCooldownResponse);
+  // Mail (migration 0027): the character's live mails (status bit 2 clear), newest first by issued_at_ms with the mail id breaking a tie, with their attachments
+  // and status. NotFound for an unknown character; a character with no mail has none.
+  rpc GetMails(GetMailsRequest) returns (GetMailsResponse);
+  // Mail: writes one mail whole (its sender, subject, body, status and times, and its items with their claimed flags). A mail with the delete bit stays as a row
+  // but is not returned by GetMails again. A save that clears a stored status bit, or that sends a stored claimed item back unclaimed or drops it, is a stale
+  // save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse; NotFound for an unknown
+  // character or mail.
+  rpc SaveMail(SaveMailRequest) returns (SaveMailResponse);
+  // Mail: the admin send. It takes the expiry as a duration (the client's FMailData carries ExpirationDurationMs; 0: none) and stores one mail with the sender,
+  // subject, body and attachments given; the service gives it its id, its issue time and its absolute expiry (the issue time plus the duration) and returns the
+  // stored mail. The store gives every new attachment its instance guid and creation time. InvalidArgument, with nothing changed, for a mail the rules refuse
+  // (an attachment sent as claimed included) or a full mailbox (200 live mails); NotFound for an unknown character.
+  rpc CreateMail(CreateMailRequest) returns (CreateMailResponse);
 }
 
 message Position {
@@ -132,6 +145,9 @@ message Character {
   // Social, step 9: the guild the character is in (migration 0026), with the items (include_items): its ranks, its member rows, the character's rank and
   // its join cooldown (Unix milliseconds; 0: none). Unset when the character is in no guild.
   Guild guild = 39;
+  // Mail (migration 0027): how many of the character's live mails are unread (no delete bit and no read bit), with the items (include_items), for the social
+  // component's unread count at the login. A character with no mail has 0.
+  int32 unread_mail_count = 40;
 }
 
 // A character's PvP state between sessions (migration 0025): the Corruption stat (GameStatProfile.CorruptionId, every client is told it) and Corruption_Blight
@@ -496,3 +512,56 @@ message SaveGuildCooldownRequest {
 }
 
 message SaveGuildCooldownResponse {}
+
+// Mail (migration 0027): one item attached to a mail, in the mail's order: the item's own data and whether the client has claimed it. An attachment has no
+// container or slot until a claim moves it into the bags. A new mail's attachments get their instance guid and creation time from the store: what a create
+// request carries there is ignored.
+message MailItem {
+  int64 item_record_id = 1; // the design database's ItemRecord Guid
+  string instance_guid = 2; // 32 lowercase hex digits, not all zero
+  int32 quantity = 3;       // 1 to 1000000
+  int32 quality = 4;        // 1 to 200
+  float durability = 5;     // 0 to 1e9
+  int64 created_at_ms = 6;  // Unix milliseconds
+  optional float persisted_health = 7; // the mount state (migration 0007); absent for every other item
+  optional float persisted_mana = 8;   // the mount state (migration 0007); absent for every other item
+  int64 lock_expiration = 9; // Unix seconds; 0: not locked
+  bool claimed = 10;         // true: the client has claimed it
+}
+
+// Mail (migration 0027): one mail of a character: its id, sender, subject (the list's title), body (the detail), the client's status bits, when it was issued and
+// when it expires, and its attachments in the mail's order.
+message Mail {
+  string id = 1;            // 32 lowercase hex digits, not all zero
+  string sender = 2;        // at most 64 UTF-8 bytes
+  string subject = 3;       // the title; at most 128 UTF-8 bytes
+  string body = 4;          // at most 4096 UTF-8 bytes
+  int32 status = 5;         // 2 deleted, 4 read; other bits are kept
+  int64 issued_at_ms = 6;   // Unix milliseconds
+  int64 expires_at_ms = 7;  // Unix milliseconds; 0: none
+  repeated MailItem items = 8; // in the mail's order
+}
+
+// Mail: the live mails of one character, newest first. NotFound for an unknown character.
+message GetMailsRequest { string character_id = 1; }
+message GetMailsResponse { repeated Mail mails = 1; }
+
+// Mail: one mail written whole, with the character it belongs to (see SaveMail).
+message SaveMailRequest {
+  string character_id = 1;
+  Mail mail = 2;
+}
+message SaveMailResponse {}
+
+// Mail: the admin send. expires_in_ms is the duration the client's FMailData carries (ExpirationDurationMs); 0: none. The service gives the stored mail its id,
+// its issue time and its absolute expiry (the issue time plus the duration), and gives every attachment its instance guid and creation time. An attachment must
+// not be sent as claimed.
+message CreateMailRequest {
+  string character_id = 1;
+  string sender = 2;
+  string subject = 3;
+  string body = 4;
+  repeated MailItem items = 5;
+  int64 expires_in_ms = 6;
+}
+message CreateMailResponse { Mail mail = 1; }

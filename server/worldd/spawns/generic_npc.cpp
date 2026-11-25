@@ -41,6 +41,9 @@ uint64_t mix(uint64_t z) {
     return z ^ (z >> 31);
 }
 
+/// The warehouse mailbox's package: the one quest object the allowlist takes by its path.
+constexpr char kMailboxFolder[] = "/Game/DesignAssets/Node/ServiceBuildings/Default/Warehouse/KAE/Mailbox.";
+
 /// A station Blueprint: under /Artisanship/, a CraftingStation_* or ProcessingStation_* class.
 bool is_station_path(const std::string& path) {
     if (path.find("/Artisanship/") == std::string::npos) return false;
@@ -155,6 +158,17 @@ bool adopt_ability_records(OpenTemplate& t, const OpenTemplate& guard, const std
 }
 
 }  // namespace
+
+bool is_mailbox_path(const std::string& archetype_path) {
+    return archetype_path.rfind(kMailboxFolder, 0) == 0;
+}
+
+void keep_mailbox_actor_properties(repl::ObjectState& state) {
+    if (!state.schema) return;
+    for (const auto& c : state.schema->commands) {
+        if (c.handle > kMailboxLastActorHandle) state.state.erase(c.handle);
+    }
+}
 
 bool fighting_humanoid(const std::string& archetype_or_class) {
     const std::string leaf = blueprint_leaf(archetype_or_class);
@@ -380,8 +394,10 @@ const OpenTemplate* GenericNpcs::prop_template(const content::NpcAssetRow& asset
     if (path.empty()) return fail(Verdict::NoPath);
     if (!config_.enabled) return fail(Verdict::Disabled);
     if (!excluded_.empty() && (excluded_.count(lower(blueprint_leaf(path))) || excluded_.count(lower(path)))) return fail(Verdict::Excluded);
+    // an empty quest-prop set keeps the pure selections' goldens as they are; the mailbox is the one service it turns off, and the path gate below is the only way it is taken.
+    if (is_mailbox_path(path) && config_.prop_components.empty()) return fail(Verdict::NotPawn);
     // only the game's folders of quest objects, whose classes derive from the state-machine actor the recorded template is (a door or a banner of another folder is a plain actor of another class)
-    static const char* const kFolders[] = {"/Game/DesignAssets/Interactables/Quest/", "/Game/DesignAssets/Quests/", "/Game/DesignAssets/Node/ServiceBuildings/ServiceBuilding_Scaffolding."};
+    static const char* const kFolders[] = {"/Game/DesignAssets/Interactables/Quest/", "/Game/DesignAssets/Quests/", "/Game/DesignAssets/Node/ServiceBuildings/ServiceBuilding_Scaffolding.", kMailboxFolder};
     bool allowed = false;
     for (const char* folder : kFolders) allowed = allowed || path.rfind(folder, 0) == 0;
     if (!allowed) return fail(Verdict::NotPawn);
@@ -396,6 +412,14 @@ const OpenTemplate* GenericNpcs::prop_template(const content::NpcAssetRow& asset
     }
     if (!donor) return fail(Verdict::NoDonor);
     OpenTemplate t = *donor;
+    // the mailbox's class reads the plain actor's properties and the four guid words; the state-machine actor's own properties are not in its layout
+    if (is_mailbox_path(path)) {
+        keep_mailbox_actor_properties(t.blocks.front().state);
+        // the mailbox Blueprint builds its own interactable as the subobject named Interactable, where a quest object inherits InteractableComponent
+        for (ParsedBlock& b : t.blocks) {
+            if (b.cls == "UInteractableComponent") b.name = "Interactable";
+        }
+    }
     t.archetype_path = path;
     t.capture = t.channel = t.packet = 0;   // made here: no capture opened it
     const repl::ExportChain* exported = archetype_export(path);

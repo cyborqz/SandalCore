@@ -152,6 +152,7 @@ bool PlayerSession::allocate_channels(const Connection& conn) {
 
 PlayerSession::~PlayerSession() {
     finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
+    close_mail("the session is destroyed");   // (a mail job's answer is dropped: it never writes into a session that is gone)
     drop_held_chat_lines();   // ... and the tells it held while loading are dropped, not delivered
     leave_friends("the session is destroyed");
     forget_party();
@@ -248,6 +249,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->init_ignored(character);   // social, step 6: the players and the guilds the character ignores, sent with the join
     p->pvp_init(character);       // PvP (migration 0025): the corruption and blight he left with  // #23 (MrJambix)
     p->init_friends(character);   // social, step 7: the friends and the pending requests, sent with the join in the SocialComponent
+    p->init_mail(character);      // mail: the unread count from the character load
     p->init_guild(character);     // social, step 9: the guild, its roster and the join cooldown, sent with the join in the pawn's GuildComponent
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
@@ -915,13 +917,15 @@ void PlayerSession::note_unserved_blocks(Role role, const repl::ClientBunch& par
 // C O A + C_Y_B
 
 const RpcTable& PlayerSession::rpc_table() {
-    static const RpcTable table = [] {
+    static RpcTable table = [] {
         RpcTable t;
 #define AOC_RPC_FEATURE(feature) PlayerSession::register_##feature##_rpcs(t);
 #include "session/rpc_registered.inc"
 #undef AOC_RPC_FEATURE
         return t;
     }();
+    static const bool seam = (rpc_table_for_test() = &table, true);   // (the tests' table: written once, read only by a test)
+    (void)seam;
     return table;
 }
 
@@ -934,6 +938,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
     else if (!rpc.on_actor && role == Role::Pawn && rpc.object == pb_.setup().guids.ability) scope = RpcScope::AbilityComponent;
     else if (!rpc.on_actor && role == Role::PlayerController && rpc.object == pb_.setup().guids.ftue) scope = RpcScope::FtueComponent;
     else if (!rpc.on_actor && role == Role::Pawn && rpc.object == pb_.setup().guids.guild) scope = RpcScope::GuildComponent;   // social, step 9
+    else if (!rpc.on_actor && role == Role::PlayerController && rpc.object == pb_.setup().guids.social) scope = RpcScope::SocialComponent;   // social, step 9: the mail's calls
     if (scope) {
         if (const RpcHandler handler = rpc_table().find(*scope, name_of_rpc)) return handler(*this, RpcContext{conn, role, rpc, bunch, now});
     }
@@ -1043,5 +1048,8 @@ void PlayerSession::register_core_rpcs(RpcTable& t) {
 
 // Social, step 9: the guilds.  It is part of this file so that the feature adds no source-list line of its own.
 #include "session/player_guild.inc"
+
+// Mail: the window's calls, the claim order and the admin send.  It is part of this file so that the feature adds no source-list line of its own.
+#include "session/player_mail.inc"
 
 }}  // namespace aoc::worldd

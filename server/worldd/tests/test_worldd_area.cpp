@@ -33,6 +33,10 @@
 #include "spawns/area_loader.h"
 #include "spawns/generic_npc.h"
 #include "spawns/mount_donors.h"
+#include "spawns/node_population.h"
+#include "spawns/spawn_filter.h"
+#include "world/city_nodes.h"
+#include "world/node_wire.h"
 #include "vendor/gm_vendor.h"
 #include "world/interaction_state.h"
 
@@ -51,6 +55,7 @@
 using namespace aoc::worldd;
 namespace repl = aoc::protocol::repl;
 namespace schema = aoc::protocol::schema;
+namespace emit = aoc::protocol::emit;
 using aoc::protocol::emit::FIntrepidNetworkGUID;
 
 static int g_pass = 0, g_fail = 0;
@@ -435,6 +440,534 @@ static void test_population(const content::ContentDb& db, const spawns::Captured
     CHECK(creatures(bare) == creatures(spawns_a) && ns.lost_by_verdict[spawns::Verdict::NoTable] > 0, "without npc_motion.tsv no generic NPC is made and the loader says so");
 }
 // CoA.C | Y | B
+
+// ---- the mailbox -------------------------------------------------------------------------------------------------------------------------
+
+static constexpr int64_t test_mailbox_icd = 6064634013971120329ll;
+static constexpr int64_t test_mailbox_pid = 6064631686289752065ll;
+static constexpr int64_t test_mailbox_asset_guid = 6064631958580297729ll;
+static constexpr int64_t test_mailbox_instance = 6064631958589210627ll;
+static constexpr int64_t test_mailbox_instance_2 = 6064631958992715776ll;
+static constexpr int64_t test_mailbox_start_instance = 6064634013908533253ll;
+
+static double test_mailbox_yaw(double yaw) {
+    const double y = std::fmod(yaw, 360.0);
+    return y < 0 ? y + 360.0 : y;
+}
+
+/// The population chain, the quest objects and the node tables, with the quest props the world would name.
+struct test_mailbox_data {
+    const content::ContentDb* db = nullptr;
+    const spawns::CapturedData* captured = nullptr;
+    std::string error;
+    std::optional<content::PopulationData> population;
+    std::optional<content::ObjectData> objects;
+    std::set<int64_t> props;
+    npc::MotionTable table;
+    std::unique_ptr<world::CityNodes> nodes;
+    std::unique_ptr<world::NodeWire> wire;
+    std::unique_ptr<spawns::NodePopulationData> node_data;
+    std::optional<spawns::GenericNpcs> generic;
+    const content::NpcAssetRow* asset = nullptr;
+    bool ok = false;
+
+    bool load(const content::ContentDb& content_db, const spawns::CapturedData& captured_data) {
+        db = &content_db;
+        captured = &captured_data;
+        population = db->population_data(error);
+        if (!population) {
+            error = "the population chain: " + error;
+            return false;
+        }
+        objects = db->object_data(error);
+        if (!objects) {
+            error = "the quest objects: " + error;
+            return false;
+        }
+        std::set<int64_t> asked;
+        if (const auto quests = db->quest_data(error)) {
+            for (const auto& [guid, q] : quests->quests) {
+                if (q.disabled || q.flavor == "Destiny" || q.name.rfind("zLegacy", 0) == 0) continue;
+                for (const content::QuestObjectiveRow& o : q.objectives) {
+                    if (o.type == "Interact") props.insert(o.components.begin(), o.components.end());
+                    if (o.type == "Collect" || o.type == "TurnIn") asked.insert(o.items.begin(), o.items.end());
+                }
+            }
+        }
+        for (const auto& [icd, row] : objects->interactables) {
+            for (const auto& [item, quantity] : row.grants) {
+                if (asked.count(item) != 0) props.insert(icd);
+            }
+        }
+        for (auto it = props.begin(); it != props.end();) {
+            if (objects->interactables.count(*it)) {
+                ++it;
+            } else {
+                it = props.erase(it);
+            }
+        }
+        const char* env_motion = std::getenv("AOC_NPC_MOTION");
+        const std::string motion_path = env_motion && *env_motion ? env_motion : "dist/content/npc_motion.tsv";
+        if (!table.load(motion_path, error)) {
+            error = "npc_motion.tsv: " + error;
+            return false;
+        }
+        nodes = world::CityNodes::load(db->path(), error);
+        if (!nodes) return false;
+        wire = world::NodeWire::load(db->path(), *nodes, error);
+        if (!wire) return false;
+        node_data = spawns::NodePopulationData::load(db->path(), error);
+        if (!node_data) return false;
+        for (const auto& [guid, a] : population->assets) {
+            if (a.archetype_path.find("Mailbox.Default__Mailbox_C") != std::string::npos) {
+                asset = &a;
+                break;
+            }
+        }
+        if (!asset) {
+            error = "the warehouse mailbox asset is in no population asset";
+            return false;
+        }
+        spawns::GenericConfig config;
+        config.prop_components = props;
+        generic.emplace(captured_data, &table, std::move(config));
+        ok = true;
+        return true;
+    }
+
+    spawns::TemplateSource templates() const { return spawns::TemplateSource{captured, &*generic}; }
+};
+
+static const spawns::NodeSpawn* test_mailbox_of(const std::vector<spawns::NodeSpawn>& list) {
+    for (const spawns::NodeSpawn& n : list) {
+        if (n.spawn.open && spawns::is_mailbox_path(n.spawn.open->archetype_path)) return &n;
+    }
+    return nullptr;
+}
+
+static int64_t test_mailbox_component_def(const world::WorldActor& w) {
+    if (w.npc.interact_component == 0) return 0;
+    FIntrepidNetworkGUID g = w.actor.guid;
+    g.ObjectId = w.npc.interact_component;
+    const repl::Subobject* sub = w.actor.find(g);
+    if (!sub || !sub->obj.schema) return 0;
+    const repl::Value* v = sub->obj.state.get(*sub->obj.schema, "ComponentDefId.Guid");
+    const auto* n = v ? v->get_if<int64_t>() : nullptr;
+    return n ? *n : 0;
+}
+
+static int64_t test_mailbox_interaction_def(const world::WorldActor& w) {
+    if (w.npc.interact_component == 0) return 0;
+    FIntrepidNetworkGUID g = w.actor.guid;
+    g.ObjectId = w.npc.interact_component;
+    const repl::Subobject* sub = w.actor.find(g);
+    if (!sub || !sub->obj.schema) return 0;
+    const repl::Value* data = sub->obj.state.get(*sub->obj.schema, "InteractionInputData");
+    const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+    if (!arr || arr->elements.empty()) return 0;
+    const auto it = arr->elements.front().values.find(6);
+    const auto* n = it == arr->elements.front().values.end() ? nullptr : it->second.get_if<int64_t>();
+    return n ? *n : 0;
+}
+
+static void test_mailbox_spawns(const content::ContentDb& db, const spawns::CapturedData& captured) {
+    std::printf("the mailbox: the warehouse's mailbox stands where its set puts it\n");
+    test_mailbox_data d;
+    const bool loaded = d.load(db, captured);
+    CHECK(loaded, "the mailbox's data loads");
+    if (!loaded) {
+        if (!d.error.empty()) std::printf("    %s\n", d.error.c_str());
+        return;
+    }
+    CHECK(d.props.count(test_mailbox_icd) == 0 && !d.props.empty(), "the quests name quest objects, and the mailbox is not one of them");
+    CHECK(d.asset->guid == test_mailbox_asset_guid, "the warehouse mailbox's asset is the one in the data");
+    const world::CityNodeInfo* joeva = d.nodes->by_name("Verra_RVR_Joeva");
+    const world::CityNodeInfo* lionhold = d.nodes->by_name("Verra_RVR_Lionhold");
+    const world::CityNodeInfo* samia = d.nodes->by_name("Verra_RVR_SamiasHope");
+    const world::CityNodeInfo* halcyon = d.nodes->by_name("Verra_RVR_Halcyon");
+    CHECK(joeva && lionhold && samia && halcyon, "Joeva, Lionhold, Samia's Hope and Halcyon are city nodes");
+    if (!joeva || !lionhold || !samia || !halcyon) return;
+    const auto select_at = [&](const world::CityNodeInfo& info, int level) {
+        const spawns::NodeSite site = spawns::node_site_of(*d.nodes, *d.wire, info, level);
+        const spawns::SpawnContext ctx = spawns::node_spawn_context(spawns::SpawnContext{}, site);
+        const spawns::SpawnFilter filter(ctx, &d.table);
+        spawns::AreaConfig area;
+        area.center_x = info.x;
+        area.center_y = info.y;
+        area.radius_cm = 200000.0;
+        spawns::NodePopStats stats;
+        return spawns::select_node_spawns(*d.population, d.templates(), *d.node_data, *d.wire, site, area, filter, stats);
+    };
+    const auto near = [](const spawns::DataSpawn& s, double x, double y, double z) {
+        return std::abs(s.x - x) <= 0.1 && std::abs(s.y - y) <= 0.1 && std::abs(s.z - z) <= 0.1;
+    };
+    const auto j3_list = select_at(*joeva, 3);
+    const auto j3 = test_mailbox_of(j3_list);
+    if (j3) std::printf("    Joeva level 3: (%.1f, %.1f, %.1f)\n", j3->spawn.x, j3->spawn.y, j3->spawn.z);
+    CHECK(j3 && j3->source == spawns::PopSource::Building && j3->plot != 0 && j3->spawn.set == 6064630270761777481ll && j3->spawn.instance &&
+              j3->spawn.instance->guid == test_mailbox_instance && near(j3->spawn, -1082271.4, 504122.1, 12534.1),
+          "Joeva at level 3: the L3 warehouse's mailbox stands at the set's rotated offset");
+    const auto j4_list = select_at(*joeva, 4);
+    const auto j4 = test_mailbox_of(j4_list);
+    if (j4) std::printf("    Joeva level 4: (%.1f, %.1f, %.1f) yaw %.3f\n", j4->spawn.x, j4->spawn.y, j4->spawn.z, j4->spawn.yaw);
+    CHECK(j4 && j4->source == spawns::PopSource::Building && j4->spawn.set == 6064630270761777583ll && j4->spawn.instance &&
+              j4->spawn.instance->guid == test_mailbox_instance && near(j4->spawn, -1082235.6, 504068.3, 12534.1) && std::abs(test_mailbox_yaw(j4->spawn.yaw) - 40.6) <= 0.1,
+          "Joeva at level 4: the L4 warehouse's mailbox stands at the set's rotated offset, turned with the plot");
+    const auto h3_list = select_at(*halcyon, 3);
+    const auto h3 = test_mailbox_of(h3_list);
+    if (h3) std::printf("    Halcyon level 3: (%.1f, %.1f, %.1f)\n", h3->spawn.x, h3->spawn.y, h3->spawn.z);
+    CHECK(h3 && h3->source == spawns::PopSource::Building && h3->spawn.set == 6064630270761777481ll && h3->spawn.instance &&
+              h3->spawn.instance->guid == test_mailbox_instance,
+          "Halcyon at level 3: the L3 warehouse's mailbox is placed from the same set as Joeva's");
+    const auto l0_list = select_at(*lionhold, 0);
+    const auto l0 = test_mailbox_of(l0_list);
+    if (l0) std::printf("    Lionhold level 0: (%.1f, %.1f, %.1f)\n", l0->spawn.x, l0->spawn.y, l0->spawn.z);
+    CHECK(l0 && l0->source == spawns::PopSource::Building && l0->spawn.set == 6064630651209383956ll && l0->spawn.instance &&
+              l0->spawn.instance->guid == test_mailbox_instance_2 && near(l0->spawn, -813869.7, 613620.1, 7898.5),
+          "Lionhold at level 0: the station's mailbox stands at its building set's point");
+    const auto s0_list = select_at(*samia, 0);
+    const auto s0 = test_mailbox_of(s0_list);
+    if (s0) std::printf("    Samia's Hope level 0: (%.1f, %.1f, %.1f)\n", s0->spawn.x, s0->spawn.y, s0->spawn.z);
+    CHECK(s0 && s0->source == spawns::PopSource::Building && s0->spawn.set == 6064632496506470401ll && s0->spawn.instance &&
+              s0->spawn.instance->guid == test_mailbox_instance_2 && near(s0->spawn, -737060.0, 636530.0, 8725.0),
+          "Samia's Hope at level 0: the layout's mailbox stands at its building set's point");
+    CHECK(!test_mailbox_of(select_at(*joeva, 5)) && !test_mailbox_of(select_at(*joeva, 6)), "Joeva at levels 5 and 6 stands no warehouse mailbox");
+    CHECK(!test_mailbox_of(select_at(*lionhold, 1)) && !test_mailbox_of(select_at(*samia, 1)), "Lionhold and Samia's Hope at level 1 stand no mailbox");
+    const world::CityNodeInfo* winstead = d.nodes->by_name("Verra_RVR_Winstead");
+    CHECK(winstead && !test_mailbox_of(select_at(*winstead, 0)), "Winstead at level 0 stands no mailbox");
+    const auto j3_again_list = select_at(*joeva, 3);
+    const auto j3_again = test_mailbox_of(j3_again_list);
+    CHECK(j3 && j3_again && j3_again->spawn.set == j3->spawn.set && j3_again->spawn.instance == j3->spawn.instance && j3_again->spawn.seed == j3->spawn.seed &&
+              near(j3_again->spawn, j3->spawn.x, j3->spawn.y, j3->spawn.z),
+          "a second load puts the same mailbox in the same place, from the same set and instance");
+
+    const auto starting = [&](int64_t set_guid, int64_t instance_guid, double x, double y, double z, const char* label) {
+        const std::string who(label);
+        const auto& set = d.population->sets.at(set_guid);
+        const auto& instance = d.population->instances.at(instance_guid);
+        const content::NpcPlacement* place = nullptr;
+        for (const content::NpcPlacement& p : d.population->placements) {
+            if (p.set == set.guid) {
+                place = &p;
+                break;
+            }
+        }
+        CHECK(place != nullptr, (who + ": the starting area's mailbox has an open-world placement").c_str());
+        if (!place) return;
+        spawns::Point point;
+        bool found = false;
+        for (const spawns::Point& p : spawns::placement_points(*place, set)) {
+            if (p.instance == instance_guid) {
+                point = p;
+                found = true;
+                break;
+            }
+        }
+        CHECK(found, (who + ": the mailbox has a member point").c_str());
+        if (!found) return;
+        spawns::PopulationStats stats;
+        spawns::DataSpawn out;
+        const bool made = spawns::spawn_point(*d.population, d.templates(), nullptr, nullptr, set, instance, point, place->spawn, place->min_level, place->max_level, 0, false, stats, out);
+        CHECK(made && out.open && spawns::is_mailbox_path(out.open->archetype_path), (who + ": the mailbox is made from its placement when nothing filters the point").c_str());
+        if (made) CHECK(near(out, x, y, z), (who + ": the mailbox stands at the set's point (which no open-world load reaches)").c_str());
+        const spawns::SpawnFilter open_world(spawns::SpawnContext{}, &d.table);
+        CHECK(open_world.point(*d.population, nullptr, set, instance) == spawns::Why::Gated, (who + ": the set is gated without its building level").c_str());
+    };
+    starting(6064634013820452865ll, test_mailbox_start_instance, -990857.0, -678644.0, 22408.4, "Hammerrest");
+    starting(6064634014087053638ll, test_mailbox_start_instance, -1178489.5, -699524.4, 4358.7, "Bonfire");
+}
+
+static void test_mailbox_fallback(const content::ContentDb& db, const spawns::CapturedData& captured) {
+    std::printf("the mailbox: its definition is the row's, not the instance's\n");
+    test_mailbox_data d;
+    const bool loaded = d.load(db, captured);
+    CHECK(loaded, "the mailbox's data loads");
+    if (!loaded) {
+        if (!d.error.empty()) std::printf("    %s\n", d.error.c_str());
+        return;
+    }
+    const auto row = d.objects->interactables.find(test_mailbox_icd);
+    CHECK(row != d.objects->interactables.end() && row->second.name == "ICD_OpenMailbox" && row->second.pid == test_mailbox_pid,
+          "the data's ICD_OpenMailbox is the fallback component and its interaction definition");
+    const auto a = d.population->instances.find(test_mailbox_instance);
+    const auto b = d.population->instances.find(test_mailbox_instance_2);
+    CHECK(a != d.population->instances.end() && b != d.population->instances.end() && a->second.interact_component == 0 && b->second.interact_component == 0 &&
+              d.asset->interact_component == 0 && d.asset->interaction_def == 0,
+          "the shared mailbox instances and their asset name no interactable definition");
+    const spawns::OpenTemplate* open = d.generic->prop_template(*d.asset);
+    CHECK(open != nullptr, "the mailbox Blueprint is made as a prop");
+    if (!open) return;
+    spawns::DataSpawn s;
+    s.x = -813869.7;
+    s.y = 613620.1;
+    s.z = 7898.5;
+    s.level = 1;
+    s.asset = d.asset;
+    s.instance = &a->second;
+    s.open = open;
+    s.seed = 0x51ed270b7a1c3d4eull;
+    std::string error;
+    auto w = spawns::make_data_actor(s, mint, 60, 0.0, nullptr, error, nullptr);
+    CHECK(w.has_value(), "the mailbox actor is made without the object rows");
+    if (!w) {
+        std::printf("    %s\n", error.c_str());
+        return;
+    }
+    CHECK(w->prop.component_def == test_mailbox_icd && w->prop.interact_def == test_mailbox_pid && test_mailbox_component_def(*w) == test_mailbox_icd &&
+              test_mailbox_interaction_def(*w) == test_mailbox_pid,
+          "the mailbox actor names the row's component and interaction definition");
+}
+
+static void test_mailbox_without_object_data(const content::ContentDb& db, const spawns::CapturedData& captured) {
+    std::printf("the mailbox: the fallback does not depend on the object rows\n");
+    test_mailbox_data d;
+    const bool loaded = d.load(db, captured);
+    CHECK(loaded, "the mailbox's data loads");
+    if (!loaded) {
+        if (!d.error.empty()) std::printf("    %s\n", d.error.c_str());
+        return;
+    }
+    const spawns::OpenTemplate* open = d.generic->prop_template(*d.asset);
+    CHECK(open != nullptr, "the mailbox Blueprint is made as a prop");
+    if (!open) return;
+    const content::NpcInstanceRow& instance = d.population->instances.at(test_mailbox_instance);
+    spawns::DataSpawn s;
+    s.level = 1;
+    s.asset = d.asset;
+    s.instance = &instance;
+    s.open = open;
+    s.seed = 0x51ed270b7a1c3d4full;
+    std::string error;
+    auto without = spawns::make_data_actor(s, mint, 60, 0.0, nullptr, error, nullptr);
+    auto with = spawns::make_data_actor(s, mint, 60, 0.0, nullptr, error, &*d.objects);
+    CHECK(without.has_value() && with.has_value(), "the mailbox actor is made with and without the quest object data");
+    if (!without || !with) return;
+    CHECK(without->prop.component_def == with->prop.component_def && without->prop.interact_def == with->prop.interact_def && without->prop.component_def == test_mailbox_icd &&
+              without->prop.interact_def == test_mailbox_pid && test_mailbox_component_def(*without) == test_mailbox_component_def(*with) &&
+              test_mailbox_interaction_def(*without) == test_mailbox_interaction_def(*with),
+          "both actors name the same mailbox component and interaction definition");
+}
+
+/// The handles a RepLayout block writes, ascending; false when the block does not read to its last bit with `o`'s schema.
+static bool test_mailbox_block_handles(const repl::ObjectState& o, const uint8_t* data, size_t bits, std::vector<uint16_t>& handles) {
+    handles.clear();
+    if (!o.schema) return false;
+    aoc::protocol::wire::PacketReader r(data, (bits + 7) / 8, bits);
+    if (r.read_bit() != 0) return false;   // bDoChecksum: a checksum after every handle
+    uint64_t last = 0;
+    for (;;) {
+        const auto h = r.read_sip();
+        if (!h) return false;
+        if (*h == 0) break;
+        if (*h > o.schema->commands.size() || *h <= last) return false;
+        last = *h;
+        const schema::RepCommand& cmd = o.schema->commands[*h - 1];
+        if (cmd.flags & schema::kRepCustomDelta) return false;
+        if (!repl::read_value(cmd, o.schema->element_commands, r, o.opts)) return false;
+        handles.push_back(static_cast<uint16_t>(*h));
+    }
+    return !r.overflowed() && r.pos() == bits;
+}
+
+/// Writes one object's RepLayout block; false when it does not build.
+static bool test_mailbox_write_block(const repl::ObjectState& o, emit::BunchWriter& out, size_t& bits) {
+    if (!o.schema) return false;
+    repl::RepShadow shadow;
+    bool failed = false;
+    bits = repl::write_rep_block(*o.schema, o.state, shadow, out, o.opts, &failed);
+    return bits != 0 && !failed;
+}
+
+static void test_mailbox_open_properties(const content::ContentDb& db, const spawns::CapturedData& captured) {
+    std::printf("the mailbox: its open carries only the properties its class has\n");
+    test_mailbox_data d;
+    const bool loaded = d.load(db, captured);
+    CHECK(loaded, "the mailbox's data loads");
+    if (!loaded) {
+        if (!d.error.empty()) std::printf("    %s\n", d.error.c_str());
+        return;
+    }
+    const content::NpcInstanceRow& lionhold = d.population->instances.at(test_mailbox_instance_2);
+    CHECK(lionhold.guid == test_mailbox_instance_2, "the Lionhold station's mailbox is the data's shared instance");
+    const spawns::OpenTemplate* open = d.generic->prop_template(*d.asset);
+    CHECK(open != nullptr && spawns::is_mailbox_path(open->archetype_path), "the mailbox Blueprint is made as a prop");
+    if (!open) return;
+    CHECK(d.generic->prop_template(*d.asset) == open, "every mailbox of the Blueprint shares the one template");
+    {
+        emit::BunchWriter out;
+        size_t bits = 0;
+        std::vector<uint16_t> handles;
+        const bool wrote = test_mailbox_write_block(open->actor_block().state, out, bits);
+        CHECK(wrote && test_mailbox_block_handles(open->actor_block().state, out.data(), bits, handles), "the mailbox template's actor block writes and reads back");
+        CHECK(!handles.empty() && handles.back() <= 22, "the mailbox template's actor block writes no property above handle 22");
+    }
+    // the Lionhold station's mailbox, at the place where the player stood beside it
+    spawns::DataSpawn s;
+    s.x = -813869.7;
+    s.y = 613620.1;
+    s.z = 7898.5;
+    s.level = 0;
+    s.asset = d.asset;
+    s.instance = &lionhold;
+    s.open = open;
+    s.seed = 0x51ed270b7a1c3d4eull;
+    std::string error;
+    auto w = spawns::make_data_actor(s, mint, 60, 0.0, nullptr, error, &*d.objects);
+    CHECK(w.has_value(), "the Lionhold station mailbox is made at the place of the run");
+    if (!w) {
+        std::printf("    %s\n", error.c_str());
+        return;
+    }
+    CHECK(std::abs(w->x - s.x) <= 0.1 && std::abs(w->y - s.y) <= 0.1 && std::abs(w->z - s.z) <= 0.1, "the mailbox stands at the place of the run");
+    std::vector<uint16_t> placed;
+    {
+        emit::BunchWriter out;
+        size_t bits = 0;
+        CHECK(test_mailbox_write_block(w->actor.obj, out, bits), "the mailbox actor's block writes");
+        CHECK(test_mailbox_block_handles(w->actor.obj, out.data(), bits, placed), "the mailbox actor's block reads back to its last bit");
+        CHECK(!placed.empty() && placed.back() <= 22, "the mailbox actor's block writes no property above handle 22");
+        size_t pos = 0;
+        const auto read = repl::read_rep_block(*w->actor.obj.schema, out.data(), bits, pos, w->actor.obj.opts);
+        CHECK(read.has_value() && pos == bits, "the mailbox actor's block reads with its schema to its last bit");
+    }
+    const auto word = [&](const char* path) -> uint32_t {
+        if (!w->actor.obj.schema) return 0;
+        const repl::Value* v = w->actor.obj.state.get(*w->actor.obj.schema, path);
+        const auto* n = v ? v->get_if<int64_t>() : nullptr;
+        return n ? static_cast<uint32_t>(*n) : 0;
+    };
+    const repl::GuidValue base{word("InteractableBaseGuid.A"), word("InteractableBaseGuid.B"), word("InteractableBaseGuid.C"), word("InteractableBaseGuid.D")};
+    CHECK(base != repl::GuidValue{}, "the mailbox keeps the four guid words its class reads");
+    const repl::Subobject* inter = nullptr;
+    for (const repl::Subobject& sub : w->actor.subobjects) {
+        if (sub.obj.schema && std::string(sub.obj.schema->name) == "UInteractableComponent") {
+            inter = &sub;
+            break;
+        }
+    }
+    CHECK(inter != nullptr, "the mailbox keeps its InteractableComponent block");
+    if (inter) {
+        CHECK(inter->name == "Interactable", "the mailbox's component is the Interactable subobject its Blueprint builds");
+        CHECK(inter->checksum == 2170799233u, "the mailbox's component is the client's UInteractableComponent class");
+        emit::BunchWriter out;
+        size_t bits = 0;
+        CHECK(test_mailbox_write_block(inter->obj, out, bits), "the mailbox's component block writes");
+        size_t pos = 0;
+        const auto read = repl::read_rep_block(*inter->obj.schema, out.data(), bits, pos, inter->obj.opts);
+        CHECK(read.has_value() && pos == bits, "the mailbox's component block reads with UInteractableComponent to its last bit");
+    }
+    CHECK(test_mailbox_component_def(*w) == test_mailbox_icd && test_mailbox_interaction_def(*w) == test_mailbox_pid,
+          "the mailbox's component carries ICD_OpenMailbox and its interaction");
+    // the donor's own open: a quest object keeps the recorded state-machine actor's blocks
+    const spawns::OpenTemplate* donor = nullptr;
+    for (const spawns::OpenTemplate& t : captured.opens()) {
+        if (t.category != "prop" || t.blocks.size() != 2) continue;
+        if (!donor || spawns::blueprint_leaf(t.archetype_path).rfind("SQ_0091_", 0) == 0) donor = &t;
+    }
+    CHECK(donor != nullptr, "the captured quest object that donates the blocks exists");
+    if (donor) {
+        CHECK(donor->blocks.size() == 2 && donor->blocks[1].name == "InteractableComponent", "a quest object's component keeps the recorded name");
+        content::NpcAssetRow quest = *d.asset;
+        quest.guid += 1;
+        quest.archetype_path = donor->archetype_path;
+        const spawns::OpenTemplate* q = d.generic->prop_template(quest);
+        CHECK(q != nullptr, "a quest object is still made as a prop");
+        if (q) {
+            CHECK(q->actor_block().state.state == donor->actor_block().state.state, "a quest object's actor block is the donor's, block for block");
+            CHECK(q->blocks[1].name == donor->blocks[1].name && q->blocks[1].checksum == donor->blocks[1].checksum,
+                  "a quest object's component block keeps the donor's name and class");
+            emit::BunchWriter out;
+            size_t bits = 0;
+            std::vector<uint16_t> handles;
+            const bool wrote = test_mailbox_write_block(q->actor_block().state, out, bits);
+            CHECK(wrote && test_mailbox_block_handles(q->actor_block().state, out.data(), bits, handles), "the quest object's actor block writes and reads back");
+            CHECK(!handles.empty() && handles.back() > 22, "a quest object's actor block still carries the state machine's own properties");
+        }
+    }
+    // a station's open is the captured station's, its component's name and class included
+    const spawns::OpenTemplate* station = nullptr;
+    for (const spawns::OpenTemplate& t : captured.opens()) {
+        if (t.category == "station" && t.blocks.size() == 4) {
+            station = &t;
+            break;
+        }
+    }
+    CHECK(station != nullptr && station->blocks[1].name == "InteractableComponent", "a station's component keeps the recorded name");
+    if (station) {
+        content::NpcAssetRow station_asset = *d.asset;
+        station_asset.guid += 2;
+        station_asset.archetype_path = station->archetype_path;
+        const spawns::OpenTemplate* made_station = d.generic->station_template(station_asset);
+        CHECK(made_station != nullptr && made_station->blocks[1].name == station->blocks[1].name && made_station->blocks[1].checksum == station->blocks[1].checksum,
+              "a station's component block keeps the recorded name and class");
+    }
+    // the same mailbox made again (the next login, or after a restart): the same block, bit for bit
+    test_mailbox_data again;
+    CHECK(again.load(db, captured), "the mailbox's data loads a second time");
+    if (again.ok) {
+        spawns::DataSpawn s2 = s;
+        s2.asset = again.asset;
+        s2.instance = &again.population->instances.at(test_mailbox_instance_2);
+        s2.open = again.generic->prop_template(*again.asset);
+        auto w2 = spawns::make_data_actor(s2, mint, 60, 0.0, nullptr, error, &*again.objects);
+        CHECK(w2.has_value(), "the same mailbox is made again");
+        if (w2) {
+            emit::BunchWriter first;
+            emit::BunchWriter second;
+            size_t first_bits = 0, second_bits = 0;
+            const bool both = test_mailbox_write_block(w->actor.obj, first, first_bits) && test_mailbox_write_block(w2->actor.obj, second, second_bits);
+            CHECK(both && first_bits == second_bits && std::equal(first.data(), first.data() + (first_bits + 7) / 8, second.data()),
+                  "a second login writes the same mailbox block, bit for bit");
+            const repl::Subobject* again_inter = nullptr;
+            for (const repl::Subobject& sub : w2->actor.subobjects) {
+                if (sub.obj.schema && std::string(sub.obj.schema->name) == "UInteractableComponent") {
+                    again_inter = &sub;
+                    break;
+                }
+            }
+            CHECK(again_inter != nullptr && inter != nullptr && again_inter->name == inter->name && again_inter->checksum == inter->checksum,
+                  "a second login names the mailbox's component subobject the same way");
+        }
+    }
+}
+
+static void test_mailbox_allowlist(const content::ContentDb& db, const spawns::CapturedData& captured) {
+    std::printf("the mailbox: it is the one package the allowlist takes by its path\n");
+    test_mailbox_data d;
+    const bool loaded = d.load(db, captured);
+    CHECK(loaded, "the mailbox's data loads");
+    if (!loaded) {
+        if (!d.error.empty()) std::printf("    %s\n", d.error.c_str());
+        return;
+    }
+    CHECK(spawns::is_mailbox_path(d.asset->archetype_path), "the warehouse mailbox's package is the mailbox path");
+    CHECK(!spawns::is_mailbox_path("/Game/DesignAssets/Node/ServiceBuildings/Default/Warehouse/KAE/Mailbox_L2.Default__Mailbox_L2_C"),
+          "a sibling warehouse package is not the mailbox path");
+    spawns::GenericNpcs none(captured, &d.table, spawns::GenericConfig{});
+    CHECK(none.prop_template(*d.asset) == nullptr, "with no quest prop named the mailbox is not made");
+    CHECK(d.generic->prop_template(*d.asset) != nullptr, "with the quest props loaded the mailbox is made");
+    content::NpcAssetRow sibling = *d.asset;
+    sibling.guid += 1;
+    sibling.archetype_path = "/Game/DesignAssets/Node/ServiceBuildings/Default/Warehouse/KAE/Mailbox_L2.Default__Mailbox_L2_C";
+    CHECK(d.generic->prop_template(sibling) == nullptr, "the sibling package is no quest object the mailbox path admits");
+}
+
+static void test_quest_props_unchanged(const content::ContentDb& db, const spawns::CapturedData& captured) {
+    std::printf("the quest props: the mailbox does not change them\n");
+    test_mailbox_data d;
+    const bool loaded = d.load(db, captured);
+    CHECK(loaded, "the mailbox's data loads");
+    if (!loaded) {
+        if (!d.error.empty()) std::printf("    %s\n", d.error.c_str());
+        return;
+    }
+    CHECK(!d.props.empty() && d.props.count(test_mailbox_icd) == 0, "the quests' prop set is not empty and does not take the mailbox");
+    content::NpcAssetRow quest;
+    quest.guid = 9000002;
+    quest.archetype_path = "/Game/DesignAssets/Interactables/Quest/CSQ_MailboxGuard.CSQ_MailboxGuard_C";
+    spawns::GenericNpcs none(captured, &d.table, spawns::GenericConfig{});
+    CHECK(none.prop_template(quest) != nullptr, "a quest object outside the mailbox is still made with no quest prop component named");
+}
 
 static void test_load_area(const content::ContentDb& db, const spawns::CapturedData& captured) {
     std::printf("load_area: the registry\n");
@@ -1191,6 +1724,12 @@ int main() {
     test_instances(*captured);
     test_names_and_references(*captured);
     test_population(*db, *captured);
+    test_mailbox_spawns(*db, *captured);
+    test_mailbox_fallback(*db, *captured);
+    test_mailbox_without_object_data(*db, *captured);
+    test_mailbox_open_properties(*db, *captured);
+    test_mailbox_allowlist(*db, *captured);
+    test_quest_props_unchanged(*db, *captured);
     test_load_area(*db, *captured);
     test_interaction_state(*db, *captured);
     test_gm_vendors(*db);

@@ -431,13 +431,22 @@ struct PartyWorld {
     size_t pending() const {
         size_t n = 0;
         for (const Player& pl : p) {
-            if (pl.s) n += pl.s->join_pending() + pl.s->replies_pending();
+            if (pl.s) n += pl.s->join_pending() + pl.s->replies_pending() + pl.s->mail_pending();
         }
         return n;
     }
-    /// Steps until nothing is pending and a step brings nothing new.
+    size_t mail_pending() const {
+        size_t n = 0;
+        for (const Player& pl : p) {
+            if (pl.s) n += pl.s->mail_pending();
+        }
+        return n;
+    }
+    /// Steps until nothing is pending and a step brings nothing new.  A mail job runs on the world's worker thread, and the fake
+    /// clock never lets that thread run, so while a mail job is pending each step first waits 1 ms of real time.
     void settle() {
         for (int quiet = 0, i = 0; quiet < 3 && i < 400; ++i) {
+            if (mail_pending() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
             const size_t before = total_got();
             step();
             quiet = total_got() == before && pending() == 0 ? quiet + 1 : 0;

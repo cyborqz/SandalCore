@@ -96,6 +96,39 @@ public:
         (void)guild;
         return svc::CallStatus::Unavailable;
     }
+    /// Mail: the character's live mails with their items and status, newest first (the character service's order).  Blocks; the caller may be
+    /// the network thread, as with create_guild_now.  A sink that cannot ask answers Failed.
+    virtual svc::MailsResult load_mails(const std::string& character_id) {
+        (void)character_id;
+        return {};
+    }
+    /// Mail: writes one mail whole (its content, status and each item's claimed flag).  Blocks; the caller may be the network thread.
+    /// A sink that cannot ask answers Failed.
+    virtual svc::MailSaveResult save_mail(const std::string& character_id, const svc::Mail& mail) {
+        (void)character_id;
+        (void)mail;
+        return {};
+    }
+    /// Mail: the admin send; the store gives the mail its id, issue time and each attachment its instance guid and creation time.  Blocks.
+    /// A sink that cannot ask answers Failed.
+    virtual svc::MailResult create_mail(const std::string& character_id, const svc::NewMail& mail) {
+        (void)character_id;
+        (void)mail;
+        return {};
+    }
+    /// The claim's bag save: it answers before the mail is marked claimed, so a claim knows the bags are stored.  Blocks; a sink that cannot
+    /// save answers Unavailable, and the claim keeps the bag change and leaves the mail unclaimed.
+    virtual svc::CallStatus save_inventory_now(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
+                                               std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                               std::vector<svc::WarehouseItem> warehouse) {
+        (void)character_id;
+        (void)items;
+        (void)wallet;
+        (void)jobs;
+        (void)known_recipes;
+        (void)warehouse;
+        return svc::CallStatus::Unavailable;
+    }
     /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
     /// keeps nothing (a test's) answers false.
     virtual bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
@@ -170,6 +203,14 @@ public:
     svc::CharacterResult character_by_id(const std::string& id) override;
     /// Social, step 7: queues the two lists as a progress hand-over that carries them and nothing else.
     void save_friend_lists(const std::string& character_id, std::vector<svc::Friend> friends, std::vector<svc::FriendRequest> requests) override;
+    /// Mail: the three blocking forwards to the character service (see PositionSink).
+    svc::MailsResult load_mails(const std::string& character_id) override;
+    svc::MailSaveResult save_mail(const std::string& character_id, const svc::Mail& mail) override;
+    svc::MailResult create_mail(const std::string& character_id, const svc::NewMail& mail) override;
+    /// Mail: the claim's blocking bag save (see PositionSink); it waits for a same-character inventory write in flight and drops a queued older bag.
+    svc::CallStatus save_inventory_now(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
+                                       std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                       std::vector<svc::WarehouseItem> warehouse) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);
@@ -220,6 +261,7 @@ private:
     bool   in_flight_ = false;
     std::string in_flight_character_;      // the entry the worker is writing (its progress is what a by-id read waits for)
     bool   in_flight_progress_ = false;
+    bool   in_flight_inventory_ = false;
     bool   stop_ = false;
     bool   abandon_ = false;
     size_t saved_ = 0, inventories_saved_ = 0, progress_saved_ = 0, failed_ = 0, dropped_ = 0, replaced_ = 0;

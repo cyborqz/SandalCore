@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace grpc { class Server; }
 
@@ -35,9 +36,16 @@ namespace aoc { namespace worldd { namespace svc {
 /// Work for the network thread.  Any thread may run() a task and wait for it; the network thread calls drain().
 class AdminQueue {
 public:
+    class Call;
+    using CallRef = std::shared_ptr<Call>;
+
     /// Puts `task` on the queue and waits until the network thread has run it.  False, with the task NOT run and never to be run, when the queue is closed or the network thread
     /// did not start it within `timeout`.  A task the network thread has started is waited for, however long it takes.
     bool run(std::function<void()> task, std::chrono::milliseconds timeout);
+
+    /// A task that may answer on a later tick: it returns true when it wrote its answer at once, false when it handed the answer to a mail job and will call
+    /// `call->answer(...)` (on the network thread) when the job lands.  The caller waits until then, unless close() releases it first.
+    bool run_later(std::function<bool(CallRef)> task, std::chrono::milliseconds timeout);
 
     /// Network thread: runs the tasks waiting, at most `max` of them; returns how many it ran.  A throwing task is logged and counts as run.
     size_t drain(size_t max = 32);
@@ -51,15 +59,25 @@ public:
     uint64_t ran() const { return ran_.load(); }
     uint64_t abandoned() const { return abandoned_.load(); }
 
-private:
-    struct Call {
-        std::function<void()>   task;
-        std::mutex              mu;
-        std::condition_variable cv;
-        bool                    started = false, done = false, cancelled = false;
+    /// A later task's answer: runs `write` and releases the caller, unless the queue was closed first (then nothing is written).  Once.
+    class Call {
+    public:
+        void answer(const std::function<void()>& write);
+        bool cancelled() const;
+    private:
+        friend class AdminQueue;
+        mutable std::mutex                 mu;
+        std::condition_variable            cv;
+        bool                               started = false, done = false, cancelled_ = false;
+        std::function<void()>              task;
+        std::function<bool(CallRef)>       later;
     };
+
+private:
+    bool wait_started(const CallRef& call, std::chrono::milliseconds timeout);
     mutable std::mutex                 mu_;
     std::deque<std::shared_ptr<Call>>  queue_;
+    std::vector<std::shared_ptr<Call>> later_;   // started later calls, until they answer (pruned by drain)
     bool                               closed_ = false;
     std::atomic<uint64_t>              ran_{0}, abandoned_{0};
 };

@@ -96,6 +96,19 @@
 //      The item structs of plan B2 live in item_codec.h (layouts, exe addresses, bounds); read_struct and
 //      write_struct reach them by name.
 //
+//  FMailHeader, FMailPersistenceData, FCurrencyContainer (lane 13: mail)
+//      The three mail structs a generated call names, registered by name: FMailHeader (the list row's
+//      mail: the guid, the sender and the subject, a localized subject, the attachment flag, the status,
+//      the expiration time and the issue time), FMailPersistenceData (the detail: three guids, the subject, a type
+//      byte, the batch, the created and expiration times, the node, the sender, an FMailMessage, the
+//      FMailItems, an FCurrencyContainer, whether the currency was claimed and the status) and
+//      FCurrencyContainer (a TMap of a currency's record guid and record type id to its amount).
+//      FMailMessage and FMailItem are plain members of the persistence data, not registered names.
+//      mail_codec.h has the layouts and the widths.  A localized message with an argument list is
+//      refused (callout_codec.h), and 1,024 items and 256 currency entries are our bounds.  Registering
+//      FCurrencyContainer also makes the marketplace and trade calls that name it readable; those
+//      calls' handlers are other pieces.
+//
 //  FPlayerMovementInput (plan E1)
 //      ABaseCharacter's CurrentMovementInput: four bits, the character's move input direction as ServerMovePacked
 //      carries it (x > 0, x < 0, y > 0, y < 0; move_packed.h).  The struct is AoC's own NetSerialize; its four bits end

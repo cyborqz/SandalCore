@@ -743,6 +743,8 @@ static void test_guild_permission_order() {
           "the three masks come back as they were");
 }
 
+#include "test_repl_mail_codecs.inc"
+
 int main() {
     test_quat();
     test_guid_to_bool();
@@ -753,6 +755,7 @@ int main() {
     test_appearance_id();
     test_customization();
     test_ability_payloads();
+    test_mail_codecs();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

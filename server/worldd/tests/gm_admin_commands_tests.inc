@@ -42,6 +42,18 @@ static AdminRun admin_run(Admin& a, const std::string& command, const std::map<s
     return {s, std::move(rs)};
 }
 
+/// A RunCommand whose answer may land on a later tick (the online send-mail): the harness ticks while the call waits.
+static AdminRun admin_run_ticking(Admin& a, const std::string& command, const std::map<std::string, std::string>& fields) {
+    grpc::ClientContext ctx;
+    Admin::authorize(ctx, kToken);
+    adminv1::RunCommandRequest rq;
+    rq.set_command(command);
+    for (const auto& [name, value] : fields) (*rq.mutable_fields())[name] = value;
+    adminv1::RunCommandResponse rs;
+    const grpc::Status s = a.via_net_thread([&] { return a.stub->RunCommand(&ctx, rq, &rs); }, /*tick=*/true);
+    return {s, std::move(rs)};
+}
+
 static std::vector<adminv1::AdminCommand> admin_command_list(Admin& a) {
     grpc::ClientContext ctx;
     Admin::authorize(ctx, kToken);
@@ -577,3 +589,444 @@ static void test_gm_admin_logging() {
     spdlog::set_default_logger(previous);
 }
 AOC_REGISTER_TEST(test_gm_admin_logging);
+
+// ---- the admin mail step -----------------------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+/// The character service's mails in memory: the store behind both of the command's ways.  `made` keeps every create it was asked for, with the character it named.
+struct AdminMailSink : PositionSink {
+    void save(const std::string&, const svc::Position&) override {}
+    svc::MailsResult load_mails(const std::string& character_id) override {
+        svc::MailsResult r;
+        r.status = svc::CallStatus::Ok;
+        const auto it = mails.find(character_id);
+        if (it != mails.end()) r.mails = it->second;
+        return r;
+    }
+    svc::MailResult create_mail(const std::string& character_id, const svc::NewMail& mail) override {
+        ++creates;
+        made.emplace_back(character_id, mail);
+        svc::MailResult r;
+        if (refuse != svc::CallStatus::Ok) {
+            r.status = refuse;
+            r.reason = refuse_reason;
+            return r;
+        }
+        svc::Mail stored;
+        char id[33];
+        std::snprintf(id, sizeof id, "%08x%08x%08x%08x", 0xB0000000u + next_id, 0x1000u, 0x2000u, next_id);
+        ++next_id;
+        stored.id = id;
+        stored.sender = mail.sender;
+        stored.subject = mail.subject;
+        stored.body = mail.body;
+        stored.expires_at_ms = mail.expires_in_ms;
+        stored.items = mail.items;
+        for (size_t i = 0; i < stored.items.size(); ++i) {   // what the real store gives every new attachment
+            stored.items[i].item.instance_guid = guid_n(900 + static_cast<uint32_t>(i));
+            stored.items[i].item.created_at_ms = 1'771'299'474'000ll + static_cast<int64_t>(i);
+        }
+        mails[character_id].insert(mails[character_id].begin(), stored);
+        r.status = svc::CallStatus::Ok;
+        r.mail = std::move(stored);
+        return r;
+    }
+    svc::CharacterResult character_by_name(const std::string& name) override {
+        ++lookups;
+        svc::CharacterResult r;
+        const auto it = characters.find(name);
+        if (it == characters.end()) {
+            r.status = svc::CallStatus::NotFound;
+            return r;
+        }
+        r.status = svc::CallStatus::Ok;
+        r.character = it->second;
+        return r;
+    }
+
+    std::map<std::string, std::vector<svc::Mail>>     mails;
+    std::map<std::string, svc::Character>             characters;
+    std::vector<std::pair<std::string, svc::NewMail>> made;
+    size_t                                            creates = 0, lookups = 0;
+    svc::CallStatus                                   refuse = svc::CallStatus::Ok;
+    std::string                                       refuse_reason;
+    uint32_t                                          next_id = 1;
+};
+
+/// The character record the character service hands back for a name no session in this world has.
+static svc::Character offline_hero() {
+    svc::Character c;
+    c.id = "cccccccccccccccccccccccccccccccc";
+    c.name = "offline_hero";
+    return c;
+}
+
+}  // namespace
+
+static void test_gm_admin_send_mail_is_listed() {
+    std::printf("send-mail: the listed command, its fields and the missing money field\n");
+    Harness h(cyb_on_the_ground(), on_the_ground);
+    h.play();
+    Admin a(h);
+    const std::vector<adminv1::AdminCommand> commands = admin_command_list(a);
+    const adminv1::AdminCommand* found = admin_command_named(commands, "send-mail");
+    CHECK(found != nullptr, "send-mail is in the command list");
+    if (!found) return;
+    CHECK(found->group() == "social", "send-mail's group is social");
+    CHECK(!found->description().empty() && found->description().back() == '.', "send-mail has a one-sentence description");
+    CHECK(!found->acts_on_character(), "send-mail does not act on a character in the world only");
+    CHECK(found->fields_size() == 6, "send-mail has six fields");
+    if (found->fields_size() != 6) return;
+    struct Want {
+        const char*               name;
+        adminv1::CommandFieldType type;
+        const char*               label;
+        bool                      required;
+    };
+    const Want want[] = {
+        {"character", adminv1::COMMAND_FIELD_TYPE_TEXT, "Character", true},
+        {"sender", adminv1::COMMAND_FIELD_TYPE_TEXT, "Sender", true},
+        {"subject", adminv1::COMMAND_FIELD_TYPE_TEXT, "Title", true},
+        {"body", adminv1::COMMAND_FIELD_TYPE_TEXT, "Body", true},
+        {"item", adminv1::COMMAND_FIELD_TYPE_ITEM, "Item", false},
+        {"count", adminv1::COMMAND_FIELD_TYPE_WHOLE_NUMBER, "Count", false},
+    };
+    bool named = true, labels = true, hints = true;
+    for (int i = 0; i < 6; ++i) {
+        const adminv1::CommandField& f = found->fields(i);
+        named = named && f.name() == want[i].name && f.type() == want[i].type;
+        labels = labels && f.label() == want[i].label;
+        hints = hints && !f.hint().empty();
+    }
+    CHECK(named, "the six fields in order, with their types: the character and the texts as free text, the item and the count as their kinds");
+    CHECK(labels, "the labels are Character, Sender, Title, Body, Item and Count");
+    CHECK(hints, "every field of send-mail has a hint");
+    CHECK(found->fields(0).required() && found->fields(1).required() && found->fields(2).required() && found->fields(3).required() && !found->fields(4).required() &&
+              !found->fields(5).required(),
+          "the character, the sender, the title and the body are required; the item and the count are optional");
+    const adminv1::CommandField* count = admin_field_named(*found, "count");
+    CHECK(count && count->has_minimum() && count->minimum() == 1 && count->has_maximum() && count->maximum() == 100000, "the count is 1 to 100,000");
+    const adminv1::CommandField* character = admin_field_named(*found, "character");
+    CHECK(character && character->type() == adminv1::COMMAND_FIELD_TYPE_TEXT, "the character field is free text, so a character who is not in the world is reachable");
+    CHECK(admin_field_named(*found, "copper") == nullptr, "send-mail has no copper field (it sends no money)");
+    bool copper = false;
+    for (const adminv1::CommandField& f : found->fields()) copper = copper || f.name().find("copper") != std::string::npos;
+    CHECK(!copper, "no field of send-mail names copper");
+    GmTravel travel = make_travel(h);
+    const GmRunResult money =
+        travel.run_command("send-mail", {{"character", "cyb"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body"}, {"copper", "5"}}, "the test");
+    CHECK(money.status == GmStatus::InvalidArgument && money.message == "the command send-mail has no field \"copper\"",
+          "a copper field is refused as a field the command does not have");
+}
+AOC_REGISTER_TEST(test_gm_admin_send_mail_is_listed);
+
+static void test_gm_admin_send_mail_online() {
+    std::printf("send-mail online: the session's list, its unread count and the admin API\n");
+    AdminMailSink sink;
+    Harness h(cyb_on_the_ground(), [&](PlayerWorld& w) {
+        on_the_ground(w);
+        w.set_position_sink(&sink);
+    });
+    h.play();
+    GmTravel travel = make_travel(h);
+    const std::map<std::string, std::string> fields = {{"character", "cyb"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"},
+                                                       {"body", "Fake body for the mail test"}, {"item", "Gear_Weapon_Sword_2H_Starter"}, {"count", "3"}};
+    GmRunResult sent = travel.run_command("send-mail", fields, "the test");
+    CHECK(sent.pending, "the create goes to the world's worker");
+    h.settle();
+    CHECK(travel.take_run(sent.ticket, sent), "the answer lands with the job");
+    CHECK(sent.status == GmStatus::Ok && sent.character == "cyb", "send-mail to a character in the world is done");
+    if (sent.status != GmStatus::Ok) return;
+    CHECK(sink.creates == 1 && sink.made.size() == 1 && sink.made.front().first == kCyb, "the store was asked once, for the character's own id");
+    if (sink.made.size() != 1) return;
+    const svc::NewMail& mail = sink.made.front().second;
+    CHECK(mail.sender == "Fake Sender" && mail.subject == "Fake Subject" && mail.body == "Fake body for the mail test" && mail.expires_in_ms == 0,
+          "the store got the three texts and no expiry");
+    CHECK(mail.items.size() == 3, "three sword attachments");
+    if (mail.items.size() == 3) {
+        bool stacks = true;
+        for (const svc::MailItem& item : mail.items) {
+            stacks = stacks && item.item.item_record_id == fi::kSword2H && item.item.quantity == 1 && !item.claimed && item.item.instance_guid.empty() &&
+                     item.item.created_at_ms == 0;
+        }
+        CHECK(stacks, "each one is an unclaimed stack of the record, with no instance guid or creation time (the store gives them)");
+    }
+    CHECK(h.s->mails().size() == 1, "the new mail is in the session's list");
+    CHECK(h.s->unread_mail_count() == 1, "the unread count rose by one");
+    const auto mine = sink.mails.find(kCyb);
+    CHECK(mine != sink.mails.end() && mine->second.size() == 1 && mine->second.front().id.size() == 32, "(the store holds the mail under the character's id)");
+    if (mine == sink.mails.end() || mine->second.empty()) return;
+    if (!h.s->mails().empty()) CHECK(h.s->mails().front().id == mine->second.front().id, "the session's list holds the store's mail");
+    const std::string first_id = mine->second.front().id;
+    CHECK(sent.message.find(first_id) != std::string::npos && sent.message.find("1 unread") != std::string::npos,
+          "the answer names the new mail's id and the unread count");
+    CHECK(one_line(sent.message), "... in one line");
+    // the same send twice: two mails, each answer with its own id
+    GmRunResult twice = travel.run_command("send-mail", fields, "the test");
+    CHECK(twice.pending, "the second create goes to the worker");
+    h.settle();
+    CHECK(travel.take_run(twice.ticket, twice) && twice.status == GmStatus::Ok && sink.creates == 2, "the same send run twice sends twice");
+    if (twice.status == GmStatus::Ok && mine->second.size() >= 2) {
+        CHECK(h.s->mails().size() == 2 && h.s->unread_mail_count() == 2, "the session's list holds two mails and two unread");
+        CHECK(mine->second.front().id != first_id && twice.message.find(mine->second.front().id) != std::string::npos, "each answer names its own mail's id");
+    }
+    // the same command over the real admin API (the answer waits for the mail job's tick)
+    Admin a(h);
+    const AdminRun api = admin_run_ticking(a, "send-mail", fields);
+    CHECK(api.status.ok() && api.response.character() == "cyb", "RunCommand sends the mail and names the character");
+    CHECK(api.status.ok() && one_line(api.response.result()) && api.response.result().find("3 unread") != std::string::npos,
+          "... with the one-line answer and the unread count");
+}
+AOC_REGISTER_TEST(test_gm_admin_send_mail_online);
+
+static void test_gm_admin_send_mail_offline() {
+    std::printf("send-mail offline: the store's lookup, its create and the answer\n");
+    AdminMailSink sink;
+    sink.characters["offline_hero"] = offline_hero();
+    Harness h(cyb_on_the_ground(), [&](PlayerWorld& w) {
+        on_the_ground(w);
+        w.set_position_sink(&sink);
+    });
+    h.play();
+    GmTravel travel = make_travel(h);
+    const GmRunResult sent = travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"},
+                                                              {"body", "Fake offline body"}, {"item", "Test_Potion"}, {"count", "7"}}, "the test");
+    CHECK(sent.status == GmStatus::Ok && sent.character == "offline_hero", "a character who is not in the world is found by name and mailed");
+    if (sent.status != GmStatus::Ok) return;
+    CHECK(sink.lookups == 1 && sink.creates == 1, "the store's name lookup and its create were each asked once");
+    CHECK(sink.made.size() == 1 && sink.made.front().first == sink.characters["offline_hero"].id, "the store got the mail for the looked-up character's id");
+    if (sink.made.size() != 1) return;
+    const svc::NewMail& mail = sink.made.front().second;
+    CHECK(mail.sender == "Fake Sender" && mail.subject == "Fake Subject" && mail.body == "Fake offline body" && mail.expires_in_ms == 0,
+          "with the three texts and no expiry");
+    CHECK(mail.items.size() == 1 && mail.items.front().item.item_record_id == fi::kPotion && mail.items.front().item.quantity == 7 && !mail.items.front().claimed,
+          "and one unclaimed stack of seven potions");
+    const svc::MailsResult loaded = sink.load_mails(sink.characters["offline_hero"].id);
+    CHECK(loaded.status == svc::CallStatus::Ok && loaded.mails.size() == 1, "the store holds the mail a login would read");
+    if (loaded.mails.empty()) return;
+    const svc::Mail& stored = loaded.mails.front();
+    CHECK(stored.id.size() == 32 && stored.sender == "Fake Sender" && stored.subject == "Fake Subject" && stored.body == "Fake offline body" && stored.items.size() == 1,
+          "with its id, the three texts and its item");
+    CHECK(sent.message.find(stored.id) != std::string::npos && sent.message.find("it waits for the character's next login") != std::string::npos,
+          "the answer names the store's id and says the mail waits for the next login");
+    CHECK(one_line(sent.message), "... in one line");
+    // the same command over the real admin API
+    Admin a(h);
+    const AdminRun api = admin_run(a, "send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject 2"},
+                                                    {"body", "Fake offline body 2"}, {"item", "Test_Potion"}, {"count", "1"}});
+    CHECK(api.status.ok() && api.response.character() == "offline_hero" && one_line(api.response.result()),
+          "RunCommand finds a character who is not in the world and answers one line");
+}
+AOC_REGISTER_TEST(test_gm_admin_send_mail_offline);
+
+static void test_gm_admin_send_mail_item_stacks() {
+    std::printf("send-mail's item: the record's own stacks, its quality and durability, and the 20-stack cap\n");
+    AdminMailSink sink;
+    sink.characters["offline_hero"] = offline_hero();
+    Harness h(cyb_on_the_ground(), [&](PlayerWorld& w) {
+        on_the_ground(w);
+        w.set_position_sink(&sink);
+    });
+    h.play();
+    GmTravel travel = make_travel(h);
+    const auto run = [&](const std::string& item, const std::string& count) {
+        return travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body"},
+                                                {"item", item}, {"count", count}}, "the test");
+    };
+    const GmRunResult potions = run("Test_Potion", "21");
+    CHECK(potions.status == GmStatus::Ok && sink.made.size() == 1, "21 potions are sent");
+    if (sink.made.size() == 1) {
+        const std::vector<svc::MailItem>& items = sink.made.front().second.items;
+        CHECK(items.size() == 2, "they are two attachments (the record stacks to 20)");
+        if (items.size() == 2) {
+            CHECK(items[0].item.quantity == 20 && items[1].item.quantity == 1, "the first stack holds 20 and the last the remainder");
+            bool same = true;
+            for (const svc::MailItem& item : items) {
+                same = same && item.item.item_record_id == fi::kPotion && !item.claimed && item.item.instance_guid.empty() && item.item.created_at_ms == 0 &&
+                       item.item.quality == 1 && item.item.durability == 0;
+            }
+            CHECK(same, "each is the record's default quality (1), with no instance guid or creation time and no durability to wear");
+        }
+    }
+    // the chest: its fixture record's durability is 11, so each attachment carries the record's full durability at its quality
+    std::string error;
+    const std::optional<content::ItemRecord> chest = h.fx.content->item(fi::kChest, error);
+    CHECK(chest.has_value(), "(the fixture has the chest's record)");
+    CHECK(chest && chest->max_durability_at(chest->default_quality) == 11, "(the chest's maximum durability at its default quality is the fixture's 11)");
+    const GmRunResult coats = run("Gear_Armor_Light_Starter_Chest", "2");
+    CHECK(coats.status == GmStatus::Ok && sink.made.size() == 2, "two chests are sent");
+    if (sink.made.size() == 2) {
+        const std::vector<svc::MailItem>& items = sink.made[1].second.items;
+        CHECK(items.size() == 2, "the chest stacks to one: two attachments");
+        bool full = items.size() == 2;
+        for (const svc::MailItem& item : items) full = full && item.item.item_record_id == fi::kChest && item.item.quality == 1 && item.item.durability == 11 && !item.claimed;
+        CHECK(full, "each carries the record's full durability at its default quality (11)");
+    }
+    // the cap itself: 20 one-item stacks are allowed
+    const GmRunResult twenty = run("Gear_Weapon_Sword_2H_Starter", "20");
+    CHECK(twenty.status == GmStatus::Ok && sink.made.size() == 3, "20 sword stacks are allowed (the cap itself)");
+    if (sink.made.size() == 3) {
+        const std::vector<svc::MailItem>& items = sink.made[2].second.items;
+        CHECK(items.size() == 20, "twenty attachments");
+        if (items.size() == 20) {
+            bool one = true;
+            for (const svc::MailItem& item : items) one = one && item.item.item_record_id == fi::kSword2H && item.item.quantity == 1;
+            CHECK(one, "each is one sword (the record stacks to one)");
+        }
+    }
+}
+AOC_REGISTER_TEST(test_gm_admin_send_mail_item_stacks);
+
+static void test_gm_admin_send_mail_refusals() {
+    std::printf("send-mail's refusals: the stacks, the character, the items, the count and the store\n");
+    AdminMailSink sink;
+    sink.characters["offline_hero"] = offline_hero();
+    Harness h(cyb_on_the_ground(), [&](PlayerWorld& w) {
+        on_the_ground(w);
+        w.set_position_sink(&sink);
+    });
+    h.play();
+    GmTravel travel = make_travel(h);
+    const auto run = [&](const std::string& character, const std::string& sender, const std::string& subject, const std::string& body, const std::string& item,
+                         const std::string& count) {
+        std::map<std::string, std::string> fields = {{"character", character}, {"sender", sender}, {"subject", subject}, {"body", body}};
+        if (!item.empty()) fields["item"] = item;
+        if (!count.empty()) fields["count"] = count;
+        return travel.run_command("send-mail", fields, "the test");
+    };
+    const auto normal = [&](const std::string& item, const std::string& count) {
+        return run("offline_hero", "Fake Sender", "Fake Subject", "Fake body", item, count);
+    };
+    // more than 20 stacks: refused before the store is asked
+    const size_t before = sink.creates;
+    const GmRunResult over = normal("Gear_Weapon_Sword_2H_Starter", "21");
+    CHECK(over.status == GmStatus::InvalidArgument && over.message == "a mail holds at most 20 stacks: the count needs 21 stacks (the item stacks to 1)" &&
+              sink.creates == before,
+          "more than 20 stacks is refused before the store call");
+    // no such character
+    const GmRunResult nobody = run("nobody_offline", "Fake Sender", "Fake Subject", "Fake body", "Test_Potion", "1");
+    CHECK(nobody.status == GmStatus::NotFound && nobody.message == "no character is named \"nobody_offline\"" && sink.creates == before,
+          "no character of that name is NotFound, and nothing is created");
+    // an unknown item, by name and by Guid
+    const GmRunResult no_name = normal("No_Such_Item", "1");
+    CHECK(no_name.status == GmStatus::NotFound &&
+              no_name.message == "no item is named \"No_Such_Item\" (the name is the record's, such as Consumable_Food_Regen_Rations_T1, or its Guid)" && sink.creates == before,
+          "an item name no record has is NotFound");
+    const GmRunResult no_guid = normal("999999999999", "1");
+    CHECK(no_guid.status == GmStatus::NotFound && no_guid.message == "the data holds no item 999999999999" && sink.creates == before,
+          "an item Guid the data does not hold is NotFound");
+    // the item edge cases: record 0, a number too long for 64 bits and a name with spaces around it
+    const GmRunResult zero = normal("0", "1");
+    CHECK(zero.status == GmStatus::NotFound && zero.message == "the data holds no item 0" && sink.creates == before, "the item record 0 is no item");
+    const GmRunResult long_number = normal("99999999999999999999", "1");
+    CHECK(long_number.status == GmStatus::NotFound && long_number.message.find("no item is named \"99999999999999999999\"") != std::string::npos && sink.creates == before,
+          "a number too long for 64 bits is no item name");
+    const GmRunResult spaces = normal(" Test_Potion ", "1");
+    CHECK(spaces.status == GmStatus::NotFound && spaces.message.find("no item is named \" Test_Potion \"") != std::string::npos && sink.creates == before,
+          "spaces around an item name are not trimmed: no item has that name");
+    // the count
+    const GmRunResult zero_count = normal("Test_Potion", "0");
+    CHECK(zero_count.status == GmStatus::InvalidArgument && zero_count.message == "\"Count\" must be 1 to 100000 (it is 0)" && sink.creates == before,
+          "a count of 0 is refused by the count's range");
+    const GmRunResult negative_count = normal("Test_Potion", "-3");
+    CHECK(negative_count.status == GmStatus::InvalidArgument && negative_count.message == "\"Count\" must be 1 to 100000 (it is -3)" && sink.creates == before,
+          "a count below 1 is refused by the count's range");
+    const GmRunResult huge_count = normal("Test_Potion", "100001");
+    CHECK(huge_count.status == GmStatus::InvalidArgument && huge_count.message == "\"Count\" must be 1 to 100000 (it is 100001)" && sink.creates == before,
+          "a count above 100,000 is refused by the count's range");
+    const GmRunResult word_count = normal("Test_Potion", "many");
+    CHECK(word_count.status == GmStatus::InvalidArgument && word_count.message == "\"Count\" must be a whole number (it is \"many\")" && sink.creates == before,
+          "a count that is not a whole number is refused");
+    const GmRunResult count_no_item = run("offline_hero", "Fake Sender", "Fake Subject", "Fake body", "", "5");
+    CHECK(count_no_item.status == GmStatus::InvalidArgument && count_no_item.message == "a count needs an item" && sink.creates == before, "a count with no item needs an item");
+    // the reply's text fields: the store's limits are in the hints, and the field rule refuses over 256 characters
+    const GmRunResult long_sender = run("offline_hero", std::string(257, 's'), "Fake Subject", "Fake body", "", "");
+    CHECK(long_sender.status == GmStatus::InvalidArgument && long_sender.message == "\"Sender\" is longer than 256 characters" && sink.creates == before,
+          "a sender over 256 characters is refused");
+    const GmRunResult long_body = run("offline_hero", "Fake Sender", "Fake Subject", std::string(4097, 'b'), "", "");
+    CHECK(long_body.status == GmStatus::InvalidArgument && long_body.message == "\"Body\" is longer than 256 characters" && sink.creates == before,
+          "a body over 256 characters is refused, though the store would take 4,096");
+    const GmRunResult long_character = run(std::string(257, 'c'), "Fake Sender", "Fake Subject", "Fake body", "", "");
+    CHECK(long_character.status == GmStatus::InvalidArgument && long_character.message == "\"Character\" is longer than 256 characters" && sink.creates == before,
+          "a character name over 256 characters is refused (the field is free text)");
+    // the store's own refusal, offline then online
+    sink.refuse = svc::CallStatus::Refused;
+    sink.refuse_reason = "the mailbox is full (200 live mails)";
+    const GmRunResult refused_offline = normal("Test_Potion", "1");
+    CHECK(refused_offline.status == GmStatus::FailedPrecondition && refused_offline.message == "the mailbox is full (200 live mails)" && sink.creates == before + 1,
+          "a store refusal reaches the answer word for word (the offline way)");
+    CHECK(sink.mails.empty(), "... and the store keeps no mail");
+    GmRunResult refused_online = run("cyb", "Fake Sender", "Fake Subject", "Fake body", "Test_Potion", "1");
+    if (refused_online.pending) {
+        h.settle();
+        CHECK(travel.take_run(refused_online.ticket, refused_online), "the online refusal lands with the job");
+    }
+    CHECK(refused_online.status == GmStatus::FailedPrecondition && refused_online.message == "the mailbox is full (200 live mails)" && h.s->mails().empty(),
+          "a store refusal reaches the answer word for word on the online way too");
+    sink.refuse = svc::CallStatus::NotFound;
+    sink.refuse_reason = "no such character in the store";
+    const GmRunResult missing = normal("Test_Potion", "1");
+    CHECK(missing.status == GmStatus::NotFound && missing.message == "no such character in the store", "a NotFound from the store is NotFound, with the store's reason");
+    sink.refuse = svc::CallStatus::Failed;
+    sink.refuse_reason.clear();
+    const GmRunResult failed = normal("Test_Potion", "1");
+    CHECK(failed.status == GmStatus::FailedPrecondition && failed.message == "the character service refused the mail: failed",
+          "a store answer with no reason gets a plain sentence, with the status");
+    sink.refuse = svc::CallStatus::Ok;
+    // a world with no character service
+    h.fx.world->set_position_sink(nullptr);
+    const size_t before_none = sink.creates;
+    const GmRunResult no_service = normal("Test_Potion", "1");
+    CHECK(no_service.status == GmStatus::FailedPrecondition &&
+              no_service.message == "this world has no character service: a character who is not in the world cannot be mailed" && sink.creates == before_none,
+          "a world with no character service refuses the offline send and creates nothing");
+}
+AOC_REGISTER_TEST(test_gm_admin_send_mail_refusals);
+
+static void test_gm_admin_send_mail_online_and_offline_agree() {
+    std::printf("send-mail: the same fields sent online and offline make the same mail\n");
+    AdminMailSink sink;
+    sink.characters["offline_hero"] = offline_hero();
+    Harness h(cyb_on_the_ground(), [&](PlayerWorld& w) {
+        on_the_ground(w);
+        w.set_position_sink(&sink);
+    });
+    h.play();
+    GmTravel travel = make_travel(h);
+    // The online send creates on the world's mail worker: it is landed (and its answer taken) before the next send, so the worker
+    // and this thread never write the sink at the same time.
+    const auto send = [&](const std::string& character, const std::string& item, const std::string& count) {
+        GmRunResult r = travel.run_command("send-mail", {{"character", character}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body for the agreement"},
+                                                         {"item", item}, {"count", count}}, "the test");
+        if (r.pending) {
+            h.settle();
+            CHECK(travel.take_run(r.ticket, r), "the online send lands with its job");
+        }
+        return r;
+    };
+    const GmRunResult online = send("cyb", "Test_Potion", "21");
+    const GmRunResult offline = send("offline_hero", "Test_Potion", "21");
+    CHECK(online.status == GmStatus::Ok && offline.status == GmStatus::Ok, "the same fields are sent to the online and the offline character");
+    if (online.status != GmStatus::Ok || offline.status != GmStatus::Ok) return;
+    CHECK(sink.made.size() == 2, "the store was asked for two mails");
+    if (sink.made.size() != 2) return;
+    CHECK(sink.made[0].second == sink.made[1].second, "the online and the offline way build the same mail: the texts, the expiry and both stacks");
+    CHECK(sink.made[0].second.items.size() == 2 && sink.made[0].second.items[0].item.quantity == 20 && sink.made[0].second.items[1].item.quantity == 1,
+          "(21 potions are two stacks, 20 and 1)");
+    // the chest's durability at its quality is the same on both ways, and it is the fixture's 11
+    const GmRunResult online_chest = send("cyb", "Gear_Armor_Light_Starter_Chest", "2");
+    const GmRunResult offline_chest = send("offline_hero", "Gear_Armor_Light_Starter_Chest", "2");
+    CHECK(online_chest.status == GmStatus::Ok && offline_chest.status == GmStatus::Ok && sink.made.size() == 4, "the chest is sent both ways");
+    if (sink.made.size() != 4) return;
+    CHECK(sink.made[2].second == sink.made[3].second, "the chest's mail is the same both ways (its durability included)");
+    CHECK(sink.made[2].second.items.size() == 2, "(two chests are two attachments)");
+    if (sink.made[2].second.items.size() == 2) {
+        bool full = true;
+        for (const svc::MailItem& item : sink.made[2].second.items) full = full && item.item.durability == 11 && item.item.quality == 1;
+        CHECK(full, "each chest carries the record's full durability at its default quality (11 on both ways)");
+    }
+    // A send left pending would be answered by the session's destructor into `travel`, which is destroyed first.
+    CHECK(h.s->mail_pending() == 0, "no mail job is left pending when the test ends");
+}
+AOC_REGISTER_TEST(test_gm_admin_send_mail_online_and_offline_agree);

@@ -310,11 +310,14 @@ struct Harness {
     void run(milliseconds total) {
         for (milliseconds done{0}; done < total; done += milliseconds(20)) step();
     }
+    /// A mail job runs on the world's worker thread, and the fake clock never lets that thread run, so while a mail job is pending
+    /// each step first waits 1 ms of real time.
     void settle() {
         for (int quiet = 0, i = 0; quiet < 5 && i < 600; ++i) {
+            if (s->mail_pending() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
             const size_t before = got.size();
             step();
-            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0) ? quiet + 1 : 0;
+            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0 && s->mail_pending() == 0) ? quiet + 1 : 0;
         }
     }
     void play();
@@ -1618,8 +1621,10 @@ struct Admin {
     std::unique_ptr<adminv1::WorldAdminService::Stub> stub;
     std::thread::id net_thread = std::this_thread::get_id();
     std::atomic<bool> directory_off_thread{false};
+    Harness* harness = nullptr;
 
     explicit Admin(Harness& h, std::chrono::milliseconds timeout = std::chrono::milliseconds(4000)) {
+        harness = &h;
         travel = std::make_unique<GmTravel>(
             *h.fx.world,
             [this, &h] {
@@ -1641,8 +1646,9 @@ struct Admin {
     }
 
     /// Runs `call` on another thread (a gRPC client's) and drains the queue on this one (the network thread) until it returns.
+    /// `tick`: a call whose answer lands on a later tick (the online send-mail) needs the session's ticks here too.
     template <class F>
-    grpc::Status via_net_thread(F&& call) {
+    grpc::Status via_net_thread(F&& call, bool tick = false) {
         std::atomic<bool> done{false};
         grpc::Status status;
         std::thread t([&] {
@@ -1650,6 +1656,7 @@ struct Admin {
             done = true;
         });
         while (!done) {
+            if (tick && harness) harness->step();
             queue->drain();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

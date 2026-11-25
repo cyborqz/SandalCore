@@ -10,6 +10,7 @@
 #include "quest/quest_book.h"
 #include "session/admin_commands.h"
 #include "session/leveling.h"
+#include "session/player_session_util.h"
 #include "spawns/mount_spawn.h"
 #include "world/world_clock.h"
 
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -784,9 +786,100 @@ std::string num_text(double v) {
     return buf;
 }
 
+/// The item a mail names: its record's name (case does not count) or its Guid in digits.  `record` is set when the world's content.db has it; false, with the
+/// answer's status and text, when there is no such item or a name needs a content.db the world does not have.
+bool admin_mail_item(PlayerWorld& world, const std::string& item, int64_t* guid, content::ItemRecord* record, bool* have_record, GmStatus* status, std::string* why) {
+    *guid = 0;
+    *have_record = false;
+    const content::ContentDb* db = world.content();
+    const bool digits = !item.empty() && std::all_of(item.begin(), item.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    bool numeric = false;
+    if (digits && item.size() <= 19) {
+        errno = 0;
+        char* end = nullptr;
+        const long long value = std::strtoll(item.c_str(), &end, 10);
+        if (errno != ERANGE && end && *end == '\0') {
+            *guid = static_cast<int64_t>(value);
+            numeric = true;
+        }
+    }
+    if (!numeric) {
+        if (!db) {
+            *status = GmStatus::FailedPrecondition;
+            *why = "worldd has no content.db to look the item up in";
+            return false;
+        }
+        std::string error;
+        const std::vector<int64_t> found = db->items_named(item, error);
+        if (!error.empty()) {
+            *status = GmStatus::FailedPrecondition;
+            *why = error;
+            return false;
+        }
+        if (found.empty()) {
+            *status = GmStatus::NotFound;
+            *why = "no item is named \"" + item + "\" (the name is the record's, such as Consumable_Food_Regen_Rations_T1, or its Guid)";
+            return false;
+        }
+        if (found.size() > 1) {
+            *status = GmStatus::InvalidArgument;
+            *why = "\"" + item + "\" names " + std::to_string(found.size()) + " items: give the Guid of one of them (first: " + std::to_string(found.front()) + ")";
+            return false;
+        }
+        *guid = found.front();
+    }
+    if (*guid <= 0) {
+        *status = GmStatus::NotFound;
+        *why = "the data holds no item " + std::to_string(*guid);
+        return false;
+    }
+    if (!db) return true;   // a Guid in digits without a content.db: the stacks are one item each, as the session's own no-content path makes them
+    std::string error;
+    const std::optional<content::ItemRecord> found = db->item(*guid, error);
+    if (!error.empty()) {
+        *status = GmStatus::FailedPrecondition;
+        *why = error;
+        return false;
+    }
+    if (!found) {
+        *status = GmStatus::NotFound;
+        *why = "the data holds no item " + std::to_string(*guid);
+        return false;
+    }
+    *record = *found;
+    *have_record = true;
+    return true;
+}
+
+/// One item's attachments: `count` split into stacks of the record's own size (1 when the world has no content.db), at most 20.  Each stack is unclaimed, with the
+/// record's default quality and durability; the store gives it its instance guid and creation time.
+bool admin_mail_stacks(int64_t guid, const content::ItemRecord* record, int32_t count, std::vector<svc::MailItem>* items, std::string* why) {
+    const int32_t stack = record && record->max_stack_size > 0 ? record->max_stack_size : 1;
+    const int64_t stacks = (static_cast<int64_t>(count) + stack - 1) / stack;
+    if (stacks > 20) {
+        *why = "a mail holds at most 20 stacks: the count needs " + std::to_string(stacks) + " stacks (the item stacks to " + std::to_string(stack) + ")";
+        return false;
+    }
+    if (record) {
+        std::vector<svc::InventoryItem> split;
+        session_util::stacks_of(guid, count, *record, split, 0);
+        for (svc::InventoryItem& item : split) items->push_back(svc::MailItem{std::move(item), false});
+        return true;
+    }
+    for (int32_t left = count; left > 0; --left) {   // no content.db: one item each
+        svc::InventoryItem item;
+        item.container = svc::ItemContainer::Backpack;
+        item.item_record_id = guid;
+        item.quantity = 1;
+        item.quality = 1;
+        items->push_back(svc::MailItem{std::move(item), false});
+    }
+    return true;
+}
+
 }  // namespace
 
-GmRunResult GmTravel::run_command(const std::string& command, const std::map<std::string, std::string>& fields, const std::string& by) {
+GmRunResult GmTravel::run_command(const std::string& command, const std::map<std::string, std::string>& fields, const std::string& by, GmRunDone when_done) {
     using admin::FieldValue;
     GmRunResult out;
     out.command = command;
@@ -972,6 +1065,81 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
         const PlayerSession::GmGuildResult r = handle.player->gm_guild(*handle.connection, action, guild_name, rank, now_(), by);
         if (!r.ok) return failed(GmStatus::InvalidArgument, r.refusal);
         out.message = r.text;
+    } else if (def->name == "send-mail") {
+        // A test's mails come from an admin step, not the client.  This is the one command that reaches a character who is not in the
+        // world: a test's mail waits in the store for the character's next login.  A character in the world gets it through its session (the window and the count change now).
+        const std::string who = text("character");
+        out.character = who;   // (the log names the typed target; a successful lookup replaces it with the store's spelling)
+        const std::string sender = text("sender");
+        const std::string subject = text("subject");
+        const std::string body = text("body");
+        const std::string item_text = text("item");
+        int64_t count = 0;   // 0 with no item, the session's own rule
+        int64_t item_record = 0;
+        content::ItemRecord record;
+        bool have_record = false;
+        std::vector<svc::MailItem> stacks;
+        if (!item_text.empty()) {
+            count = whole("count", 1);
+            if (count < 1) return failed(GmStatus::InvalidArgument, "the count must be 1 or more");
+            GmStatus why_status = GmStatus::Ok;
+            std::string why;
+            if (!admin_mail_item(world_, item_text, &item_record, &record, &have_record, &why_status, &why)) return failed(why_status, why);
+            if (!admin_mail_stacks(item_record, have_record ? &record : nullptr, static_cast<int32_t>(count), &stacks, &why)) return failed(GmStatus::InvalidArgument, why);
+        } else if (value("count") != nullptr) {
+            return failed(GmStatus::InvalidArgument, "a count needs an item");
+        }
+        if (const PlayerHandle handle = find_player(who)) {
+            out.character = handle.player->name();
+            const std::string character = out.character;
+            const PlayerSession::GmMailResult r = handle.player->gm_send_mail(
+                *handle.connection, sender, subject, body, item_record, static_cast<int32_t>(count), by,
+                [this, character, when_done](uint64_t ticket, const PlayerSession::GmMailResult& made) {
+                    GmRunResult done;
+                    done.command = "send-mail";
+                    done.character = character;
+                    if (!made.ok) {
+                        done.status = GmStatus::FailedPrecondition;
+                        done.message = made.refusal.empty() ? std::string("the mail was not sent") : made.refusal;
+                    } else {
+                        done.status = GmStatus::Ok;
+                        done.message = character + ": mail " + made.mail_id + " sent; " + std::to_string(made.unread) + " unread";
+                    }
+                    spdlog::info("[admin] run send-mail: character=\"{}\" -> {}", log_text(character), log_text(done.message));
+                    if (when_done) when_done(done);
+                    else pending_runs_[ticket] = done;
+                });
+            if (!r.ok && !r.pending) return failed(GmStatus::FailedPrecondition, r.refusal.empty() ? std::string("the mail was not sent") : r.refusal);
+            if (r.pending) {
+                // The create runs on the world's mail worker (a slow store must not hold the tick); the answer is filled when it lands.
+                out.pending = true;
+                out.ticket = r.ticket;
+                return out;
+            }
+            out.message = out.character + ": mail " + r.mail_id + " sent; " + std::to_string(r.unread) + " unread";
+        } else {
+            PositionSink* sink = world_.position_sink();
+            if (!sink) return failed(GmStatus::FailedPrecondition, "this world has no character service: a character who is not in the world cannot be mailed");
+            const svc::CharacterResult found = sink->character_by_name(who);
+            if (found.status == svc::CallStatus::NotFound) return failed(GmStatus::NotFound, "no character is named \"" + who + "\"");
+            if (found.status != svc::CallStatus::Ok) {
+                return failed(GmStatus::FailedPrecondition, "the character service could not look up \"" + who + "\": " + svc::call_status_name(found.status));
+            }
+            if (found.character.id.empty()) return failed(GmStatus::NotFound, "no character is named \"" + who + "\"");
+            out.character = found.character.name;
+            svc::NewMail mail;
+            mail.sender = sender;
+            mail.subject = subject;
+            mail.body = body;
+            mail.items = std::move(stacks);
+            const svc::MailResult r = sink->create_mail(found.character.id, mail);
+            if (r.status != svc::CallStatus::Ok) {
+                const bool missing = r.status == svc::CallStatus::NotFound;
+                return failed(missing ? GmStatus::NotFound : GmStatus::FailedPrecondition,
+                              r.reason.empty() ? "the character service refused the mail: " + std::string(svc::call_status_name(r.status)) : r.reason);
+            }
+            out.message = out.character + ": mail " + r.mail.id + " is in the store; it waits for the character's next login";
+        }
     } else if (def->name == "give-experience") {
         const PlayerSession::GmXpResult r = handle.player->gm_give_experience(*handle.connection, whole("amount"), now_(), by);
         if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
@@ -1057,6 +1225,14 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
 
     spdlog::info("[admin] run {} by {}: character=\"{}\" fields={} -> {}", log_text(def->name), log_text(by), log_text(out.character), fields_for_log(fields), log_text(out.message));
     return out;
+}
+
+bool GmTravel::take_run(uint64_t ticket, GmRunResult& out) {
+    const auto it = pending_runs_.find(ticket);
+    if (it == pending_runs_.end()) return false;
+    out = std::move(it->second);
+    pending_runs_.erase(it);
+    return true;
 }
 
 size_t GmTravel::teleport_characters(const std::string& names, double x, double y, double z_named, const std::string& by, Clock::time_point now) {
