@@ -178,7 +178,7 @@ const Known kKnown[] = {
     {"Rogue_Stab", 428, "CD:cooldown 5.0", R_CHARGES},
     {"Rogue_Stab", 428, "EFF:missing Rogue_Advantage", R_REACT},
     {"Rogue_Stab", 428, "EFF:missing Rogue_Trounce", R_REACT},
-    {"Rogue_Throw", 431, "CONF:missing Rogue_Throw", R_AREA},
+    {"Rogue_Throw", 431, "CONF:fewer Rogue_Throw 1/2", R_ALLY},
     {"Rogue_Throw", 431, "CONF:extra Rogue_Throw_First", R_CONFX},
     {"Rogue_Thump", 432, "CONF:extra Rogue_Thump_Dazed", R_CONFX},
     {"Rogue_Thrash", 433, "EFF:missing Rogue_Thrash_Combo", R_REACT},

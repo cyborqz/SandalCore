@@ -1397,14 +1397,29 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 		}
 		return f.hostCall(e, aocexpr.HostCooldownLeft, strconv.FormatInt(args[0].ref.Guid, 10), tNum)
 	case "GetHitTriggerCount", "GetAbilityHitCount":
-		if err := check(tObj, tRef); err != nil {
-			return val{}, err
-		}
 		fn := aocexpr.HostHitTriggerCount
 		if e.Name == "GetAbilityHitCount" {
 			fn = aocexpr.HostAbilityHitCount
 		}
-		return f.hostCall(e, fn, strconv.FormatInt(args[1].ref.Guid, 10), tNum, val{t: tNum, n: nConst{float64(args[0].role)}})
+		// GetAbilityHitCount(<hit>) asks how often the hit landed in the whole cast (its one argument is the hit); the
+		// two-argument form names the actor whose count it asks for. The whole cast is RoleCount: one past every role of a hit (0 to 6, the
+		// effect's instigator 8), so no actor of a hit can be it, and the one-argument form's argument is a reference, never an object.
+		var role int
+		var hitRef int64
+		if e.Name == "GetAbilityHitCount" && len(e.Args) == 1 {
+			if err := check(tRef); err != nil {
+				return val{}, err
+			}
+			hitRef = args[0].ref.Guid
+			role = aocexpr.RoleCount
+		} else {
+			if err := check(tObj, tRef); err != nil {
+				return val{}, err
+			}
+			hitRef = args[1].ref.Guid
+			role = args[0].role
+		}
+		return f.hostCall(e, fn, strconv.FormatInt(hitRef, 10), tNum, val{t: tNum, n: nConst{float64(role)}})
 	case "CalculateDamage", "CalculateDamageMultiplier", "CalculateDamageAdditiveMultiplier", "CalculateDamageMitigation", "CalculateDamageCritical",
 		"CalculateDamagePenetration", "CalculateDamageDampening":
 		if err := check(); err != nil {

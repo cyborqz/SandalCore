@@ -29,26 +29,26 @@ flowchart LR
     classDef todo fill:#6e7781,stroke:#57606a,color:#ffffff
 ```
 
-| Stage | | Phase | What it brings |
+| Stage | | Phase | What is left |
 |---|:-:|---|---|
-| 🔌 **Getting in** | ✅ | **1 · Network protocol** | How the client and the server talk: the handshake, packet framing and replication |
-| | ✅ | **2 · Login** | The launcher, accounts, character creation and character select |
-| | ✅ | **3 · Into the world** | Entering the world as your character, with your progress kept across logins |
-| 🧙 **Your character** | ✅ | **4 · Stats** | The game's own stat formulas, updated as your gear changes |
-| | ✅ | **5 · Mounts** | Ground, flying and swimming mounts, sprinting and roads |
-| | 🛠️ | **6 · Progression and items** | XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. *Still to come: splitting and joining stacks, food and potions.* |
-| | 🛠️ | **7 · Combat and abilities** | Most classes' abilities, weapon combos and finishers, buffs, death and respawn. *Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.* |
-| 🌍 **The world** | 🛠️ | **8 · Gathering and professions** | Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations. *Still to come: sport fishing and the rest of the 22 professions.* |
-| | 🛠️ | **9 · Living world** | Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. *Still to come: the other mob families, flying mobs, and day and night spawns.* |
-| | 🛠️ | **10 · City nodes** | Node levels and XP, and the five towns with their people, buildings and crafting stations. *Still to come: citizenship, mayors, taxes and vassal nodes, and the node's service buildings and their upgrades.* |
-| | 🛠️ | **11 · Quests** | NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. *Still to come: more quests, group quests and events, and the towns' commission boards.* |
-| 🤝 **Playing together** | 🛠️ | **12 · Economy** | Gold, silver, copper and Glint, the NPC vendors, crates and storage. *Still to come: node currencies and more crates, the marketplace's buy orders, and the node's own storage.* |
-| | 🛠️ | **13 · Social** | Players within 150 m of each other see each other as their characters, standing, walking, stopping and riding their mounts, with their gear, weapons in hand, level, live Health and Mana and corruption, their death and their combat stance (the draw, the fight, the PvP key and the name colour of their flag) kept current; a Cleric's Resurrection revives a dead player in place; a player's heals, buffs, cleanses and Resurrection reach other players, harmful abilities between players follow the PvP rules (the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level and place; a party can become a raid of 2 to 40 players in up to 10 squads of 8. *Still to come: suppression areas, guards and pets, guild and node wars, other players' abilities shown to the players who see them, guilds, chat and mail, player trading and the marketplace, guild storage, guild levels and perks, and the guild board and calendar.* |
-| ⚔️ **Wars and world events** | ⬜ | **14 · Node sieges** | Node sieges and territory wars: the siege teams and their invites, the siege weapons, and the war's phases |
-| | ⬜ | **15 · Caravans** | Caravans and trade routes: buying one, loading its cargo, and raiding it on the road |
-| | ⬜ | **16 · World events** | Corruption events and other world events, with their stages, goals and rewards |
+| 🔌 **Getting in** | ✅ | **1 · Network protocol** | Fully implemented |
+| | ✅ | **2 · Login** | Fully implemented |
+| | ✅ | **3 · Into the world** | Fully implemented |
+| 🧙 **Your character** | ✅ | **4 · Stats** | Fully implemented |
+| | ✅ | **5 · Mounts** | Fully implemented |
+| | 🛠️ | **6 · Progression and items** | Food and drinks, potions and salves, buffs that stay through a logout, weapon experience from quests and gathering, and bigger stacks in the material bags |
+| | 🛠️ | **7 · Combat and abilities** | Fall damage, the Caltrops' effect, the Frostbolt's second bolt, the Hex's shorter time and the Rogue's bomb ending after it explodes, mobs attacking slower when Weakened or Dazed, the Summoner pets' knockbacks, and the Embersprings' map markers and siege, war and corruption respawns |
+| 🌍 **The world** | 🛠️ | **8 · Gathering and professions** | Sport fishing, freeholds, the Journeyman and higher stations in the towns (they need the node's service buildings), and the full recipe chains of Alchemy, Arcane Engineering, Armor Smithing, Carpentry, Jewelry, Leatherworking, Lumber Milling, Metalworking, Scribe, Stonemasonry, Tanning and Weaving (their stations already work) |
+| | 🛠️ | **9 · Living world** | Pack aggro, mob damage checked against the game, flying mobs and the mob moves still held back (summons, blinks, changes of form, heals), the bandit archers and healers and the cultists, the flame shamans' fleeing, the arsonists' spray, stream and ring of fire, mobs that come and go at dawn and dusk and with the seasons, wild mobs that change with the node's level, lava, weather, treasure hunts and camp props |
+| | 🛠️ | **10 · City nodes** | Citizenship, elections and mayors, setting node taxes, vassal nodes in play, the node's service buildings and their upgrades, building the sites below Village, the Wilderness camp, cutting trees inside the towns, and the towns' doors and stairs |
+| | 🛠️ | **11 · Quests** | The quest givers that quests and events bring, quests that start from an item, hand-ins by tag or rarity, the speech bubbles over NPCs who have an objective for you, the Harbinger quests, the Destiny window, group quests and events, the commission boards and the mayor's commissions, and NPC voices |
+| 🤝 **Playing together** | 🛠️ | **12 · Economy** | Player trading, the marketplace and its buy orders, earning node currency, crates on the ground for others and sold to vendors, more storage room, and currency from coffers |
+| | 🛠️ | **13 · Social** | Guild levels and perks, guild storage, the guild board and calendar, the patron guild hall, loot rules for parties and raids, raid summons, raid and squad chat, ignoring a guild, guild and node wars, suppression areas, guards and pets in PvP, other players' abilities shown to the players who see them, and friends' last-online time and guild |
+| ⚔️ **Wars and world events** | ⬜ | **14 · Node sieges** | All of it: the siege teams and their invites, the siege weapons, and the war's phases |
+| | ⬜ | **15 · Caravans** | All of it: buying a caravan, loading its cargo, and raiding it on the road |
+| | ⬜ | **16 · World events** | All of it: corruption events and other world events, with their stages, goals and rewards |
 
-✅ Done · 🛠️ In progress · ⬜ Planned. Each phase in detail, and what is left, is in [ROADMAP.md](docs/ROADMAP.md).
+✅ Done · 🛠️ In progress · ⬜ Planned. What each phase already brings, in detail, is in [ROADMAP.md](docs/ROADMAP.md).
 
 📋 **Everything that works today**, area by area, is in [docs/WHAT_WORKS.md](docs/WHAT_WORKS.md).
 

@@ -538,3 +538,23 @@ func TestSprintAndTheRetailBard(t *testing.T) {
 		}
 	}
 }
+
+// the Rogue's Throw's damage formula (ab_expr 1079) is the only expression that used the one-argument
+// GetAbilityHitCount, and it compiles now. Its id does not move: the MaxHitsGlobally expressions are added after every other table.
+func TestTheThrowsDamageFormulaCompiles(t *testing.T) {
+	sq := openContent(t)
+	var id, program int64
+	var errText, terms string
+	if err := sq.QueryRow(`SELECT id, program, error, terms FROM ab_expr WHERE terms LIKE '%GetAbilityHitCount(%'`).Scan(&id, &program, &errText, &terms); err != nil {
+		t.Fatal(err)
+	}
+	if id != 1079 {
+		t.Errorf("the Throw's damage expression is %d, want 1079", id)
+	}
+	if !strings.Contains(terms, "6064632706140474182") {
+		t.Errorf("ab_expr %d does not read the bounce hit: %s", id, terms)
+	}
+	if program < 0 || errText != "" {
+		t.Errorf("ab_expr %d does not compile: program %d, %q", id, program, errText)
+	}
+}

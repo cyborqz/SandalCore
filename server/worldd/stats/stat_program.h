@@ -219,6 +219,7 @@ constexpr int kRoleCasterOwner = 4;
 constexpr int kRoleTargetOwner = 5;
 constexpr int kRoleClosestInHit = 6;
 constexpr int kRoleEffectInstigator = 8;   // GetEffectInstigator() (a reaction's expression); the VM reads it as the caster until the host supplies it
+constexpr int kRoleWholeCast = kMaxRoles;   // GetAbilityHitCount(): the role the compiled form names for the whole cast, one past every real role (0 to 8)
 
 // Stat flags.
 constexpr uint8_t kStatMulMods = 1 << 0;

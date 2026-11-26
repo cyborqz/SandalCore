@@ -523,7 +523,7 @@ flight::Flight make_flight(const combat::Fighter& caster, const content::Project
 constexpr BounceRule kBounces[] = {
     {"Bard_Misc_Discordance_Bounce1", 1000.0, 2, true},
     {"Bard_Misc_Discordance_Bounce2", 1000.0, 2, true},
-    {"Rogue_Throw_Bounce", 1000.0, 2, false},
+    {"Rogue_Throw_Bounce", 1000.0, 2, false, true},
 };
 
 // Casts that shoot again and again (see LoopedCast). The Ranger's Salvo [R: the two recorded casts; the montage's sections]: the ability item came 83 ms after the trigger and the first shot's
@@ -794,7 +794,7 @@ private:
 // progress (songs are stage 2) or of a hit event (the defaults).
 class AbilityPipeline::Host final : public combat::ContextHost {
 public:
-    explicit Host(AbilityPipeline& p) : p_(p), rc_(p.active_reaction_) {}
+    explicit Host(AbilityPipeline& p, const Cast* cast = nullptr) : p_(p), rc_(p.active_reaction_), cast_(cast) {}
     double effect_count_by_instigator(const stats::RecordRef& r) override { return p_.stacks_of(r.guid); }
     double rand_double() override { return p_.rng_.rand_double(); }
     double ability_progress(const std::string& group) override { return p_.progress_of(group); }
@@ -804,7 +804,7 @@ public:
 protected:
     // the named host functions (statprog's Host... constants) the hit in progress does not answer (combat/hit_context.h does the damage functions, the
     // roles' distance and identity and the hit's own tags and flags): the cast's own state; with only the caster in its world every target is the caster
-    double other_fn(int fn, const std::string& name, const double* args, int) override {
+    double other_fn(int fn, const std::string& name, const double* args, int argc) override {
         switch (fn) {
             case stats::kHostRemainingCharges: return p_.remaining_charges(std::strtoll(name.c_str(), nullptr, 10));
             case stats::kHostApplicableTarget: {
@@ -823,6 +823,12 @@ protected:
             case stats::kHostStatDelta: return p_.stat_delta_over_time(std::strtoll(name.c_str(), nullptr, 10), args[0]);
             case stats::kHostNow: return p_.clock_;
             case stats::kHostHitTriggerCount: return p_.hit_trigger_count(std::strtoll(name.c_str(), nullptr, 10));
+            case stats::kHostAbilityHitCount: {
+                // GetAbilityHitCount: the whole cast counts the hits its records have landed so far (the hit being resolved is not among them); every other role is none
+                if (argc < 1 || static_cast<int>(args[0]) != stats::kRoleWholeCast || !cast_) return 0.0;
+                const auto it = cast_->hit_counts.find(std::strtoll(name.c_str(), nullptr, 10));
+                return it == cast_->hit_counts.end() ? 0.0 : static_cast<double>(it->second);
+            }
             case stats::kHostProgressDuration: return name == "DefaultGroup" ? kCastSeconds : 0.0;
             case stats::kHostRandIntRange: {
                 const double lo = std::floor(args[0]), hi = std::floor(args[1]);
@@ -861,6 +867,7 @@ protected:
 private:
     AbilityPipeline&       p_;
     const ReactionContext* rc_ = nullptr;
+    const Cast*            cast_ = nullptr;   // the cast whose hits the expressions count (a reaction's expression has none)
 };
 // -- C-Y-B & C-O-A --
 
@@ -1776,7 +1783,7 @@ std::optional<combat::TargetInfo> AbilityPipeline::target_info(uint64_t actor) {
 }
 
 void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                           const AbilityDef* ability, bool* landed, uint64_t* first_landed, uint64_t* first_reached, bool* ran) {
+                                           const AbilityDef* ability, bool* landed, uint64_t* first_landed, uint64_t* first_reached, bool* ran, Cast* cast) {
     if (landed) *landed = false;
     if (first_landed) *first_landed = 0;
     if (first_reached) *first_reached = 0;
@@ -1830,7 +1837,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         ask.target_effects = &held;
         ask.instigator_actor = combat_->self().id();
         ask.target_actor = id;
-        Host ask_host(*this);
+        Host ask_host(*this, cast);
         ask_host.set_context(&ask);
         double v = 0;
         evaluation_->set_consumed(consumed_);
@@ -1861,7 +1868,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             closest_cm = ti->surface_distance_cm;
         }
     }
-    // the hit reached a live target when one is in reach, whether or not its damage can be worked out (the Throw's cannot): that is what fires a bounce. An enemy an earlier hit killed is no target
+    // the hit reached a live target when one is in reach, whether or not its damage can be worked out (a hit whose formula does not compile reached one but ran on none): that is what fires a bounce. An enemy an earlier hit killed is no target
     if (landed) *landed = closest != 0;
     if (first_reached) *first_reached = closest;
     std::vector<bootstrap::HitTargetOut> outs;
@@ -1884,7 +1891,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             // that helps allies and heals does anything; a damage hit on a friendly mount reaches nobody.
             const std::optional<MountTarget> mount = mount_target_ ? mount_target_(id) : std::nullopt;
             if (!combat_ || !mount || !mount_heal_ || (hit.row.applicable_targets & 4) == 0) continue;
-            Host host(*this);
+            Host host(*this, cast);
             combat::HitMeta meta;
             meta.source_type = src.type;
             meta.source_guid = src.guid;
@@ -1938,7 +1945,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         std::string err;
         auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
         if (!target_eval) continue;
-        Host host(*this);
+        Host host(*this, cast);
         combat::HitMeta meta;
         meta.source_type = src.type;
         meta.source_guid = src.guid;
@@ -1966,6 +1973,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         // already has BaseValueMax 10.0 with the passive; only the caster's own heal is short of it, see apply_hit_here)
         const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
+        if (cast && !r.miss()) ++cast->hit_counts[hit.row.guid];   // (what a later hit of this cast reads: GetAbilityHitCount; this one is still the count before it)
         if (ran) *ran = true;
         // a hit that leaves a lasting area on the ground (LingeringZonesIds): one zone opens where it landed, whatever the number of targets it reached
         if (!zones_opened) {
@@ -5042,7 +5050,15 @@ void AbilityPipeline::bounce_from(AbilityChange& c, Cast& cast, const HitDef& hi
         for (const BounceRule& b : kBounces) {
             if (child->row.name == b.child_hit) rule = &b;
         }
-        if (!rule || depth >= rule->max_bounces) continue;
+        if (!rule) continue;
+        // the data's ceiling for the whole cast (MaxHitsGlobally: 2, or 5 with the Rogue's Ricochet) when the rule lets it speak; else the rule's fallback
+        int max_bounces = rule->max_bounces;
+        if (rule->data_limit && child->max_hits_expr != 0) {
+            double v = 0;
+            std::string why;
+            if (eval(child->max_hits_expr, v, why) && v >= 1) max_bounces = static_cast<int>(std::min(v, 16.0));
+        }
+        if (depth >= max_bounces) continue;
         const content::ProjectileRow* flying = catalog_->projectile(child->fires.front());
         const combat::TargetInfo from = combat_->inspect(target);
         if (!flying || !(flying->speed > 0) || !from.exists) continue;
@@ -5079,7 +5095,7 @@ void AbilityPipeline::bounce_from(AbilityChange& c, Cast& cast, const HitDef& hi
         src.simulated = false;
         src.autonomous = false;
         src.source_actor = target;   // (the Source is the enemy just hit: the client spawns the bounce projectile there)
-        apply_hit_on_targets(c, *child, {pick}, t, src, cast.def);
+        apply_hit_on_targets(c, *child, {pick}, t, src, cast.def, nullptr, nullptr, nullptr, nullptr, &cast);
         if (!rule->random) cast.bounced.insert(pick);
         Cast::Missile fly;
         fly.kind = Cast::Missile::Kind::Fly;
@@ -6051,7 +6067,7 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
         } else if (std::string_view(which) == "projectile" && !cast.target_actors.empty() && cast.target_actors.size() == 1 && cast.target_actors.front() == self_actor) {
             apply_hit(c, *hit, t, true, src);
         } else if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) {
-            apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+            apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed, nullptr, nullptr, nullptr, &cast);
         }
         // a hit that fires a bounce when it lands (the Discordance's notes, the Throw): the projectile flies on from this enemy to another near it. A hit that landed on nobody (the enemy
         // an earlier note killed) fires none; a hit that killed its enemy did land and does
@@ -6090,7 +6106,7 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
                 } else if (!cast.target_actors.empty() && cast.target_actors.size() == 1 && cast.target_actors.front() == self_actor) {
                     apply_hit(c, *hit, t, true, src);
                 } else if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) {
-                    apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+                    apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed, nullptr, nullptr, nullptr, &cast);
                 }
                 if (landed && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, cast.chain_owner, cast.target_actors.front(), depth, t);
             }

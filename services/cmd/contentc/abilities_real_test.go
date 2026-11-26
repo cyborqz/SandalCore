@@ -7,6 +7,7 @@ package main
 // Plan D2 on the real design database (the shared build of real_test.go): the ability tables hold what the records say.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -39,7 +40,9 @@ func TestRealAbilityTables(t *testing.T) {
 		// PR #10 review: his numbers (1,406 abilities, 2,383 hits and so on) were measured before the pet attacks of version 40; these include them
 		// version 42: the knock-back export writes the impulses of 30 hits, the pushes of 7 crowd-control records and 5 teleports, with the expressions their numbers are (12 more: ab_expr 2,552 -> 2,564,
 		// after all the others, so that no id moves); the removal tags it adds to 5 hits are in the hit rows' extra
-		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1528, "ab_expr": 2571, "ab_effect_control": 1528,
+		// the hits' MaxHitsGlobally adds 2 expressions after every other table (the Beam's progress formula and the Throw's bounce
+		// count), so no id moves either (ab_expr 2,571 -> 2,573)
+		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1528, "ab_expr": 2573, "ab_effect_control": 1528,
 		"ab_hit_impulse": 30, "ab_crowd_push": 7, "ab_teleport": 5,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
@@ -239,5 +242,34 @@ func TestRealAbilityTables(t *testing.T) {
 	}
 	if missing > 40 {
 		t.Errorf("%d abilities of montage_ids.tsv are in no ability table", missing)
+	}
+}
+
+// the Throw's bounce hit's MaxHitsGlobally is exported in its extra as MaxHitsExpr, and the expression it
+// names compiles (2 bounces, or 5 with the Ricochet passive).
+func TestRealMaxHitsGlobally(t *testing.T) {
+	db := builtDB(t)
+	var extra string
+	if err := db.SQL().QueryRow(`SELECT extra FROM ab_hit WHERE name = 'Rogue_Throw_Bounce'`).Scan(&extra); err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(extra), &fields); err != nil {
+		t.Fatalf("Rogue_Throw_Bounce's extra: %v", err)
+	}
+	id, ok := fields["MaxHitsExpr"].(float64)
+	if !ok || id == 0 {
+		t.Fatalf("Rogue_Throw_Bounce's extra has no MaxHitsExpr: %s", extra)
+	}
+	var program int64
+	var text, errText string
+	if err := db.SQL().QueryRow(`SELECT program, text, error FROM ab_expr WHERE id = ?`, int64(id)).Scan(&program, &text, &errText); err != nil {
+		t.Fatal(err)
+	}
+	if program < 0 || errText != "" {
+		t.Errorf("MaxHitsExpr %d does not compile: program %d, %q", int64(id), program, errText)
+	}
+	if !strings.Contains(text, "GetSkillPurchased") || !strings.Contains(text, "5, 2") {
+		t.Errorf("MaxHitsExpr %d is %q, want the Ricochet formula", int64(id), text)
 	}
 }

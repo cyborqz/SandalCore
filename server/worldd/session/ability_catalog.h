@@ -102,6 +102,7 @@ struct HitDef {
     // plan E1, stage 3: what the damage rules read of the hit (extra's EventTags ...)
     std::vector<std::string>           tags;             // EventTags: the element (Element.Physical.Slash), ability.Melee, ComboStep.End ...
     int64_t                            crit_rate_expr = 0, block_rate_expr = 0, miss_rate_expr = 0;   // ab_expr ids that override the stats' chances (0: the default)
+    int64_t                            max_hits_expr = 0;   // extra's MaxHitsExpr: how many hits of this record the whole cast may land (0: the data names none)
     bool                               force_cant_crit = false, force_cant_block = false, force_cant_miss = false;
     bool                               force_roll_crit = false, force_roll_block = false, force_roll_miss = false;
     /// bShouldUseItemTags: the hit of a player also carries the tags of the weapon it holds (a bow made for casters says ability.MagicalScalingOverride).

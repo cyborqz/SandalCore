@@ -129,6 +129,7 @@ struct HitRow {
     int         applicable_targets = 0, applicable_types = 0;
     std::string fallback_target;
     int64_t     requirement_expr = 0, delay_expr = 0, threat_expr = 0, max_targets_expr = 0;
+    int64_t     max_hits_expr = 0;   // extra's MaxHitsExpr: MaxHitsGlobally, how many hits of this record the whole cast may land
     std::string extra;
     bool        has_fx = false;   // OnHitFXId or OnActivateFXId is set (extra's HitFX): the server confirms such a hit to the client (it plays the effect)
 };

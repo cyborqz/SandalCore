@@ -213,6 +213,8 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
             d.crit_rate_expr = id_of("CritRateExpr");
             d.block_rate_expr = id_of("BlockRateExpr");
             d.miss_rate_expr = id_of("MissRateExpr");
+            d.max_hits_expr = id_of("MaxHitsExpr");
+            d.row.max_hits_expr = d.max_hits_expr;
             d.force_cant_crit = flag("bForceCantCrit");
             d.force_cant_block = flag("bForceCantBlock");
             d.force_cant_miss = flag("bForceCantMiss");

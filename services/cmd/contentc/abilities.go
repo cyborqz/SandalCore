@@ -212,6 +212,10 @@ type abBuilder struct {
 	groups                                             map[int64]*designdb.Row // contentc version 38: the EffectGroup rows, and the ones written to ab_effect_group
 	groupsWritten                                      map[int64]bool
 	ccWritten                                          map[int64]bool // contentc version 42: the crowd-control records written to ab_crowd_control (the knock-back export reads the ones that push)
+	// the hits' MaxHitsGlobally texts (ab_hit.extra's MaxHitsExpr) and the extra maps they go into. The
+	// expressions are compiled at the end of buildAbilities, after every other table, so that no existing expression id moves.
+	maxHits      map[int64]string
+	maxHitsExtra map[int64]map[string]any
 }
 
 func indexRows(rows []designdb.Row) map[int64]*designdb.Row {
@@ -340,6 +344,8 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 		targetingRows: indexRows(src.rows["AbilityTargetingRecordBase"]),
 		groups:        indexRows(src.rows["EffectGroupRecordBase"]),
 		groupsWritten: map[int64]bool{},
+		maxHits:       map[int64]string{},
+		maxHitsExtra:  map[int64]map[string]any{},
 	}
 
 	// ---- the ranks of every skill tree (plan D1's skill_rank: the one table of ranks); the abilities and effects they grant seed the closure ----
@@ -792,7 +798,10 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	if err := b.writeEffectControl(opt, meta, sortedBools(effectSet)); err != nil { // version 39: after every other table, so that no existing expression id moves
 		return err
 	}
-	return b.writeKnockback(opt, meta, sortedBools(hitSet)) // version 42: after the effect-control tables (the pushes it writes are theirs), for the same reason
+	if err := b.writeKnockback(opt, meta, sortedBools(hitSet)); err != nil { // version 42: after the effect-control tables (the pushes it writes are theirs), for the same reason
+		return err
+	}
+	return b.writeMaxHits(sortedBools(hitSet)) // after every other table, so that no existing expression id moves
 }
 
 // [CoA ~ C_Y_B]
@@ -1089,6 +1098,7 @@ func (b *abBuilder) writeHit(r *designdb.Row) error {
 	mask, types := f.int("ApplicableTargets"), f.int("ApplicableTypes")
 	netType, fallback := f.str("NetworkType"), f.str("DefaultFallbackTargetType")
 	req, delay, threat, maxTargets := f.str("ApplicationRequirements"), f.str("HitDelay"), f.str("ThreatToTarget"), f.str("MaxTargetsPerHit")
+	maxHits := f.str("MaxHitsGlobally")
 	applies, selfs := f.list("ApplyEffects"), f.list("EffectsAppliedToSelf")
 	fires, spawns := f.list("ProjectilesToFire"), f.list("ProjectilesToSpawn")
 	zones := refGuids(f, "LingeringZonesIds")
@@ -1139,6 +1149,10 @@ func (b *abBuilder) writeHit(r *designdb.Row) error {
 	if err := b.w.exec(`INSERT INTO ab_hit (guid, name, net_type, applicable_targets, applicable_types, fallback_target, requirement_expr, delay_expr, threat_expr, max_targets_expr, extra)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.Guid, r.Name, netType, mask, types, fallback, ids[0], ids[1], ids[2], ids[3], jsonOf(extra)); err != nil {
 		return err
+	}
+	if maxHits != "" {   // compiled at the end of the build, and put into this hit's extra there
+		b.maxHits[r.Guid] = maxHits
+		b.maxHitsExtra[r.Guid] = extra
 	}
 	for i, v := range applies {
 		s, ok := v.(designdb.Struct)
@@ -1230,6 +1244,32 @@ func (b *abBuilder) writeHit(r *designdb.Row) error {
 		}
 	}
 	return b.writeMods("hit", r, f)
+}
+
+// writeMaxHits compiles the hits' MaxHitsGlobally formulas and puts each expression's id into its
+// hit's extra as MaxHitsExpr: how many times the hit may land in all (the Throw's bounce count, 2, or 5 with Ricochet).
+// It runs after every other table that adds expressions, so that no existing expression id moves; the hit rows were
+// written earlier, so their extra is updated here.
+func (b *abBuilder) writeMaxHits(hits []int64) error {
+	for _, g := range hits {
+		text, ok := b.maxHits[g]
+		if !ok {
+			continue
+		}
+		id, err := b.exprs.id(text, nil)
+		if err != nil {
+			return err
+		}
+		if id == 0 {
+			continue
+		}
+		extra := b.maxHitsExtra[g]
+		extra["MaxHitsExpr"] = id
+		if err := b.w.exec(`UPDATE ab_hit SET extra = ? WHERE guid = ?`, jsonOf(extra), g); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // -- C-O-A . Cyb --

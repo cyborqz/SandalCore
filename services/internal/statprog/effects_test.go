@@ -5,6 +5,7 @@
 package statprog
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand"
@@ -608,5 +609,36 @@ func TestVerifierRulesOfD2(t *testing.T) {
 	b.Stats[0].Flags |= StatMulCompl
 	if _, err := Decode(b.Encode()); err != nil {
 		t.Errorf("the complement flag: %v", err)
+	}
+}
+
+// GetAbilityHitCount takes the one-argument form (the hit's count in the whole cast) and the two-argument
+// form (the actor whose count is asked for), which compiles to the program it always has: a constant role, then the host call
+// that names the hit and passes the role (RoleCount for the whole cast, the actor's role otherwise).
+func TestAbilityHitCountFormsCompile(t *testing.T) {
+	hit := fmt.Sprintf("$#%d:%d$", 3672506661632452365, 6064632706140474182)
+	for _, tc := range []struct {
+		what, text string
+		role       float64
+	}{
+		{"the whole cast", "GetAbilityHitCount(" + hit + ")", aocexpr.RoleCount},
+		{"an actor", "GetAbilityHitCount(GetTarget(), " + hit + ")", aocexpr.RoleTarget},
+	} {
+		b, r := compileOne(t, ModeFloat32, tc.text)
+		if r.Program < 0 {
+			t.Errorf("%s: %q did not compile: %s", tc.what, tc.text, r.Err)
+			continue
+		}
+		code := b.Progs[r.Program].Code
+		if len(code) != 9 || code[0] != OpConst || code[3] != OpHost1 || binary.LittleEndian.Uint16(code[4:6]) != uint16(aocexpr.HostAbilityHitCount) || code[8] != OpRet {
+			t.Errorf("%s: program % x, want a constant, the Host1 call %d and the return", tc.what, code, aocexpr.HostAbilityHitCount)
+			continue
+		}
+		if got := b.Consts[binary.LittleEndian.Uint16(code[1:3])]; got != tc.role {
+			t.Errorf("%s: role constant %v, want %v", tc.what, got, tc.role)
+		}
+		if got := b.Strings[binary.LittleEndian.Uint16(code[6:8])]; got != "6064632706140474182" {
+			t.Errorf("%s: name operand %q, want the hit's guid", tc.what, got)
+		}
 	}
 }

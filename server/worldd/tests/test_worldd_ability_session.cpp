@@ -2545,6 +2545,7 @@ struct WolfWorld {
     double north = 0;                // ... and this far along +Y, the way the player faces, for the first Wolf (an ability that gathers the enemies in a cone ahead of the caster)
     int extra = 0;                   // E1 stage 3 fix 3: more Wolves, minted right after the first (their blocks follow its), 1 m apart
     int extra_level = 0;             // ... of this level (0: the first Wolf's)
+    double extra_step = 100;         // ... this far apart along +Y, cm
     std::vector<uint64_t> wolves;    // their ids
     void prepare(PlayerWorld& w) {
         std::string err;
@@ -2569,7 +2570,7 @@ struct WolfWorld {
         }
         wolf = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + north, kZ, level, 800);
         for (int i = 0; i < extra; ++i) {
-            const uint64_t id = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + north + 100 * (i + 1), kZ, extra_level > 0 ? extra_level : level, 800);
+            const uint64_t id = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + north + extra_step * (i + 1), kZ, extra_level > 0 ? extra_level : level, 800);
             if (id != 0) wolves.push_back(id);
         }
     }
@@ -4253,9 +4254,12 @@ struct FlightCast {
     int         anim = 0;
     double      ahead = 1500;
     int         extra = 0;
+    double      extra_step = 100;   // how far apart the extra Wolves stand, cm (the Throw's bounce reach is 1,000)
     int         wolf_level = 25;   // the first Wolf's level (a low one dies to the first hits)
     int         extra_level = 0;   // the extra Wolves' (0: the first's)
     double      seconds = 3.0;
+    double      first_wolf_health = 1.0;   // the first Wolf's Health when the cast begins, as a share of its maximum
+    double      recast_at = -1;   // the same ability pressed again this long after the trigger (a second charge; negative: one cast)
     int64_t     branch = 0;   // a cast bar's branch (the client asks for it when its bar ends, `bar` seconds after the trigger)
     double      bar = 0;
     const char* then = "";    // a second ability pressed `then_at` seconds after the first, at the same Wolf: its item takes the pawn's place
@@ -4267,6 +4271,10 @@ struct FlightCast {
 struct FlightEnd {
     std::string         log;
     std::vector<double> wolf_health;   // the first Wolf's, then the extra ones'
+    std::vector<double> wolf_max_health;   // the same Wolves' maximum Health
+    std::vector<double> wolf_bleed_left;   // ... and the Bleeding's seconds left on each when the cast ends
+    std::vector<emit::FIntrepidNetworkGUID> wolf_comps;   // ... and the actors the confirmations name as their targets
+    double              first_wolf_bleed_left = -1;   // the Bleeding's seconds left on the first Wolf when the first Rogue_Throw landed
     int                 charges_left = -1;
     int32_t             cast_id = -1;       // the client's id of the cast
     int32_t             dodge_id = -1;      // ... and of the Dodge pressed after it
@@ -4294,14 +4302,30 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
     ww.ahead = 0;              // (the Wolf stands the way the player faces: the turn-limited flight leaves along the caster's facing)
     ww.north = fc.ahead;
     ww.extra = fc.extra;
+    ww.extra_step = fc.extra_step;
     Run r(0, true, &rec, [&](PlayerWorld& w) { ww.prepare(w); });
     if (!ww.ground || ww.wolf == 0 || !r.h.fx.world->combat()) return false;
     r.play(0.5, false);
+    combat::CombatWorld& cw = *r.h.fx.world->combat();
     const bs::PlayerSetup setup = r.h.s->bootstrap().setup();
+    if (fc.first_wolf_health < 1.0) {   // (a target the Throw finds already hurt: the Bleeding's length reads its Health share)
+        // a Wolf no hit has reached yet is no combatant, and its maximum Health reads -1: a first hit with no mods makes it one
+        cw.apply_hit_to_npc(ww.wolf, setup.guids.pawn.ObjectId, combat::Resolved{}, r.now());
+        const double max_health = cw.max_health_of(ww.wolf);
+        if (!(max_health > 0)) return false;
+        combat::Resolved hurt;
+        hurt.mods.push_back({1, content::kGuidHealth, -std::clamp(1.0 - fc.first_wolf_health, 0.0, 0.99) * max_health});
+        cw.apply_hit_to_npc(ww.wolf, setup.guids.pawn.ObjectId, hurt, r.now());
+        if (!(cw.health_of(ww.wolf) <= max_health * (fc.first_wolf_health + 0.01))) return false;   // (the Wolf is as hurt as asked, or the run is refused)
+    }
     const world::WorldActor* wa = r.h.fx.world->registry().find(ww.wolf);
     const abilities::Catalog* cat = r.h.fx.world->ability_catalog();
     const abilities::AbilityDef* def = cat ? cat->ability_named(fc.ability) : nullptr;
     if (!wa || !def) return false;
+    const abilities::EffectDef* bleed = cat ? cat->effect_named("Status_Bleeding") : nullptr;
+    const abilities::HitDef* throw_hit = cat ? cat->hit_named("Rogue_Throw") : nullptr;
+    const int64_t bleed_guid = bleed ? bleed->row.guid : 0;
+    const emit::FIntrepidNetworkGUID first_comp = cw.actor_guid(ww.wolf);
     const repl::InlineObject cyl = inline_cylinder_of(*wa);
     r.h.s->teach_ability(def->row.guid);
     const abilities::AbilityDef* then_def = (cat && fc.then[0] != '\0') ? cat->ability_named(fc.then) : nullptr;
@@ -4315,7 +4339,7 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
     if (fc.dodge_first) r.trigger(kDodge);
     if (end) end->mana_before = r.m.stats[kManaStat];
     r.send_trigger(def->row.guid, id, &trig);
-    bool requested = false, then_sent = false, dodged = fc.dodge_at < 0;
+    bool requested = false, then_sent = false, dodged = fc.dodge_at < 0, recast = fc.recast_at < 0;
     size_t reported = 0;
     if (end) end->cast_id = id;
     for (int i = 0; i < static_cast<int>(fc.seconds / 0.05); ++i) {
@@ -4333,6 +4357,12 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
             const BunchWriter then_trig = trigger_at_value(setup, then_def->row.guid, then_id, repl::Value(cyl), 0);
             r.send_trigger(then_def->row.guid, then_id, &then_trig);
         }
+        if (!recast && (i + 1) * 0.05 >= fc.recast_at - 1e-9) {
+            recast = true;
+            const int32_t again = r.next_id++;
+            const BunchWriter again_trig = trigger_at_value(setup, def->row.guid, again, repl::Value(cyl), fc.anim);
+            r.send_trigger(def->row.guid, again, &again_trig);
+        }
         if (fc.branch != 0 && !requested && (i + 1) * 0.05 >= fc.bar - 1e-9) {
             requested = true;
             const schema::RpcSchema* rpc = class_named("UAoCAbilityComponent").rpc("ServerRequestBranchVerification");
@@ -4348,6 +4378,10 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
         r.h.fx.world->tick_world(r.now());
         for (; before + reported < r.m.hits.size(); ++reported) {
             const repl::HitInstance& h = r.m.hits[before + reported];
+            if (end && throw_hit && bleed_guid != 0 && h.record_guid == throw_hit->row.guid && !h.targets.empty() && h.targets[0].hit_comp == first_comp &&
+                end->first_wolf_bleed_left < 0) {
+                end->first_wolf_bleed_left = cw.effect_remaining(ww.wolf, bleed_guid, r.now());
+            }
             TimedHit t;
             t.at = r.now() - base;
             t.raw = h;
@@ -4362,13 +4396,26 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
         spdlog::default_logger()->flush();
         end->log = g_log.str();
         if (r.h.s->pipeline()) end->charges_left = r.h.s->pipeline()->charges_left(def->row.guid);
-        const combat::CombatWorld& cw = *r.h.fx.world->combat();
+        end->wolf_comps.push_back(first_comp);
         end->wolf_health.push_back(cw.health_of(ww.wolf));
-        for (const uint64_t w : ww.wolves) end->wolf_health.push_back(cw.health_of(w));
+        end->wolf_max_health.push_back(cw.max_health_of(ww.wolf));
+        end->wolf_bleed_left.push_back(bleed_guid != 0 ? cw.effect_remaining(ww.wolf, bleed_guid, r.now()) : 0.0);
+        for (const uint64_t w : ww.wolves) {
+            end->wolf_comps.push_back(cw.actor_guid(w));
+            end->wolf_health.push_back(cw.health_of(w));
+            end->wolf_max_health.push_back(cw.max_health_of(w));
+            end->wolf_bleed_left.push_back(bleed_guid != 0 ? cw.effect_remaining(w, bleed_guid, r.now()) : 0.0);
+        }
         end->ends = r.m.end_ids();
         end->mana_after = r.m.stats[kManaStat];
     }
     return true;
+}
+
+/// The Health mod of a hit's first target (0 when it has none).
+static double health_mod_of(const TimedHit& h) {
+    if (h.raw.targets.empty() || h.raw.targets[0].stat_mods.size() != 1) return 0.0;
+    return h.raw.targets[0].stat_mods[0].value;
 }
 
 /// The Firebolt's five AnimationIndex variants in ONE world and one session: each cast
@@ -4601,7 +4648,11 @@ static void test_flight_leftovers() {
         CHECK(end.wolf_health.size() == 2 && end.wolf_health[0] <= 0 && end.wolf_health[1] > 0, "the notes killed the weak Wolf and the sturdy Wolf lived through the bounces");
         CHECK(notes >= 1 && notes < 3 && bounces == notes, "every note that landed fired one bounce, and the note that landed on the body confirmed nothing and fired none");
     }
-    // the Throw: its damage formula cannot be worked out yet, but the hit reached an enemy, so its shuriken bounces once to the second Wolf (a third enemy is not there)
+    // the Throw: its primary hit's damage and Bleeding, and its shuriken's bounce from the first Wolf to the second
+    constexpr int64_t kRogueTree = 6064630422842835238ll;
+    constexpr int64_t kRicochetRank = 6064633221707281737ll;   // Rogue_Passive_Throw_Ricochet
+    constexpr int64_t kToolbeltRank = 6064632898502857652ll;   // Rogue_Passive_Toolbelt_Expanded: the second charge
+    double plain_base = 0.0;   // the Throw's first hit without Ricochet: the bounce ratios' unit
     {
         const svc::Character rogue = class25(5, "Rogue", 17752);
         FlightCast fc;
@@ -4614,16 +4665,173 @@ static void test_flight_leftovers() {
         const bool ok = run_flight_cast(rogue, fc, hits, &end);
         CHECK(ok, "a world with ground and two Wolves for the Throw");
         if (!ok) return;
+        const TimedHit* primary = nullptr;
         int bounces = 0;
         const TimedHit* child = nullptr;
         for (const TimedHit& h : hits) {
+            if (!primary && h.hit == "Rogue_Throw" && !h.raw.targets.empty() && h.raw.targets[0].hit_comp == end.wolf_comps[0]) primary = &h;
             if (h.hit != "Rogue_Throw_Bounce" || h.raw.targets.empty()) continue;
             ++bounces;
             if (!child) child = &h;
         }
-        std::printf("  (the Throw at two Wolves: %d bounce child hits; %zu bounces left in the log)\n", bounces, flight_leaves(end.log, "Rogue_Throw: bounce ").size());
+        plain_base = primary ? health_mod_of(*primary) : 0.0;
+        std::printf("  (the Throw at two Wolves: the primary's Health mod %.2f, the Bleeding %.2f s left; %d bounce child hits; %zu bounces left in the log)\n", plain_base,
+                    end.first_wolf_bleed_left, bounces, flight_leaves(end.log, "Rogue_Throw: bounce ").size());
+        CHECK(primary != nullptr && primary->raw.targets.size() == 1 && health_mod_of(*primary) < 0.0,
+              "the Throw's primary Rogue_Throw is confirmed on the first Wolf with a Health mod that takes Health");
+        CHECK(end.first_wolf_bleed_left > 11.5 && end.first_wolf_bleed_left <= 12.0, "the first Wolf bleeds for 12 s: the Bleeding is on it when the Throw lands at its full Health");
         CHECK(bounces == 1, "the Throw at two Wolves bounces once: one child hit is confirmed");
         if (child) CHECK(child->raw.source.ObjectId != 0 && !(child->raw.targets[0].hit_comp == child->raw.source), "... it names the first Wolf as its Source and the second Wolf as its target");
+    }
+    // three Wolves within the bounce's 1,000 cm: two bounces, and the data's damage falls by 0.1 of the base at each
+    {
+        const svc::Character rogue = class25(5, "Rogue", 17752);
+        FlightCast fc;
+        fc.ability = "Rogue_Throw";
+        fc.extra = 2;
+        fc.ahead = 1200;
+        fc.seconds = 4.0;
+        std::vector<TimedHit> hits;
+        FlightEnd end;
+        const bool ok = run_flight_cast(rogue, fc, hits, &end);
+        CHECK(ok, "a world with ground and three Wolves for the Throw's two bounces");
+        if (!ok) return;
+        std::vector<double> mod(end.wolf_comps.size(), 0.0);
+        std::vector<int> landed(end.wolf_comps.size(), 0);
+        int crits = 0;
+        for (const TimedHit& h : hits) {
+            if (h.hit != "Rogue_Throw" || h.raw.targets.empty()) continue;
+            for (size_t w = 0; w < end.wolf_comps.size(); ++w) {
+                if (h.raw.targets[0].hit_comp != end.wolf_comps[w]) continue;
+                mod[w] = health_mod_of(h);
+                ++landed[w];
+                crits += (h.raw.targets[0].flags & stats::kHitCrit) != 0 ? 1 : 0;
+            }
+        }
+        std::printf("  (the Throw at three Wolves: Health mods %.2f, %.2f, %.2f; hits on each %d, %d, %d; %d crit)\n", mod[0], mod[1], mod[2], landed[0], landed[1], landed[2], crits);
+        CHECK(end.wolf_comps.size() == 3 && landed[0] == 1 && landed[1] == 1 && landed[2] == 1, "three Wolves within 1,000 cm take the Throw once each: the primary and two bounces");
+        CHECK(crits == 0 && mod[0] != 0.0, "(no hit of the sample crit: the ratios below are the data's own)");
+        if (mod[0] != 0.0) {
+            CHECK(std::fabs(mod[1] / mod[0] - 0.9) < 0.02, "the first bounce deals 0.9 of the primary's damage");
+            CHECK(std::fabs(mod[2] / mod[0] - 0.8) < 0.02, "the second bounce deals 0.8 of it");
+        }
+        plain_base = mod[0];
+    }
+    // a Wolf beyond the bounce's 1,000 cm is not hit: only the primary lands
+    {
+        const svc::Character rogue = class25(5, "Rogue", 17752);
+        FlightCast fc;
+        fc.ability = "Rogue_Throw";
+        fc.extra = 1;
+        fc.extra_step = 2000;   // the second Wolf 20 m behind the first
+        fc.ahead = 1200;
+        fc.seconds = 3.0;
+        std::vector<TimedHit> hits;
+        FlightEnd end;
+        const bool ok = run_flight_cast(rogue, fc, hits, &end);
+        CHECK(ok, "a world with ground and a Wolf out of the Throw's bounce range");
+        if (!ok) return;
+        int damage = 0, children = 0;
+        for (const TimedHit& h : hits) {
+            if (h.hit == "Rogue_Throw" && !h.raw.targets.empty() && h.raw.targets[0].hit_comp == end.wolf_comps[0]) ++damage;
+            if (h.hit == "Rogue_Throw_Bounce") ++children;
+        }
+        std::printf("  (the Throw with the second Wolf 20 m off: %d Rogue_Throw hits on the first, %d child hits, the second bleeds %.2f s)\n", damage, children, end.wolf_bleed_left[1]);
+        CHECK(damage == 1 && children == 0 && end.wolf_bleed_left[1] == 0.0, "a Wolf 20 m from the one just hit is out of the bounce's reach: no child hit, no hit and no Bleeding on it");
+    }
+    // the Bleeding's length reads the target's Health share: at 10% it runs near its 6 s
+    {
+        const svc::Character rogue = class25(5, "Rogue", 17752);
+        FlightCast fc;
+        fc.ability = "Rogue_Throw";
+        fc.ahead = 1200;
+        fc.first_wolf_health = 0.1;
+        fc.seconds = 3.0;
+        std::vector<TimedHit> hits;
+        FlightEnd end;
+        const bool ok = run_flight_cast(rogue, fc, hits, &end);
+        CHECK(ok, "a world with ground and a low-Health Wolf for the Throw");
+        if (!ok) return;
+        std::printf("  (the Throw at a Wolf at 10%%: the Bleeding has %.2f s left as it lands)\n", end.first_wolf_bleed_left);
+        CHECK(end.first_wolf_bleed_left > 6.0 && end.first_wolf_bleed_left < 7.0, "a target near death bleeds for near the data's 6 s, not 12");
+    }
+    // Ricochet: the data's five bounces and the 1.25 base, each bounce 0.1 lower
+    {
+        svc::Character rogue = class25(5, "Rogue", 17752);
+        rogue.skill_ranks.push_back({kRogueTree, {kRicochetRank}});
+        FlightCast fc;
+        fc.ability = "Rogue_Throw";
+        fc.extra = 5;
+        fc.ahead = 1200;
+        fc.seconds = 6.0;
+        std::vector<TimedHit> hits;
+        FlightEnd end;
+        const bool ok = run_flight_cast(rogue, fc, hits, &end);
+        CHECK(ok, "a world with ground and six Wolves for the Throw with Ricochet");
+        if (!ok) return;
+        std::vector<double> mod(end.wolf_comps.size(), 0.0);
+        std::vector<int> landed(end.wolf_comps.size(), 0);
+        std::vector<unsigned> flags(end.wolf_comps.size(), 0);
+        int crits = 0;
+        for (const TimedHit& h : hits) {
+            if (h.hit != "Rogue_Throw" || h.raw.targets.empty()) continue;
+            for (size_t w = 0; w < end.wolf_comps.size(); ++w) {
+                if (h.raw.targets[0].hit_comp != end.wolf_comps[w]) continue;
+                mod[w] = health_mod_of(h);
+                flags[w] = h.raw.targets[0].flags;
+                ++landed[w];
+                crits += (h.raw.targets[0].flags & stats::kHitCrit) != 0 ? 1 : 0;
+            }
+        }
+        int hit_wolves = 0;
+        for (const int n : landed) hit_wolves += n > 0 ? 1 : 0;
+        std::printf("  (the Throw with Ricochet at six Wolves: %d Wolves hit; Health mods", hit_wolves);
+        for (const double v : mod) std::printf(" %.2f", v);
+        std::printf("; flags");
+        for (const unsigned f : flags) std::printf(" %u", f);
+        std::printf("; plain base %.2f; %d crit)\n", plain_base, crits);
+        CHECK(end.wolf_comps.size() == 6 && hit_wolves == 6 && crits == 0, "six Wolves in a line each take one Rogue_Throw: the primary and the data's five bounces");
+        // (a roll that crit, was blocked or missed is no sample of the data's step: the Throw's hits keep the stats' own chances, and with the rig's fixed rolls the sixth Wolf dodges)
+        int plain = 0;
+        if (plain_base != 0.0) {
+            for (size_t w = 0; w < mod.size(); ++w) {
+                if ((flags[w] & stats::kHitMiss) != 0) {
+                    CHECK(mod[w] == 0.0 && end.wolf_health[w] == end.wolf_max_health[w], "a bounce the Wolf dodged takes no Health: that Wolf is still at full Health");
+                    continue;
+                }
+                if ((flags[w] & (stats::kHitCrit | stats::kHitBlock)) != 0) continue;
+                const double want = 1.25 - 0.1 * static_cast<double>(w);
+                CHECK(std::fabs(mod[w] / plain_base - want) < 0.02, "... and the Ricochet's base is 1.25, each bounce 0.1 of it lower");
+                ++plain;
+            }
+        }
+        CHECK(plain >= 5, "(at least five of the six rolls are plain, so at least five of the six steps are checked)");
+    }
+    // two casts, the Toolbelt's second charge: the second cast's primary sees a count of 0 of its own, not the first cast's bounce
+    {
+        svc::Character rogue = class25(5, "Rogue", 17752);
+        rogue.skill_ranks.push_back({kRogueTree, {kToolbeltRank}});
+        FlightCast fc;
+        fc.ability = "Rogue_Throw";
+        fc.extra = 1;
+        fc.ahead = 1200;
+        fc.recast_at = 1.2;
+        fc.seconds = 4.0;
+        std::vector<TimedHit> hits;
+        FlightEnd end;
+        const bool ok = run_flight_cast(rogue, fc, hits, &end);
+        CHECK(ok, "a world with ground and two Wolves for the Throw's two charges");
+        if (!ok) return;
+        const TimedHit* second = nullptr;
+        for (const TimedHit& h : hits) {
+            if (h.at > fc.recast_at + 0.1 && h.hit == "Rogue_Throw" && !h.raw.targets.empty() && h.raw.targets[0].hit_comp == end.wolf_comps[0]) {
+                second = &h;
+                break;
+            }
+        }
+        std::printf("  (the Throw's two casts: the second cast's primary Health mod %.2f; %d charges left)\n", second ? health_mod_of(*second) : 0.0, end.charges_left);
+        CHECK(second != nullptr && plain_base != 0.0 && std::fabs(health_mod_of(*second) / plain_base - 1.0) < 0.02,
+              "the second cast's primary sees a count of 0: it deals the full base, not the first cast's bounce step");
     }
 }
 

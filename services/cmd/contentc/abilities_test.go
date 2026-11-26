@@ -87,7 +87,7 @@ func completeFields(src *source) {
 	}
 	missing(src.rows["AbilityHitRecordBase"], st{
 		"ApplicableTargets": int64(1), "ApplicableTypes": int64(0), "NetworkType": "EAttackNetworkType::NET_ServerVerify",
-		"DefaultFallbackTargetType": "EDefaultFallbackTargetType::SelfOnly", "HitDelay": "", "ThreatToTarget": "", "MaxTargetsPerHit": "",
+		"DefaultFallbackTargetType": "EDefaultFallbackTargetType::SelfOnly", "HitDelay": "", "ThreatToTarget": "", "MaxTargetsPerHit": "", "MaxHitsGlobally": "",
 		"ProjectilesToFire": list{}, "ProjectilesToSpawn": list{}, "LingeringZonesIds": list{}, "RecursiveHit": list{},
 		"TeleportId": idv(0, 1, "None"), "ResurrectId": idv(0, 2, "None"),
 		"ModifyCooldownsIds": list{}, "ModifyEffectsIds": list{}, "EffectsToRemoveIds": list{}, "ReactionsIds": list{},

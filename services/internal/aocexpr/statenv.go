@@ -844,6 +844,15 @@ func AbilityEnv(ctx AbilityContext, curves CurveSource) *Env {
 		return ctx.HostFn(HostHitTriggerCount, strconv.FormatInt(r.Guid, 10), []float64{float64(args[0].(Object).Role)}), nil
 	}
 	env.Funcs["GetAbilityHitCount"] = func(args []Value) (Value, error) {
+		// GetAbilityHitCount(<hit>) counts the hit in the whole cast (RoleCount, one past every role of a hit); the
+		// two-argument form names the actor whose count it asks for.
+		if len(args) == 1 {
+			r, ok := args[0].(Ref)
+			if !ok {
+				return nil, fmt.Errorf("takes an actor and an ability, or an ability")
+			}
+			return ctx.HostFn(HostAbilityHitCount, strconv.FormatInt(r.Guid, 10), []float64{float64(RoleCount)}), nil
+		}
 		if len(args) != 2 || !isObj(args[0]) {
 			return nil, fmt.Errorf("takes an actor and an ability")
 		}

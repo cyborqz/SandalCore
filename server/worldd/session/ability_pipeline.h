@@ -294,6 +294,7 @@ struct BounceRule {
     double      radius;       // how far from the enemy just hit the next one may stand, cm
     int         max_bounces;  // how many times in a row the projectile may fly on
     bool        random;       // the next enemy is drawn at random (else: the nearest one that this cast has not hit yet, to the enemy just hit and to the caster)
+    bool        data_limit = false;   // the child's MaxHitsExpr overrides max_bounces when it evaluates (the Throw; the Discordance's records say 1 but its chain keeps its 2)
 };
 
 /// An ability whose projectile is a ball that flies on from where the caster stands and hurts every enemy its body touches, each again and again while it stays inside the ball (the Mage's Ball
@@ -857,6 +858,7 @@ private:
         };
         std::optional<GroundMarks>            ground;
         std::set<uint64_t>                    bounced;                    // a bouncing cast (kBounces): the enemies its projectiles have landed on
+        std::map<int64_t, int>                hit_counts;                 // the hits of this cast that landed: hit record guid -> how many times (GetAbilityHitCount)
         bootstrap::ActiveAbilityItem          item;
         std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
@@ -1259,10 +1261,11 @@ void   step_multi_hit(Cast& cast, double t);
     /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target;
     /// `first_landed` (when given) is the first actor the hit took effect on (0: none), for a hit that goes on from the one it landed on; `first_reached` (when given) is
     /// the first actor the hit reached, whether or not its numbers could be worked out, for a child that follows the hit on the actor it was aimed at; `ran` (when given)
-    /// says whether the hit took effect on any actor (a hit whose formula does not compile reached one but ran on none).
+    /// says whether the hit took effect on any actor (a hit whose formula does not compile reached one but ran on none); `cast` (when given) is the cast whose landed
+    /// hits GetAbilityHitCount reads, and this hit joins its count after it lands (a reaction's hit has no cast of its own).
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
                                 const abilities::AbilityDef* ability, bool* landed = nullptr, uint64_t* first_landed = nullptr, uint64_t* first_reached = nullptr,
-                                bool* ran = nullptr);
+                                bool* ran = nullptr, Cast* cast = nullptr);
     // reactions (session/ability_reactions.cpp)
     /// An expression of the reaction tables run for the event: the hit's tags and flags, the stat mods it resolved, the ability whose cost was paid.
     bool   eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why);
