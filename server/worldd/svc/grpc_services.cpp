@@ -583,12 +583,11 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
     return save_inventory(id, items, wallet, /*with_wallet=*/true, &jobs, &known_recipes, &warehouse);
 }
 
-CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs,
-                                        const std::vector<int64_t>* known_recipes, const std::vector<WarehouseItem>* warehouse) {
-    grpc::ClientContext ctx;
-    prepare(ctx, save_timeout_);
-    characterv1::SaveInventoryRequest req;
-    req.set_id(id);
+namespace {
+
+/// What SaveInventory and ClaimMailItems both send of the bags: the items and, when given, the wallet, the processing jobs, the known recipes and the warehouse, each replaced whole.
+void fill_inventory_request(characterv1::SaveInventoryRequest& req, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet,
+                            const std::vector<ProcessingJob>* jobs, const std::vector<int64_t>* known_recipes, const std::vector<WarehouseItem>* warehouse) {
     if (warehouse) {
         req.set_replace_warehouse(true);
         for (const WarehouseItem& w : *warehouse) {
@@ -669,8 +668,46 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
         if (it.persisted_mana) p->set_persisted_mana(*it.persisted_mana);
         p->set_lock_expiration(it.lock_expiration);
     }
+}
+
+}  // namespace
+
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs,
+                                        const std::vector<int64_t>* known_recipes, const std::vector<WarehouseItem>* warehouse) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::SaveInventoryRequest req;
+    req.set_id(id);
+    fill_inventory_request(req, items, wallet, with_wallet, jobs, known_recipes, warehouse);
     characterv1::SaveInventoryResponse resp;
     return map_grpc_status(stubs_->character->SaveInventory(&ctx, req, &resp));
+}
+
+MailClaimResult GrpcServices::claim_mail_items(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<InventoryItem>& items,
+                                               const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs, const std::vector<int64_t>& known_recipes,
+                                               const std::vector<WarehouseItem>& warehouse) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::ClaimMailItemsRequest req;
+    req.set_character_id(character_id);
+    for (const MailClaim& claim : claims) {
+        auto* c = req.add_claims();
+        c->set_mail_id(claim.mail_id);
+        c->set_instance_guid(claim.instance_guid);
+    }
+    fill_inventory_request(*req.mutable_inventory(), items, wallet, /*with_wallet=*/true, &jobs, &known_recipes, &warehouse);
+    characterv1::ClaimMailItemsResponse resp;
+    const grpc::Status s = stubs_->character->ClaimMailItems(&ctx, req, &resp);
+    MailClaimResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        r.claimed_before = s.error_code() == grpc::StatusCode::ALREADY_EXISTS;
+        return r;
+    }
+    r.claimed = resp.claimed();
+    r.replayed = resp.replayed();
+    return r;
 }
 // ~ Cyb - C O A ~
 

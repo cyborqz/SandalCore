@@ -205,6 +205,26 @@ public:
     bool take_mail_job(uint64_t ticket, MailJobAnswer& out) const;
     /// Drops a mail job's answer: a session that ended never reads it.
     void forget_mail_job(uint64_t ticket) const;
+    /// Takes a mail job back that the worker has not started: true when it will never run.
+    bool cancel_mail_job(uint64_t ticket) const;
+    /// Leaves a claim the worker is running to the worker (see OrphanClaim); false when it has been answered meanwhile: the session takes the answer.
+    bool orphan_mail_claim(OrphanClaim claim) const;
+    /// The session applied the answer of a claim: it is closed.
+    void close_mail_claim(uint64_t ticket) const;
+    /// Whether a write of the character's bags can still happen from here: a mail claim of it that is not closed, or a save queued or running in the sink.  The log-in waits for
+    /// this to be false before it reads the character (login/login_service.h), and it is safe to ask from the log-in's thread.
+    bool character_writes_pending(const std::string& character_id) const;
+    /// A log-in whose ticket was redeemed for the character marks it: the log-in's thread sets the mark right after the redeem (login/login_service.h), and the Endpoint ends it when the
+    /// log-in's result is applied, refused, or its session is gone.  While it stands the character's new mail claims wait (the log-in's wait for the claims must not be overtaken by a
+    /// new one).  The mark lives in the mail worker under its lock, so the log-in's thread sets it and the world's reads it without a race (see MailJobs::submit).
+    void login_began(const std::string& character_id, uint64_t session_id) const;
+    void login_ended(uint64_t session_id) const;
+    bool login_pending(const std::string& character_id) const;
+    /// How the mail worker asks again for a claim without an answer (a test makes the pauses short).  It takes effect before the first mail call.
+    void set_mail_job_config(const MailJobs::Config& config) { mail_job_config_ = config; }
+    /// A test's hook: called on the world's thread right before a mail job is handed to the worker, so a test can mark a log-in between a session's check and the worker's
+    /// registration of a claim.  Empty (and doing nothing) everywhere else.
+    void set_mail_submit_hook(std::function<void()> hook) { mail_submit_hook_ = std::move(hook); }
 
     /// The per-connection values of one joining player: ServerId, `world_time` (seconds), the next PlayerId and a
     /// fresh set of GUIDs.
@@ -629,6 +649,10 @@ private:
     PositionSink*                        sink_ = nullptr;
     mutable std::unique_ptr<FriendLookups> friend_lookups_;   // created at the first friend lookup; destroyed with the world (before the sink it holds)
     mutable std::unique_ptr<MailJobs>      mail_jobs_;        // created at the first mail call; destroyed with the world (before the sink it holds)
+    mutable std::mutex                     mail_jobs_mu_;     // guards the pointer: the log-in's thread reads it too
+    MailJobs::Config                       mail_job_config_;
+    std::function<void()>                  mail_submit_hook_;   // a test's (see set_mail_submit_hook)
+    MailJobs* mail_jobs(bool create) const;
     world::ActorRegistry                 registry_;
     std::shared_ptr<world::DuelBook>     duel_book_ = std::make_shared<world::DuelBook>(&registry_, [this] { return guids_.next(); });   // PvP: the duels (after the registry it names)   // #23 (MrJambix)
     spawns::AreaConfig                   area_;

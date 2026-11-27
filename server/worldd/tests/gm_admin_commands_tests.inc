@@ -17,7 +17,10 @@
 #include "session/admin_commands.h"
 #include "svc/services.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <mutex>
+#include <thread>
 
 namespace gma = aoc::worldd::admin;
 namespace qs = aoc::worldd::quest;
@@ -634,6 +637,11 @@ struct AdminMailSink : PositionSink {
     }
     svc::CharacterResult character_by_name(const std::string& name) override {
         ++lookups;
+        lookup_thread = std::this_thread::get_id();
+        {
+            std::unique_lock<std::mutex> lock(gate_mu);
+            gate_cv.wait_for(lock, std::chrono::seconds(3), [this] { return gate_open; });   // (the lookup can be held here to show the world goes on; a lookup that runs on the caller gives up after 3 s)
+        }
         svc::CharacterResult r;
         const auto it = characters.find(name);
         if (it == characters.end()) {
@@ -648,7 +656,22 @@ struct AdminMailSink : PositionSink {
     std::map<std::string, std::vector<svc::Mail>>     mails;
     std::map<std::string, svc::Character>             characters;
     std::vector<std::pair<std::string, svc::NewMail>> made;
-    size_t                                            creates = 0, lookups = 0;
+    std::atomic<size_t>                               creates{0}, lookups{0};
+    std::thread::id                                   lookup_thread;
+    std::mutex                                        gate_mu;
+    std::condition_variable                           gate_cv;
+    bool                                              gate_open = true;
+    void block() {
+        std::lock_guard<std::mutex> lock(gate_mu);
+        gate_open = false;
+    }
+    void release() {
+        {
+            std::lock_guard<std::mutex> lock(gate_mu);
+            gate_open = true;
+        }
+        gate_cv.notify_all();
+    }
     svc::CallStatus                                   refuse = svc::CallStatus::Ok;
     std::string                                       refuse_reason;
     uint32_t                                          next_id = 1;
@@ -660,6 +683,21 @@ static svc::Character offline_hero() {
     c.id = "cccccccccccccccccccccccccccccccc";
     c.name = "offline_hero";
     return c;
+}
+
+/// The final answer of a send-mail: a send to a character who is not in the world is pending (its lookup and create run on the mail worker), as is the online send; the harness ticks and
+/// the answer is taken with take_run, as the network thread's loop hands it over.
+static GmRunResult admin_finish(GmTravel& travel, Harness& h, GmRunResult first) {
+    if (!first.pending) return first;
+    GmRunResult done;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < until) {
+        h.settle();
+        if (travel.take_run(first.ticket, done)) return done;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(false, "the pending send-mail was answered within five seconds");
+    return first;
 }
 
 }  // namespace
@@ -790,8 +828,10 @@ static void test_gm_admin_send_mail_offline() {
     });
     h.play();
     GmTravel travel = make_travel(h);
-    const GmRunResult sent = travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"},
-                                                              {"body", "Fake offline body"}, {"item", "Test_Potion"}, {"count", "7"}}, "the test");
+    const GmRunResult first = travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"},
+                                                                {"body", "Fake offline body"}, {"item", "Test_Potion"}, {"count", "7"}}, "the test");
+    CHECK(first.pending && first.ticket != 0, "the send is pending: the lookup and the create are the mail worker's, not this thread's");
+    const GmRunResult sent = admin_finish(travel, h, first);
     CHECK(sent.status == GmStatus::Ok && sent.character == "offline_hero", "a character who is not in the world is found by name and mailed");
     if (sent.status != GmStatus::Ok) return;
     CHECK(sink.lookups == 1 && sink.creates == 1, "the store's name lookup and its create were each asked once");
@@ -820,6 +860,35 @@ static void test_gm_admin_send_mail_offline() {
 }
 AOC_REGISTER_TEST(test_gm_admin_send_mail_offline);
 
+static void test_gm_admin_offline_send_does_not_hold_the_world() {
+    std::printf("send-mail offline: the lookup waits on the mail worker and the world goes on meanwhile\n");
+    AdminMailSink sink;
+    sink.characters["offline_hero"] = offline_hero();
+    Harness h(cyb_on_the_ground(), [&](PlayerWorld& w) {
+        on_the_ground(w);
+        w.set_position_sink(&sink);
+    });
+    h.play();
+    GmTravel travel = make_travel(h);
+    sink.block();
+    const std::thread::id here = std::this_thread::get_id();
+    const GmRunResult first = travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body"}}, "the test");
+    CHECK(first.status == GmStatus::Ok && first.pending && first.ticket != 0, "the command returns at once, pending, while the character service has not answered");
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (sink.lookups.load() == 0 && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(sink.lookups == 1 && sink.creates == 0, "the worker is inside the lookup and nothing is created yet");
+    CHECK(sink.lookup_thread != here, "the lookup runs on the mail worker, not on the network thread");
+    h.run(milliseconds(400));   // the ticks of the world, while the lookup waits
+    const GmRunResult other = travel.run_command("list-players", {}, "the test");
+    CHECK(other.status == GmStatus::Ok && !other.pending, "another admin command is served while the lookup waits");
+    GmRunResult done;
+    CHECK(!travel.take_run(first.ticket, done), "no answer is there while the character service waits");
+    sink.release();
+    const GmRunResult answered = admin_finish(travel, h, first);
+    CHECK(answered.status == GmStatus::Ok && answered.message.find("is in the store") != std::string::npos && sink.creates == 1, "the answer comes when the lookup and the create are done");
+}
+AOC_REGISTER_TEST(test_gm_admin_offline_send_does_not_hold_the_world);
+
 static void test_gm_admin_send_mail_item_stacks() {
     std::printf("send-mail's item: the record's own stacks, its quality and durability, and the 20-stack cap\n");
     AdminMailSink sink;
@@ -831,8 +900,8 @@ static void test_gm_admin_send_mail_item_stacks() {
     h.play();
     GmTravel travel = make_travel(h);
     const auto run = [&](const std::string& item, const std::string& count) {
-        return travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body"},
-                                                {"item", item}, {"count", count}}, "the test");
+        return admin_finish(travel, h, travel.run_command("send-mail", {{"character", "offline_hero"}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body"},
+                                                                         {"item", item}, {"count", count}}, "the test"));
     };
     const GmRunResult potions = run("Test_Potion", "21");
     CHECK(potions.status == GmStatus::Ok && sink.made.size() == 1, "21 potions are sent");
@@ -893,7 +962,7 @@ static void test_gm_admin_send_mail_refusals() {
         std::map<std::string, std::string> fields = {{"character", character}, {"sender", sender}, {"subject", subject}, {"body", body}};
         if (!item.empty()) fields["item"] = item;
         if (!count.empty()) fields["count"] = count;
-        return travel.run_command("send-mail", fields, "the test");
+        return admin_finish(travel, h, travel.run_command("send-mail", fields, "the test"));
     };
     const auto normal = [&](const std::string& item, const std::string& count) {
         return run("offline_hero", "Fake Sender", "Fake Subject", "Fake body", item, count);
@@ -958,10 +1027,6 @@ static void test_gm_admin_send_mail_refusals() {
           "a store refusal reaches the answer word for word (the offline way)");
     CHECK(sink.mails.empty(), "... and the store keeps no mail");
     GmRunResult refused_online = run("cyb", "Fake Sender", "Fake Subject", "Fake body", "Test_Potion", "1");
-    if (refused_online.pending) {
-        h.settle();
-        CHECK(travel.take_run(refused_online.ticket, refused_online), "the online refusal lands with the job");
-    }
     CHECK(refused_online.status == GmStatus::FailedPrecondition && refused_online.message == "the mailbox is full (200 live mails)" && h.s->mails().empty(),
           "a store refusal reaches the answer word for word on the online way too");
     sink.refuse = svc::CallStatus::NotFound;
@@ -997,13 +1062,8 @@ static void test_gm_admin_send_mail_online_and_offline_agree() {
     // The online send creates on the world's mail worker: it is landed (and its answer taken) before the next send, so the worker
     // and this thread never write the sink at the same time.
     const auto send = [&](const std::string& character, const std::string& item, const std::string& count) {
-        GmRunResult r = travel.run_command("send-mail", {{"character", character}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"}, {"body", "Fake body for the agreement"},
-                                                         {"item", item}, {"count", count}}, "the test");
-        if (r.pending) {
-            h.settle();
-            CHECK(travel.take_run(r.ticket, r), "the online send lands with its job");
-        }
-        return r;
+        return admin_finish(travel, h, travel.run_command("send-mail", {{"character", character}, {"sender", "Fake Sender"}, {"subject", "Fake Subject"},
+                                                                         {"body", "Fake body for the agreement"}, {"item", item}, {"count", count}}, "the test"));
     };
     const GmRunResult online = send("cyb", "Test_Potion", "21");
     const GmRunResult offline = send("offline_hero", "Test_Potion", "21");

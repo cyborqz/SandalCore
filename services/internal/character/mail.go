@@ -306,9 +306,10 @@ func (s *Store) Mails(ctx context.Context, characterID string) ([]Mail, error) {
 	return out, tx.Commit(ctx)
 }
 
-// SaveMail writes one mail whole: its content, its status and its attachments with their claimed flags. It may rewrite the sender, subject, body, times and
-// attachments, but not clear a stored status bit or unclaim or drop a stored claimed attachment (matched by its instance guid): that is ErrMailStale and
-// nothing is written. ErrNotFound for an unknown character or mail; ErrInvalid for a mail the rules refuse.
+// SaveMail writes one mail whole: its content, its status and its attachments. It may rewrite the sender, subject, body, times and attachments, but not clear a
+// stored status bit or unclaim or drop a stored claimed attachment (matched by its instance guid): that is ErrMailStale and nothing is written. It never claims: an
+// attachment sent as claimed that is not claimed in the store is ErrInvalid and nothing is written (ClaimMailItems is the only way to claim, with the bags in the same
+// transaction). ErrNotFound for an unknown character or mail; ErrInvalid for a mail the rules refuse.
 func (s *Store) SaveMail(ctx context.Context, characterID string, m Mail) error {
 	if err := ValidateMail(m); err != nil {
 		return err
@@ -331,18 +332,21 @@ func (s *Store) SaveMail(ctx context.Context, characterID string, m Mail) error 
 	if m.Status&stored != stored {
 		return fmt.Errorf("%w: the save has status %d and would clear a mark of the stored status %d", ErrMailStale, m.Status, stored)
 	}
-	rows, err := tx.Query(ctx, `SELECT instance_guid FROM character_mail_items WHERE mail_id = $1 AND claimed`, m.ID)
+	rows, err := tx.Query(ctx, `SELECT instance_guid, claimed FROM character_mail_items WHERE mail_id = $1`, m.ID)
 	if err != nil {
 		return err
 	}
 	claimed := map[string]bool{}
 	for rows.Next() {
 		var guid string
-		if err := rows.Scan(&guid); err != nil {
+		var isClaimed bool
+		if err := rows.Scan(&guid, &isClaimed); err != nil {
 			rows.Close()
 			return err
 		}
-		claimed[guid] = true
+		if isClaimed {
+			claimed[guid] = true
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -352,6 +356,11 @@ func (s *Store) SaveMail(ctx context.Context, characterID string, m Mail) error 
 	for _, it := range m.Items {
 		if it.Claimed {
 			given[it.InstanceGUID] = true
+			// Only ClaimMailItems claims an attachment, together with the bags that hold it. A save that sets the flag would give the player nothing and leave the item
+			// unclaimable, so it is refused whole (the other changes in it are not written either).
+			if !claimed[it.InstanceGUID] {
+				return fmt.Errorf("%w: the attachment %s is sent claimed, but a mail save never claims: only ClaimMailItems does", ErrInvalid, it.InstanceGUID)
+			}
 		}
 	}
 	for guid := range claimed {

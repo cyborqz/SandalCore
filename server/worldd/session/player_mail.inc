@@ -79,6 +79,7 @@ void PlayerSession::init_mail(const svc::Character& character) {
     mail_pending_.clear();
     mail_added_events_.clear();
     mail_claim_in_flight_.clear();
+    mail_claims_waiting_.clear();
     mail_gm_done_.clear();
     mails_.clear();
     mail_loaded_ = false;
@@ -138,6 +139,8 @@ void PlayerSession::run_mail(Connection& conn, Clock::time_point now) {
         mail_pending_.pop_front();
         mail_apply(conn, now, std::move(job), std::move(answer));
     }
+    // the claims that waited for a log-in of this character to be applied go on once it is (or was refused)
+    if (!mail_claims_waiting_.empty() && !mail_claims_held()) mail_claim_settled(conn);
 }
 
 void PlayerSession::mail_apply(Connection& conn, Clock::time_point now, PendingMail job, MailJobAnswer answer) {
@@ -152,11 +155,11 @@ void PlayerSession::mail_apply(Connection& conn, Clock::time_point now, PendingM
         mail_create_landed(conn, std::move(job), answer.created);
         break;
     case MailJobKind::Claim:
+    case MailJobKind::ClaimAll:
         mail_claim_landed(conn, std::move(job), answer);
         break;
-    case MailJobKind::ClaimAll:
-        mail_claim_all_landed(conn, std::move(job), answer);
-        break;
+    case MailJobKind::GmSend:
+        break;   // (the offline admin send is answered by GmTravel: no session holds its ticket)
     case MailJobKind::BulkStatus:
         mail_bulk_landed(conn, std::move(job), answer);
         break;
@@ -226,16 +229,6 @@ void PlayerSession::mail_run_wait(Connection& conn, const MailWait& wait) {
     case MailWaitKind::BulkStatus:
         mail_bulk_status(conn, wait.ids, wait.status);
         break;
-    case MailWaitKind::StaleClaim:
-    case MailWaitKind::StaleClaimAll: {
-        std::vector<std::string> guids;
-        if (wait.kind == MailWaitKind::StaleClaim) guids = wait.guids;
-        else {
-            for (const auto& entry : mail_added_events_) guids.push_back(entry.first);
-        }
-        mail_send_added(conn, guids, /*require_claimed=*/true);
-        break;
-    }
     }
 }
 
@@ -283,13 +276,32 @@ bool PlayerSession::mail_place(const svc::InventoryItem& item, items::Outcome& a
     return true;
 }
 
-void PlayerSession::mail_roll_back(const items::Outcome& added, bool dirty_before, bool changed_before) {
+void PlayerSession::mail_roll_back(const items::Outcome& added) {
+    // Only the events this claim's own placement made are undone, each where the item is now: the player may have moved a bag item while the claim was in flight, and what the
+    // player did to anything else stays, with the unsaved marks of it (`inventory_dirty_` and `inventory_changed_` are never reset here: a change made meanwhile is still saved).
     for (auto it = added.events.rbegin(); it != added.events.rend(); ++it) {
         if (it->type != repl::StorageEventType::Add) continue;
-        inventory_.consume(it->container, it->slot, it->item.instance_guid, it->item.quantity);
+        const std::string& guid = it->item.instance_guid;
+        if (inventory_.consume(it->container, it->slot, guid, it->item.quantity).ok) continue;
+        const svc::InventoryItem* now = inventory_.find_guid(guid);
+        if (!now) continue;   // taken out of the bags meanwhile, or topped up into a stack that has another guid
+        const svc::ItemContainer container = now->container;
+        const int slot = now->slot;
+        const int32_t count = std::min(now->quantity, it->item.quantity);
+        inventory_.consume(container, slot, guid, count);
     }
-    inventory_dirty_ = dirty_before;
-    inventory_changed_ = changed_before;
+}
+
+void PlayerSession::mail_resync_bags(Connection& conn) {
+    // the client is told what is where, as at the join (the bags changed on this side and the client's view may hold a drag that does not match)
+    if (!room_for(5)) return;
+    std::vector<bootstrap::StorageKind> kinds = {bootstrap::StorageKind::Backpack, bootstrap::StorageKind::Equipment};
+    for (int i = 0; i < items::kResourceContainers; ++i) {
+        if (pb_.setup().resource_bags[static_cast<size_t>(i)].present) kinds.push_back(bootstrap::resource_kind(i));
+    }
+    for (const bootstrap::StorageKind kind : kinds) {
+        queue("ClientReceiveStoragePayload", [kind](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(kind, Role::Pawn); }, conn);
+    }
 }
 
 void PlayerSession::mail_send_events(Connection& conn, std::vector<bootstrap::ItemEvent> events) {
@@ -301,18 +313,11 @@ void PlayerSession::mail_send_events(Connection& conn, std::vector<bootstrap::It
     }
 }
 
-void PlayerSession::mail_send_added(Connection& conn, const std::vector<std::string>& guids, bool require_claimed) {
+void PlayerSession::mail_send_added(Connection& conn, const std::vector<std::string>& guids) {
     std::vector<bootstrap::ItemEvent> events;
     for (const std::string& guid : guids) {
         const auto it = mail_added_events_.find(guid);
         if (it == mail_added_events_.end()) continue;
-        if (require_claimed) {
-            bool claimed = false;
-            for (const svc::Mail& mail : mails_) {
-                for (const svc::MailItem& item : mail.items) claimed = claimed || (item.item.instance_guid == guid && item.claimed);
-            }
-            if (!claimed) continue;
-        }
         for (const bootstrap::ItemEvent& event : it->second) events.push_back(event);
         mail_added_events_.erase(it);
     }
@@ -540,6 +545,88 @@ void PlayerSession::mail_bulk_landed(Connection& conn, PendingMail job, const Ma
     if (stale) mail_start_load("a bulk status' mail save was stale", MailWait{}, last_now_);
 }
 
+/// Places one mail's attachment for a claim in the bags, in the tick (the bags the claim's call will store).  False when it does not fit; then nothing was changed.
+bool PlayerSession::mail_claim_place(PendingMail& job, const svc::MailItem& attachment, Connection& conn) {
+    const std::string& guid = attachment.item.instance_guid;
+    // an attachment that is in the bags or the warehouse already is not granted again
+    if (inventory_.find_guid(guid) != nullptr || mail_added_events_.count(guid) != 0 || wh_storage_.holds_guid(guid)) return true;
+    items::Outcome added;
+    std::string why;
+    if (!mail_place(attachment.item, added, why)) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: an item of a mail does not fit the bags ({}): not claimed", name(), why);
+        mail_say_bags_full(conn);
+        return false;
+    }
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    job.placed.push_back(MailPlaced{guid, true, std::move(added)});
+    std::vector<bootstrap::ItemEvent> events;
+    for (const items::Event& event : job.placed.back().added.events) events.push_back(mail_item_event(event));
+    mail_added_events_[guid] = std::move(events);
+    return true;
+}
+
+void PlayerSession::mail_claim_undo_placed(PendingMail& job) {
+    for (auto it = job.placed.rbegin(); it != job.placed.rend(); ++it) {
+        if (it->moved) mail_roll_back(it->added);
+        mail_added_events_.erase(it->guid);
+    }
+    job.placed.clear();
+}
+
+/// Sends the one call that stores the claim: the bags as they are now and the attachments `job` names.
+bool PlayerSession::mail_claim_submit(PendingMail job, const std::vector<svc::Mail>& claimed_mails) {
+    MailJobRequest request;
+    request.kind = job.kind;
+    request.character_id = character_id_;
+    for (size_t i = 0; i < job.ids.size(); ++i) {
+        for (const size_t item : job.items[i]) request.claims.push_back(svc::MailClaim{job.ids[i], claimed_mails[i].items[item].item.instance_guid});
+    }
+    request.items = inventory_.items();
+    request.wallet = wallet_.entries();
+    request.jobs = jobs_;
+    request.recipes = taught_;
+    request.warehouse = wh_storage_.rows();
+    job.mails = claimed_mails;
+    if (!world_) {
+        mail_claim_undo_placed(job);
+        return false;
+    }
+    job.ticket = world_->submit_mail_job(std::move(request));
+    if (job.ticket == 0) {
+        // A log-in of this character was marked after the check that let this claim start (the worker refuses it in the step that registers it): nothing was stored, the items go
+        // back and the claim waits for the log-in to be applied or refused.
+        mail_claim_undo_placed(job);
+        MailWait wait;
+        wait.kind = job.kind == MailJobKind::Claim ? MailWaitKind::Claim : MailWaitKind::ClaimAll;
+        wait.id = job.id;
+        wait.item = job.item;
+        wait.ids = job.ids;
+        mail_claims_waiting_.push_front(std::move(wait));
+        return true;
+    }
+    for (const std::string& id : job.ids) mail_claim_in_flight_.insert(id);
+    mail_pending_.push_back(std::move(job));
+    return true;
+}
+
+/// Applies a claim's answer to the session's own state: the claim is no longer in flight; stored, the mails show the attachments claimed; not stored, the items placed for it go back.
+/// True when the claim was stored.  The client is told by the caller.
+bool PlayerSession::mail_claim_apply_state(PendingMail& job, const svc::MailClaimResult& claim) {
+    for (const std::string& id : job.ids) mail_claim_in_flight_.erase(id);
+    if (claim.status != svc::CallStatus::Ok) {
+        mail_claim_undo_placed(job);
+        return false;
+    }
+    for (size_t i = 0; i < job.ids.size() && i < job.mails.size(); ++i) {
+        const int found = mail_find(job.ids[i]);
+        if (found < 0) continue;
+        mails_[static_cast<size_t>(found)] = job.mails[i];
+        ++mail_version_;
+    }
+    return true;
+}
+
 bool PlayerSession::mail_claim_one(Connection& conn, size_t mail_index, int32_t item_index) {
     if (mail_index >= mails_.size()) return false;
     const std::string id = mails_[mail_index].id;
@@ -562,225 +649,66 @@ bool PlayerSession::mail_claim_one(Connection& conn, size_t mail_index, int32_t 
         spdlog::log(level_for(mail_refused_logged_), "[mail] {}: no mail store is set: the claim of {} is ignored", name(), id);
         return false;
     }
-    const std::string guid = attachment.item.instance_guid;
-    // an attachment whose placement is still waiting for its mail save is already placed: a retry must not grant it again
-    // (a top-up leaves no bag row under the attachment's guid, so the events are what says it is there)
-    const bool held = inventory_.find_guid(guid) != nullptr || mail_added_events_.count(guid) != 0;
-    const bool in_warehouse = !held && wh_storage_.holds_guid(guid);
+    if (mail_claims_held()) {
+        // One claim at a time: the bags a claim stores are the bags as they are when it is sent, and a second claim sent behind it would store them again while the first is
+        // unanswered.  This one waits for the answer and is made then.  It waits too while a log-in of this character is being read (the log-in waits for the claims in flight
+        // and must not be overtaken by a new one).
+        MailWait wait;
+        wait.kind = MailWaitKind::Claim;
+        wait.id = id;
+        wait.item = item_index;
+        mail_claims_waiting_.push_back(std::move(wait));
+        return true;
+    }
     PendingMail job;
     job.kind = MailJobKind::Claim;
     job.id = id;
     job.item = item_index;
-    job.guid = guid;
-    job.dirty_before = inventory_dirty_;
-    job.changed_before = inventory_changed_;
-    if (!held && !in_warehouse) {
-        items::Outcome added;
-        std::string why;
-        if (!mail_place(attachment.item, added, why)) {
-            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: item {} of {} does not fit the bags ({}): not claimed", name(), item_index, id, why);
-            mail_say_bags_full(conn);
-            return false;
-        }
-        inventory_dirty_ = true;
-        inventory_changed_ = true;
-        job.placed.push_back(MailPlaced{guid, true, std::move(added)});
-        std::vector<bootstrap::ItemEvent> events;
-        for (const items::Event& event : job.placed.back().added.events) events.push_back(mail_item_event(event));
-        mail_added_events_[guid] = std::move(events);
-    }
+    job.guid = attachment.item.instance_guid;
+    if (!mail_claim_place(job, attachment, conn)) return false;
     svc::Mail next = mails_[mail_index];
     next.items[static_cast<size_t>(item_index)].claimed = true;
-    MailJobRequest request;
-    request.kind = MailJobKind::Claim;
-    request.character_id = character_id_;
-    request.mail = std::move(next);
-    request.items = inventory_.items();
-    request.wallet = wallet_.entries();
-    request.jobs = jobs_;
-    request.recipes = taught_;
-    request.warehouse = wh_storage_.rows();
-    job.ticket = world_ ? world_->submit_mail_job(std::move(request)) : 0;
-    if (!world_) return false;
-    mail_claim_in_flight_.insert(id);
-    mail_pending_.push_back(std::move(job));
+    job.ids.push_back(id);
+    job.items.push_back({static_cast<size_t>(item_index)});
+    if (!mail_claim_submit(std::move(job), {std::move(next)})) {
+        return false;
+    }
     return true;
 }
 
 void PlayerSession::mail_claim_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer) {
-    mail_claim_in_flight_.erase(job.id);
-    if (answer.bag == svc::CallStatus::Refused || answer.bag == svc::CallStatus::NotFound) {
-        for (auto it = job.placed.rbegin(); it != job.placed.rend(); ++it) {
-            if (it->moved) mail_roll_back(it->added, job.dirty_before, job.changed_before);
-            mail_added_events_.erase(it->guid);
-        }
-        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the bags refused the claim of {} ({}): the item is not moved", name(), job.id,
-                    svc::call_status_name(answer.bag));
+    const svc::MailClaimResult& claim = answer.claim;
+    if (claim.status != svc::CallStatus::Ok && claim.status != svc::CallStatus::Refused && claim.status != svc::CallStatus::NotFound) {
+        // No answer.  The worker asks again until the service answers, so only a world that is stopping hands this over.  Nothing is guessed: the claim stays in flight, the item stays
+        // in the bags and no bag is saved.
+        spdlog::log(spdlog::level::warn, "[mail] {}: the claim of {} has no answer ({}): it stays unsettled", name(), job.ids.empty() ? job.id : job.ids.front(),
+                    svc::call_status_name(claim.status));
+        mail_pending_.push_front(std::move(job));
         return;
     }
-    if (answer.bag != svc::CallStatus::Ok) {
-        // not a clean refusal: the store may have written the bags; keep the item where the session put it and retry the mail later
-        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the bags did not answer the claim of {} ({}): the bag change is kept and the mail stays unclaimed", name(),
-                    job.id, svc::call_status_name(answer.bag));
-        return;
-    }
-    if (answer.saves.empty()) {
-        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim of {} has no mail answer: the bag change is kept and the mail stays unclaimed", name(), job.id);
-        return;
-    }
-    const svc::MailSaveResult& saved = answer.saves.front();
-    if (saved.status == svc::CallStatus::Ok) {
-        const int found = mail_find(job.id);
-        if (found >= 0 && static_cast<size_t>(job.item) < mails_[static_cast<size_t>(found)].items.size()) {
-            mails_[static_cast<size_t>(found)].items[static_cast<size_t>(job.item)].claimed = true;
-            ++mail_version_;
-        }
-        mail_send_added(conn, {job.guid}, /*require_claimed=*/false);
-        const auto guid = items::guid_of(job.id);
-        const std::optional<bootstrap::Send> answer_send = guid ? pb_.mail_item_claimed(*guid, job.item) : std::nullopt;
-        if (!answer_send) {
-            spdlog::log(level_for(mail_logged_), "[mail] {}: the claim answer of {} does not build", name(), job.id);
-        } else {
-            queue("ClientClaimMailItem", [send = *answer_send](bootstrap::PlayerBootstrap&) { return send; }, conn, /*must_build=*/true);
-        }
-        spdlog::log(level_for(mail_logged_, 20), "[mail] {}: item {} of {} is claimed", name(), job.item, job.id);
-        return;
-    }
-    spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim of item {} of {} did not save the mail ({}: {}): it stays unclaimed", name(), job.item, job.id,
-                svc::call_status_name(saved.status), saved.reason);
-    if (saved.status == svc::CallStatus::Failed || saved.status == svc::CallStatus::NotFound) {
-        // the store may already show the claim (a second session): read it again, and send what this session added when it does
+    const bool stored = mail_claim_apply_state(job, claim);
+    if (!stored) {
+        // Refused: nothing was written and nothing will be.  The item goes back, the bags the client has are sent again and the list is read again, so the player sees the mail as the
+        // store has it.
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim of {} was refused ({}: {}): the item goes back to the mail", name(), job.ids.empty() ? job.id : job.ids.front(),
+                    svc::call_status_name(claim.status), claim.reason);
+        mail_resync_bags(conn);
         MailWait wait;
-        wait.kind = MailWaitKind::StaleClaim;
-        wait.id = job.id;
-        wait.item = job.item;
-        for (const MailPlaced& placed : job.placed) wait.guids.push_back(placed.guid);
-        if (wait.guids.empty()) wait.guids.push_back(job.guid);
-        mail_start_load("a claim's mail save was stale", std::move(wait), last_now_);
-    }
-}
-
-bool PlayerSession::mail_claim_all(Connection& conn, const std::vector<std::string>& ids) {
-    if (!sink_) {
-        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: no mail store is set: the claim-all is ignored", name());
-        return false;
-    }
-    if (ids.empty()) return false;
-    PendingMail job;
-    job.kind = MailJobKind::ClaimAll;
-    job.dirty_before = inventory_dirty_;
-    job.changed_before = inventory_changed_;
-    // every item of the request that the cache holds and has not claimed; a mail with a claim in flight is left alone
-    for (const std::string& id : ids) {
-        const int found = mail_find(id);
-        if (found < 0) {
-            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim-all names a mail the cache does not hold ({}): skipped", name(), id);
-            continue;
-        }
-        const size_t mail_index = static_cast<size_t>(found);
-        if (mail_claim_in_flight_.count(id) != 0) {
-            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: a claim of {} is already in flight: the mail is skipped", name(), id);
-            continue;
-        }
-        std::vector<size_t> items;
-        for (size_t item = 0; item < mails_[mail_index].items.size(); ++item) {
-            const svc::MailItem& attachment = mails_[mail_index].items[item];
-            if (attachment.claimed) continue;
-            const std::string& guid = attachment.item.instance_guid;
-            if (inventory_.find_guid(guid) == nullptr && mail_added_events_.count(guid) == 0 && !wh_storage_.holds_guid(guid)) {
-                items::Outcome added;
-                std::string why;
-                if (!mail_place(attachment.item, added, why)) {
-                    // all or nothing: undo every add this request made, say it once, and save nothing
-                    for (auto it = job.placed.rbegin(); it != job.placed.rend(); ++it) {
-                        if (it->moved) mail_roll_back(it->added, job.dirty_before, job.changed_before);
-                        mail_added_events_.erase(it->guid);
-                    }
-                    inventory_dirty_ = job.dirty_before;
-                    inventory_changed_ = job.changed_before;
-                    spdlog::log(level_for(mail_refused_logged_), "[mail] {}: item {} of {} does not fit the bags ({}): the claim-all is not made", name(), item, id,
-                                why);
-                    mail_say_bags_full(conn);
-                    return false;
-                }
-                inventory_dirty_ = true;
-                inventory_changed_ = true;
-                job.placed.push_back(MailPlaced{guid, true, std::move(added)});
-                std::vector<bootstrap::ItemEvent> events;
-                for (const items::Event& event : job.placed.back().added.events) events.push_back(mail_item_event(event));
-                mail_added_events_[guid] = std::move(events);
-            }
-            items.push_back(item);
-        }
-        if (items.empty()) continue;
-        svc::Mail next = mails_[mail_index];
-        for (size_t item : items) next.items[item].claimed = true;
-        job.ids.push_back(id);
-        job.items.push_back(std::move(items));
-        job.mails.push_back(std::move(next));
-    }
-    if (job.mails.empty()) return false;
-    MailJobRequest request;
-    request.kind = MailJobKind::ClaimAll;
-    request.character_id = character_id_;
-    request.mails = job.mails;
-    request.items = inventory_.items();
-    request.wallet = wallet_.entries();
-    request.jobs = jobs_;
-    request.recipes = taught_;
-    request.warehouse = wh_storage_.rows();
-    job.ticket = world_ ? world_->submit_mail_job(std::move(request)) : 0;
-    if (!world_) return false;
-    for (const std::string& id : job.ids) mail_claim_in_flight_.insert(id);
-    mail_pending_.push_back(std::move(job));
-    return true;
-}
-
-void PlayerSession::mail_claim_all_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer) {
-    for (const std::string& id : job.ids) mail_claim_in_flight_.erase(id);
-    if (answer.bag == svc::CallStatus::Refused || answer.bag == svc::CallStatus::NotFound) {
-        for (auto it = job.placed.rbegin(); it != job.placed.rend(); ++it) {
-            if (it->moved) mail_roll_back(it->added, job.dirty_before, job.changed_before);
-            mail_added_events_.erase(it->guid);
-        }
-        inventory_dirty_ = job.dirty_before;
-        inventory_changed_ = job.changed_before;
-        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the bags refused the claim-all ({}): nothing is moved", name(), svc::call_status_name(answer.bag));
-        return;
-    }
-    if (answer.bag != svc::CallStatus::Ok) {
-        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the bags did not answer the claim-all ({}): the bag change is kept and the mails stay unclaimed", name(),
-                    svc::call_status_name(answer.bag));
+        wait.kind = MailWaitKind::Refresh;
+        mail_start_load("a claim was not stored", std::move(wait), last_now_);
+        mail_claim_settled(conn);
+        if (world_) world_->close_mail_claim(job.ticket);   // (after the save the answer let go: a log-in never sees the gap)
         return;
     }
     bool any = false;
-    bool stale = false;
-    for (size_t i = 0; i < job.ids.size() && i < answer.saves.size(); ++i) {
-        const svc::MailSaveResult& saved = answer.saves[i];
-        if (saved.status == svc::CallStatus::Unavailable) {
-            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim-all stopped at {} ({}): the later mails are not saved or answered", name(), job.mails[i].id,
-                        svc::call_status_name(saved.status));
-            break;
-        }
-        if (saved.status != svc::CallStatus::Ok) {
-            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim-all did not save {} ({}: {}): it stays unclaimed", name(), job.mails[i].id,
-                        svc::call_status_name(saved.status), saved.reason);
-            if (saved.status == svc::CallStatus::Failed || saved.status == svc::CallStatus::NotFound) stale = true;
-            continue;
-        }
-        const int found = mail_find(job.ids[i]);
-        if (found >= 0) {
-            mails_[static_cast<size_t>(found)] = job.mails[i];
-            ++mail_version_;
-        }
+    for (size_t i = 0; i < job.ids.size() && i < job.mails.size(); ++i) {
         any = true;
         std::vector<std::string> guids;
-        for (size_t item : job.items[i]) {
-            if (job.mails[i].items.size() <= item) continue;
-            guids.push_back(job.mails[i].items[item].item.instance_guid);
+        for (const size_t item : job.items[i]) {
+            if (job.mails[i].items.size() > item) guids.push_back(job.mails[i].items[item].item.instance_guid);
         }
-        mail_send_added(conn, guids, /*require_claimed=*/false);
-        for (size_t item : job.items[i]) {
+        mail_send_added(conn, guids);
+        for (const size_t item : job.items[i]) {
             const auto guid = items::guid_of(job.mails[i].id);
             const std::optional<bootstrap::Send> answer_send = guid ? pb_.mail_item_claimed(*guid, static_cast<int32_t>(item)) : std::nullopt;
             if (answer_send) {
@@ -790,12 +718,76 @@ void PlayerSession::mail_claim_all_landed(Connection& conn, PendingMail job, con
             }
         }
     }
-    if (any) mail_send_unread(conn, "a claim-all was saved");
-    if (stale) {
-        MailWait wait;
-        wait.kind = MailWaitKind::StaleClaimAll;
-        mail_start_load("a claim-all's mail save was stale", std::move(wait), last_now_);
+    for (const MailPlaced& placed : job.placed) mail_added_events_.erase(placed.guid);
+    if (any && job.kind == MailJobKind::ClaimAll) mail_send_unread(conn, "a claim-all was saved");
+    spdlog::log(level_for(mail_logged_, 20), "[mail] {}: the claim of {} mail(s) is stored{}", name(), job.ids.size(), claim.replayed ? " (the service had it already)" : "");
+    mail_claim_settled(conn);
+    if (world_) world_->close_mail_claim(job.ticket);   // (after the save the answer let go: a log-in never sees the gap)
+}
+
+/// Whether a claim may not start now: one is in flight (one at a time), or a log-in of this character is waiting to be applied.
+bool PlayerSession::mail_claims_held() const {
+    return !mail_claim_in_flight_.empty() || (world_ && world_->login_pending(character_id_));
+}
+
+/// What follows a claim's answer: the hand-over that waited for it, and the claims that waited behind it.
+void PlayerSession::mail_claim_settled(Connection& conn) {
+    if (!mail_claim_in_flight_.empty()) return;
+    if (inventory_save_deferred_) {
+        inventory_save_deferred_ = false;
+        hand_over_inventory("a mail claim was answered", /*periodic=*/false);
     }
+    while (!mail_claims_waiting_.empty() && !mail_claims_held()) {
+        MailWait wait = std::move(mail_claims_waiting_.front());
+        mail_claims_waiting_.pop_front();
+        mail_run_wait(conn, wait);
+    }
+}
+
+bool PlayerSession::mail_claim_all(Connection& conn, const std::vector<std::string>& ids) {
+    if (!sink_) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: no mail store is set: the claim-all is ignored", name());
+        return false;
+    }
+    if (ids.empty()) return false;
+    if (mail_claims_held()) {
+        MailWait wait;   // (one claim at a time, and none while a log-in of this character waits: see mail_claim_one)
+        wait.kind = MailWaitKind::ClaimAll;
+        wait.ids = ids;
+        mail_claims_waiting_.push_back(std::move(wait));
+        return true;
+    }
+    PendingMail job;
+    job.kind = MailJobKind::ClaimAll;
+    std::vector<svc::Mail> claimed_mails;
+    // every item of the request that the cache holds and has not claimed
+    for (const std::string& id : ids) {
+        const int found = mail_find(id);
+        if (found < 0) {
+            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the claim-all names a mail the cache does not hold ({}): skipped", name(), id);
+            continue;
+        }
+        const size_t mail_index = static_cast<size_t>(found);
+        std::vector<size_t> items;
+        for (size_t item = 0; item < mails_[mail_index].items.size(); ++item) {
+            if (mails_[mail_index].items[item].claimed) continue;
+            if (!mail_claim_place(job, mails_[mail_index].items[item], conn)) {
+                // all or nothing: undo every add this request made, say it once, and send nothing
+                mail_claim_undo_placed(job);
+                return false;
+            }
+            items.push_back(item);
+        }
+        if (items.empty()) continue;
+        svc::Mail next = mails_[mail_index];
+        for (size_t item : items) next.items[item].claimed = true;
+        job.ids.push_back(id);
+        job.items.push_back(std::move(items));
+        claimed_mails.push_back(std::move(next));
+    }
+    if (claimed_mails.empty()) return false;
+    if (!mail_claim_submit(std::move(job), claimed_mails)) return false;
+    return true;
 }
 
 void PlayerSession::on_fetch_mail(Connection& conn, const repl::ClientRpc&, Clock::time_point now) {
@@ -1084,6 +1076,83 @@ bool PlayerSession::take_gm_mail(uint64_t ticket, GmMailResult& out) {
     return true;
 }
 
+bool PlayerSession::mail_defers_hand_over(const char* why, bool periodic) {
+    if (mail_claim_in_flight_.empty()) {
+        inventory_save_deferred_ = false;
+        inventory_dirty_ = false;
+        return false;
+    }
+    // A mail claim of this character is in flight: it stores the bags it was sent, and a save made now would be a second writer of the same bags (the claim's refusal would only
+    // undo the memory, and the save would keep the item with its mail unclaimed).  The save is made when the claim is answered.
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    inventory_save_deferred_ = true;
+    spdlog::log(periodic ? level_for(item_periodic_logged_) : spdlog::level::info, "[session] {}: the inventory is saved when the mail claim in flight is answered ({})", name(), why);
+    return true;
+}
+
+bool PlayerSession::mail_settle_on_finish() {
+    // A claim that waited behind another was never made: its mails stay unclaimed and nothing of it was placed.
+    mail_claims_waiting_.clear();
+    if (!world_) return false;
+    std::vector<uint64_t> settled;   // the claims this session settled itself: each is closed once the bags that follow are queued, never before
+    bool left_to_worker = false;
+    for (;;) {
+        const auto at = std::find_if(mail_pending_.begin(), mail_pending_.end(),
+                                     [](const PendingMail& job) { return job.kind == MailJobKind::Claim || job.kind == MailJobKind::ClaimAll; });
+        if (at == mail_pending_.end()) break;
+        PendingMail job = std::move(*at);
+        mail_pending_.erase(at);
+        if (world_->cancel_mail_job(job.ticket)) {
+            // the worker never asked for it: nothing was stored and nothing will be, so the items go back and the bags are saved as they are
+            svc::MailClaimResult not_made;
+            not_made.status = svc::CallStatus::Unavailable;
+            mail_claim_apply_state(job, not_made);
+            settled.push_back(job.ticket);
+            continue;
+        }
+        MailJobAnswer answer;
+        if (world_->take_mail_job(job.ticket, answer)) {
+            const svc::CallStatus status = answer.claim.status;
+            if (status != svc::CallStatus::Ok && status != svc::CallStatus::Refused && status != svc::CallStatus::NotFound) {
+                // no answer, from a world that is stopping: nothing is guessed, so no bag is saved
+                for (const std::string& id : job.ids) mail_claim_in_flight_.erase(id);
+                inventory_dirty_ = false;
+                left_to_worker = true;
+                continue;
+            }
+            mail_claim_apply_state(job, answer.claim);   // (answered, not applied yet: the client is gone, so only the state changes)
+            settled.push_back(job.ticket);
+            continue;
+        }
+        // The worker is asking the character service, or waiting to ask again.  The bags cannot be saved from here (a second writer next to the claim), so the worker is left the two
+        // bags the character can end with, and saves the one the answer decides.  The claim stays open until it has: a log-in of the character waits for that.
+        OrphanClaim orphan;
+        orphan.ticket = job.ticket;
+        orphan.character_id = character_id_;
+        orphan.items_with = inventory_.items();
+        const items::Inventory kept = inventory_;
+        mail_claim_undo_placed(job);
+        orphan.items_without = inventory_.items();
+        inventory_ = kept;
+        orphan.wallet = wallet_.entries();
+        orphan.jobs = jobs_;
+        orphan.recipes = taught_;
+        orphan.warehouse = wh_storage_.rows();
+        if (!world_->orphan_mail_claim(std::move(orphan))) {
+            // answered while this was made ready: the answer is taken on the next pass
+            mail_pending_.push_front(std::move(job));
+            continue;
+        }
+        for (const std::string& id : job.ids) mail_claim_in_flight_.erase(id);
+        inventory_dirty_ = false;
+        left_to_worker = true;
+    }
+    if (!left_to_worker && !settled.empty()) hand_over_inventory("a mail claim was settled", /*periodic=*/false);
+    for (const uint64_t ticket : settled) world_->close_mail_claim(ticket);   // (the bags are queued above: the claim is closed after them)
+    return left_to_worker || !settled.empty();
+}
+
 void PlayerSession::close_mail(const char* why) {
     (void)why;
     for (PendingMail& job : mail_pending_) {
@@ -1096,6 +1165,7 @@ void PlayerSession::close_mail(const char* why) {
     }
     mail_pending_.clear();
     mail_claim_in_flight_.clear();
+    mail_claims_waiting_.clear();
     mail_added_events_.clear();
     mail_gm_done_.clear();
 }

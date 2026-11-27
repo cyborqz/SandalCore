@@ -378,8 +378,9 @@ func TestMailItemsKeepTheirStateAndOrder(t *testing.T) {
 	}
 }
 
-// A claim is a save of the mail: the claimed flag is kept per attachment and a later claim adds to it.
-func TestASaveKeepsItemClaims(t *testing.T) {
+// A claim (ClaimMailItems) keeps the claimed flag per attachment and a later claim adds to it. (It used to be a save of the mail with the flag set; a save no longer
+// claims, see TestAMailSaveNeverClaims.)
+func TestAClaimKeepsItemClaimsPerAttachment(t *testing.T) {
 	s, acc := setup(t)
 	ctx := context.Background()
 	c := newMailCharacter(t, s, acc, "cyb")
@@ -392,10 +393,7 @@ func TestASaveKeepsItemClaims(t *testing.T) {
 		t.Fatalf("Mails = %+v, %v; want one mail with two attachments", mails, err)
 	}
 	mail := mails[0]
-	mail.Items[0].Claimed = true
-	if err := s.SaveMail(ctx, c.ID, mail); err != nil {
-		t.Fatalf("saving the first claim: %v", err)
-	}
+	claimByStore(t, s, c, created.ID, mail.Items[0])
 	got, err := s.Mails(ctx, c.ID)
 	if err != nil || len(got) != 1 || !got[0].Items[0].Claimed || got[0].Items[1].Claimed {
 		t.Errorf("after the first claim the flags are %+v, %v; want only the first claimed", got, err)
@@ -405,10 +403,7 @@ func TestASaveKeepsItemClaims(t *testing.T) {
 		t.Errorf("%d stored attachments are claimed (%v), want 1", claimed, err)
 	}
 	mail = got[0]
-	mail.Items[1].Claimed = true
-	if err := s.SaveMail(ctx, c.ID, mail); err != nil {
-		t.Fatalf("saving the second claim: %v", err)
-	}
+	claimByStore(t, s, c, created.ID, mail.Items[1])
 	got, err = s.Mails(ctx, c.ID)
 	if err != nil || len(got) != 1 || !got[0].Items[0].Claimed || !got[0].Items[1].Claimed {
 		t.Errorf("after claiming both, the flags are %+v, %v; want both claimed", got, err)
@@ -827,11 +822,15 @@ func TestAStaleMailSaveCannotUnclaimOrClearAMark(t *testing.T) {
 	if err != nil || len(mails) != 1 || len(mails[0].Items) != 2 {
 		t.Fatalf("Mails = %+v, %v; want one mail with two attachments", mails, err)
 	}
-	claimed := mails[0]
-	claimed.Items[0].Claimed = true
+	claimByStore(t, s, c, created.ID, mails[0].Items[0])
+	after, err := s.Mails(ctx, c.ID)
+	if err != nil || len(after) != 1 || !after[0].Items[0].Claimed {
+		t.Fatalf("Mails after the claim = %+v, %v; want the first item claimed", after, err)
+	}
+	claimed := after[0]
 	claimed.Status |= MailStatusRead | MailStatusDeleted
 	if err := s.SaveMail(ctx, c.ID, claimed); err != nil {
-		t.Fatalf("the save that claims and marks: %v", err)
+		t.Fatalf("the save that marks a claimed mail: %v", err)
 	}
 	if status, items := mailRowStatus(t, s, created.ID); status != MailStatusRead|MailStatusDeleted || len(items) != 2 || !items[0].Claimed {
 		t.Fatalf("after the valid save the row holds status %d and %+v; want the marks and the claim", status, items)
@@ -890,9 +889,10 @@ func TestTheSameMailSaveTwiceChangesNothing(t *testing.T) {
 	if err != nil || len(mails) != 1 {
 		t.Fatalf("Mails = %d, %v; want 1", len(mails), err)
 	}
+	claimByStore(t, s, c, created.ID, mails[0].Items[0])
 	save := mails[0]
 	save.Status |= MailStatusRead
-	save.Items[0].Claimed = true
+	save.Items[0].Claimed = true   // (the store holds it claimed since the claim above: a save may repeat the flag)
 	for i := 0; i < 2; i++ {
 		if err := s.SaveMail(ctx, c.ID, save); err != nil {
 			t.Fatalf("save %d of the same mail: %v", i+1, err)
@@ -904,5 +904,61 @@ func TestTheSameMailSaveTwiceChangesNothing(t *testing.T) {
 	var count int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM character_mails WHERE character_id = $1`, c.ID).Scan(&count); err != nil || count != 1 {
 		t.Errorf("after saving the same mail twice there are %d rows (%v), want 1", count, err)
+	}
+}
+
+// claimByStore claims one attachment of a stored mail for the character through ClaimMailItems, with the bags the character holds plus the item (what a session sends).
+func claimByStore(t *testing.T, s *Store, c Character, mailID string, att MailItem) {
+	t.Helper()
+	if _, err := s.ClaimMailItems(context.Background(), c.ID, []MailClaim{{MailID: mailID, InstanceGUID: att.InstanceGUID}}, bagsWith(t, s, c, att)); err != nil {
+		t.Fatalf("claiming %s of mail %s: %v", att.InstanceGUID, mailID, err)
+	}
+}
+
+// A mail save never claims: it is the second call of the old two-call claim, and with it an item could be marked claimed with nothing put into the bags. A save that sends an
+// attachment claimed that the store holds unclaimed is refused whole (ErrInvalid) and writes nothing: the attachment stays unclaimed, the bags are untouched, the mail's other
+// changes in that save are not made, and the real claim still works afterwards.
+func TestAMailSaveNeverClaims(t *testing.T) {
+	s, acc := setup(t)
+	ctx := context.Background()
+	c := newMailCharacter(t, s, acc, "cyb")
+	created, err := s.CreateMail(ctx, c.ID, NewMail{Sender: "Brannoc", Subject: "Not by a save", Body: "", Items: attachments(2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Inventory(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mails, err := s.Mails(ctx, c.ID)
+	if err != nil || len(mails) != 1 || len(mails[0].Items) != 2 {
+		t.Fatalf("Mails = %+v, %v; want one mail with two attachments", mails, err)
+	}
+	try := mails[0]
+	try.Status |= MailStatusRead
+	try.Subject = "Changed by the same save"
+	try.Items[1].Claimed = true
+	if err := s.SaveMail(ctx, c.ID, try); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a save that sets an attachment claimed: %v, want ErrInvalid", err)
+	}
+	var subject string
+	if err := s.pool.QueryRow(ctx, `SELECT subject FROM character_mails WHERE id = $1`, created.ID).Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	status, items := mailRowStatus(t, s, created.ID)
+	if subject != "Not by a save" || status != 0 || len(items) != 2 || items[0].Claimed || items[1].Claimed {
+		t.Errorf("after the refused save the mail holds subject %q, status %d and %+v; want nothing changed and both attachments unclaimed", subject, status, items)
+	}
+	if after, err := s.Inventory(ctx, c.ID); err != nil || len(after) != len(before) {
+		t.Errorf("the bags hold %d items after the refused save (%v), want the %d they held: the save gave nothing", len(after), err, len(before))
+	}
+	// the save without the claim goes through, and the attachment can still be claimed by the real call
+	try.Items[1].Claimed = false
+	if err := s.SaveMail(ctx, c.ID, try); err != nil {
+		t.Fatalf("the same save without the claim: %v", err)
+	}
+	claimByStore(t, s, c, created.ID, mails[0].Items[1])
+	if _, items := mailRowStatus(t, s, created.ID); !items[1].Claimed || items[0].Claimed {
+		t.Errorf("after ClaimMailItems the flags are %+v, want only the second attachment claimed", items)
 	}
 }

@@ -36,6 +36,7 @@ const (
 	CharacterService_GetMails_FullMethodName           = "/aoc.character.v1.CharacterService/GetMails"
 	CharacterService_SaveMail_FullMethodName           = "/aoc.character.v1.CharacterService/SaveMail"
 	CharacterService_CreateMail_FullMethodName         = "/aoc.character.v1.CharacterService/CreateMail"
+	CharacterService_ClaimMailItems_FullMethodName     = "/aoc.character.v1.CharacterService/ClaimMailItems"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -91,16 +92,22 @@ type CharacterServiceClient interface {
 	// Mail (migration 0027): the character's live mails (status bit 2 clear), newest first by issued_at_ms with the mail id breaking a tie, with their attachments
 	// and status. NotFound for an unknown character; a character with no mail has none.
 	GetMails(ctx context.Context, in *GetMailsRequest, opts ...grpc.CallOption) (*GetMailsResponse, error)
-	// Mail: writes one mail whole (its sender, subject, body, status and times, and its items with their claimed flags). A mail with the delete bit stays as a row
+	// Mail: writes one mail whole (its sender, subject, body, status and times, and its items; their claimed flags are the store's: a save never claims). A mail with the delete bit stays as a row
 	// but is not returned by GetMails again. A save that clears a stored status bit, or that sends a stored claimed item back unclaimed or drops it, is a stale
-	// save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse; NotFound for an unknown
-	// character or mail.
+	// save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse, and for an item sent claimed that the
+	// store holds unclaimed (only ClaimMailItems claims); NotFound for an unknown character or mail.
 	SaveMail(ctx context.Context, in *SaveMailRequest, opts ...grpc.CallOption) (*SaveMailResponse, error)
 	// Mail: the admin send. It takes the expiry as a duration (the client's FMailData carries ExpirationDurationMs; 0: none) and stores one mail with the sender,
 	// subject, body and attachments given; the service gives it its id, its issue time and its absolute expiry (the issue time plus the duration) and returns the
 	// stored mail. The store gives every new attachment its instance guid and creation time. InvalidArgument, with nothing changed, for a mail the rules refuse
 	// (an attachment sent as claimed included) or a full mailbox (200 live mails); NotFound for an unknown character.
 	CreateMail(ctx context.Context, in *CreateMailRequest, opts ...grpc.CallOption) (*CreateMailResponse, error)
+	// Mail: claims attachments into the bags in ONE transaction. It checks that each mail is the character's, that it is not deleted and that each named attachment is
+	// unclaimed, writes the character's bags (and wallet, jobs, recipes and warehouse as SaveInventory does) and marks the attachments claimed; if any check or write
+	// fails it writes nothing. NotFound for an unknown character, mail or attachment (another character's mail looks the same); AlreadyExists for an attachment that was
+	// claimed before by a request with other bags; InvalidArgument, with nothing changed, for bags that break SaveInventory's rules. A request that repeats an earlier one
+	// whole (every named attachment claimed and the stored bags the same as the request's) answers Ok and writes nothing, so a retry after a lost answer is safe.
+	ClaimMailItems(ctx context.Context, in *ClaimMailItemsRequest, opts ...grpc.CallOption) (*ClaimMailItemsResponse, error)
 }
 
 type characterServiceClient struct {
@@ -241,6 +248,16 @@ func (c *characterServiceClient) CreateMail(ctx context.Context, in *CreateMailR
 	return out, nil
 }
 
+func (c *characterServiceClient) ClaimMailItems(ctx context.Context, in *ClaimMailItemsRequest, opts ...grpc.CallOption) (*ClaimMailItemsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClaimMailItemsResponse)
+	err := c.cc.Invoke(ctx, CharacterService_ClaimMailItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -294,16 +311,22 @@ type CharacterServiceServer interface {
 	// Mail (migration 0027): the character's live mails (status bit 2 clear), newest first by issued_at_ms with the mail id breaking a tie, with their attachments
 	// and status. NotFound for an unknown character; a character with no mail has none.
 	GetMails(context.Context, *GetMailsRequest) (*GetMailsResponse, error)
-	// Mail: writes one mail whole (its sender, subject, body, status and times, and its items with their claimed flags). A mail with the delete bit stays as a row
+	// Mail: writes one mail whole (its sender, subject, body, status and times, and its items; their claimed flags are the store's: a save never claims). A mail with the delete bit stays as a row
 	// but is not returned by GetMails again. A save that clears a stored status bit, or that sends a stored claimed item back unclaimed or drops it, is a stale
-	// save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse; NotFound for an unknown
-	// character or mail.
+	// save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse, and for an item sent claimed that the
+	// store holds unclaimed (only ClaimMailItems claims); NotFound for an unknown character or mail.
 	SaveMail(context.Context, *SaveMailRequest) (*SaveMailResponse, error)
 	// Mail: the admin send. It takes the expiry as a duration (the client's FMailData carries ExpirationDurationMs; 0: none) and stores one mail with the sender,
 	// subject, body and attachments given; the service gives it its id, its issue time and its absolute expiry (the issue time plus the duration) and returns the
 	// stored mail. The store gives every new attachment its instance guid and creation time. InvalidArgument, with nothing changed, for a mail the rules refuse
 	// (an attachment sent as claimed included) or a full mailbox (200 live mails); NotFound for an unknown character.
 	CreateMail(context.Context, *CreateMailRequest) (*CreateMailResponse, error)
+	// Mail: claims attachments into the bags in ONE transaction. It checks that each mail is the character's, that it is not deleted and that each named attachment is
+	// unclaimed, writes the character's bags (and wallet, jobs, recipes and warehouse as SaveInventory does) and marks the attachments claimed; if any check or write
+	// fails it writes nothing. NotFound for an unknown character, mail or attachment (another character's mail looks the same); AlreadyExists for an attachment that was
+	// claimed before by a request with other bags; InvalidArgument, with nothing changed, for bags that break SaveInventory's rules. A request that repeats an earlier one
+	// whole (every named attachment claimed and the stored bags the same as the request's) answers Ok and writes nothing, so a retry after a lost answer is safe.
+	ClaimMailItems(context.Context, *ClaimMailItemsRequest) (*ClaimMailItemsResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -352,6 +375,9 @@ func (UnimplementedCharacterServiceServer) SaveMail(context.Context, *SaveMailRe
 }
 func (UnimplementedCharacterServiceServer) CreateMail(context.Context, *CreateMailRequest) (*CreateMailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateMail not implemented")
+}
+func (UnimplementedCharacterServiceServer) ClaimMailItems(context.Context, *ClaimMailItemsRequest) (*ClaimMailItemsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClaimMailItems not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -608,6 +634,24 @@ func _CharacterService_CreateMail_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_ClaimMailItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClaimMailItemsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).ClaimMailItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_ClaimMailItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).ClaimMailItems(ctx, req.(*ClaimMailItemsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -666,6 +710,10 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateMail",
 			Handler:    _CharacterService_CreateMail_Handler,
+		},
+		{
+			MethodName: "ClaimMailItems",
+			Handler:    _CharacterService_ClaimMailItems_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

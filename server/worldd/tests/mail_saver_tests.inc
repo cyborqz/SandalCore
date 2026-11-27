@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // ============================================================================
-//  tests/mail_saver_tests.inc: the character saver's mail forwards and the claim's blocking bag save.
+//  tests/mail_saver_tests.inc: the character saver's mail forwards and the claim call.
 //
-//  The character service fake answers the four calls and can hold one inventory write in the worker's thread, so the direct bag save's wait, its
-//  drop of an older queued bag and its order after the write in flight are checked without a server.
+//  The character service fake answers the four calls and can hold one inventory write in the worker's thread, so the claim's wait for the write in flight,
+//  its drop of an older queued bag and its order after the write in flight are checked without a server.
 // ============================================================================
+#include "login/login_service.h"
+
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -35,6 +38,9 @@ struct MailSaverApi : FriendStoreApi {
     std::string                                  create_reason = "the store refused the mail";
     bool                                         throw_load = false, throw_save = false, throw_create = false, throw_inventory = false;
     size_t                                       loads = 0, saves = 0, creates = 0, inventories = 0, six_argument_calls = 0;
+    std::vector<std::vector<svc::MailClaim>>     claim_calls;
+    std::vector<size_t>                          claim_wallet_sizes, claim_job_counts, claim_recipe_counts, claim_warehouse_counts;
+    size_t                                       claimed_replayed = 0;
 
     svc::CallStatus record_inventory(const std::string& character_id, const std::vector<svc::InventoryItem>& items, bool six_argument) {
         {
@@ -112,6 +118,23 @@ struct MailSaverApi : FriendStoreApi {
         return record_inventory(character_id, items, false);
     }
 
+    svc::MailClaimResult claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::InventoryItem>& items,
+                                          const std::vector<svc::WalletEntry>& wallet, const std::vector<svc::ProcessingJob>& jobs, const std::vector<int64_t>& known_recipes,
+                                          const std::vector<svc::WarehouseItem>& warehouse) override {
+        {
+            std::lock_guard<std::mutex> lock(mail_mu);
+            claim_calls.push_back(claims);
+            claim_wallet_sizes.push_back(wallet.size());
+            claim_job_counts.push_back(jobs.size());
+            claim_recipe_counts.push_back(known_recipes.size());
+            claim_warehouse_counts.push_back(warehouse.size());
+        }
+        svc::MailClaimResult result;
+        result.status = record_inventory(character_id, items, true);
+        if (result.status == svc::CallStatus::Ok) result.claimed = static_cast<int32_t>(claims.size());
+        return result;
+    }
+
     svc::CallStatus save_inventory(const std::string& character_id, const std::vector<svc::InventoryItem>& items, const std::vector<svc::WalletEntry>& wallet,
                                    const std::vector<svc::ProcessingJob>& jobs, const std::vector<int64_t>& known_recipes,
                                    const std::vector<svc::WarehouseItem>& warehouse) override {
@@ -121,6 +144,35 @@ struct MailSaverApi : FriendStoreApi {
         (void)warehouse;
         return record_inventory(character_id, items, true);
     }
+};
+
+/// The log-in tests' gateway and character service: the character answers with the bags the service wrote last.
+struct SaverLoginGateway : svc::GatewayApi {
+    svc::RedeemResult redeem_ticket(const std::string&, const std::string& character_id, uint32_t) override {
+        svc::RedeemResult result;
+        result.status = svc::CallStatus::Ok;
+        result.account_id = 3;
+        result.character_id = character_id;
+        return result;
+    }
+};
+
+struct SaverLoginCharacters : svc::CharacterApi {
+    MailSaverApi&    api;
+    std::atomic<int> loads{0};
+    explicit SaverLoginCharacters(MailSaverApi& a) : api(a) {}
+    svc::CharacterResult get_character(const std::string& id) override {
+        ++loads;
+        svc::CharacterResult result;
+        result.status = svc::CallStatus::Ok;
+        result.character.id = id;
+        result.character.account_id = 3;
+        result.character.name = "mailer";
+        std::lock_guard<std::mutex> lock(api.mail_mu);
+        if (!api.inventory_writes.empty()) result.character.items = api.inventory_writes.back();
+        return result;
+    }
+    svc::CallStatus save_position(const std::string&, const svc::Position&) override { return svc::CallStatus::Ok; }
 };
 
 static svc::InventoryItem test_mail_saver_item(uint32_t n) {
@@ -183,8 +235,8 @@ static void test_mail_saver_forwards_the_three_mail_calls() {
     CHECK(refused.status == svc::CallStatus::Refused && refused.reason == "the store refused the mail", "a refusal carries the service's reason");
 }
 
-static void test_mail_saver_save_inventory_now_passes_the_six_arguments() {
-    std::printf("the direct bag save passes the six arguments to the six-argument service call and returns its status\n");
+static void test_mail_saver_claim_passes_the_claims_and_the_bags() {
+    std::printf("the claim passes the attachments and the whole bags to the one claim call of the service and returns its answer\n");
     std::fflush(stdout);
     MailSaverApi api;
     CharacterSaver saver(api);
@@ -193,19 +245,21 @@ static void test_mail_saver_save_inventory_now_passes_the_six_arguments() {
     const std::vector<svc::ProcessingJob> jobs(1);
     const std::vector<int64_t> recipes = {41, 42};
     const std::vector<svc::WarehouseItem> warehouse(1);
-    const svc::CallStatus saved = saver.save_inventory_now("char-a", items, wallet, jobs, recipes, warehouse);
-    CHECK(saved == svc::CallStatus::Ok, "the direct save answers the service's Ok");
-    CHECK(saver.inventories_saved() == 1, "the direct save counts its Ok");
-    CHECK(api.six_argument_calls == 1 && api.inventory_writes.size() == 1, "the service's six-argument save was called once");
+    const std::vector<svc::MailClaim> claims = {{test_mail_saver_hex(5), test_mail_saver_hex(11)}};
+    const svc::MailClaimResult claimed = saver.claim_mail_items("char-a", claims, items, wallet, jobs, recipes, warehouse);
+    CHECK(claimed.status == svc::CallStatus::Ok && claimed.claimed == 1, "the claim answers the service's Ok");
+    CHECK(saver.inventories_saved() == 1, "the claim counts its Ok");
+    CHECK(api.claim_calls.size() == 1 && api.claim_calls[0] == claims && api.inventory_writes.size() == 1, "the service's claim call was made once, with the attachments named");
     CHECK(api.inventory_writes.size() == 1 && api.inventory_writes[0].size() == 2 && api.inventory_writes[0][0].instance_guid == test_mail_saver_hex(11),
           "the items reached the service");
+    CHECK(api.claim_wallet_sizes[0] == 1 && api.claim_job_counts[0] == 1 && api.claim_recipe_counts[0] == 2 && api.claim_warehouse_counts[0] == 1,
+          "the wallet, the jobs, the recipes and the warehouse reached it too");
     api.inventory_answer = svc::CallStatus::Unavailable;
-    CHECK(saver.save_inventory_now("char-a", items, wallet, jobs, recipes, warehouse) == svc::CallStatus::Unavailable,
-          "the service's Unavailable comes back");
+    CHECK(saver.claim_mail_items("char-a", claims, items, wallet, jobs, recipes, warehouse).status == svc::CallStatus::Unavailable, "the service's Unavailable comes back");
 }
 
-static void test_mail_saver_save_inventory_now_waits_for_the_same_characters_inventory() {
-    std::printf("the direct bag save waits for the same character's inventory write and writes the newer bag after it\n");
+static void test_mail_saver_claim_waits_for_the_same_characters_inventory() {
+    std::printf("the claim waits for the same character's inventory write and its bags are written after it\n");
     std::fflush(stdout);
     MailSaverApi api;
     api.inventory_gate_id = "char-a";
@@ -217,15 +271,15 @@ static void test_mail_saver_save_inventory_now_waits_for_the_same_characters_inv
     std::atomic<int>  answer{static_cast<int>(svc::CallStatus::Failed)};
     std::thread direct([&] {
         started = true;
-        answer = static_cast<int>(saver.save_inventory_now("char-a", {test_mail_saver_item(22)}, {}, {}, {}, {}));
+        answer = static_cast<int>(saver.claim_mail_items("char-a", {{test_mail_saver_hex(6), test_mail_saver_hex(22)}}, {test_mail_saver_item(22)}, {}, {}, {}, {}).status);
         returned = true;
     });
     while (!started) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    CHECK(!returned, "the direct save waits while the same character's inventory write is in flight");
+    CHECK(!returned, "the claim waits while the same character's inventory write is in flight");
     api.inventory_gate.release();
     direct.join();
-    CHECK(static_cast<svc::CallStatus>(answer.load()) == svc::CallStatus::Ok, "the direct save answers the service's Ok");
+    CHECK(static_cast<svc::CallStatus>(answer.load()) == svc::CallStatus::Ok, "the claim answers the service's Ok");
     CHECK(api.inventory_writes.size() == 2, "two inventory writes reached the service");
     CHECK(api.inventory_writes.size() == 2 && api.inventory_writes[0][0].instance_guid == test_mail_saver_hex(21) &&
               api.inventory_writes[1][0].instance_guid == test_mail_saver_hex(22),
@@ -249,19 +303,72 @@ static void test_mail_saver_mail_throw_answers_failed() {
     CHECK(saver.create_mail("char-a", fresh).status == svc::CallStatus::Failed, "a throwing create answers Failed");
 }
 
-static void test_mail_saver_inventory_throw_answers_unavailable() {
-    std::printf("a throw in the direct bag save is caught and answered Unavailable\n");
+static void test_mail_saver_claim_drops_an_older_queued_bag() {
+    std::printf("a bag queued for the character before a claim is dropped: the claim's bags are the newer ones\n");
+    std::fflush(stdout);
+    MailSaverApi api;
+    api.inventory_gate_id = "char-b";
+    api.inventory_gate_on = true;
+    CharacterSaver saver(api);
+    saver.save_inventory("char-b", {test_mail_saver_item(50)});   // held in the worker: it keeps the worker busy
+    CHECK(api.inventory_gate.wait_entered(), "the worker reached the held write of another character");
+    saver.save_inventory("char-a", {test_mail_saver_item(51)});   // queued behind it
+    const svc::MailClaimResult claimed = saver.claim_mail_items("char-a", {{test_mail_saver_hex(7), test_mail_saver_hex(52)}}, {test_mail_saver_item(52)}, {}, {}, {}, {});
+    api.inventory_gate.release();
+    CHECK(claimed.status == svc::CallStatus::Ok, "the claim answers Ok");
+    CHECK(saver.flush(std::chrono::seconds(5)), "the saver finishes");
+    size_t stale = 0;
+    for (const auto& write : api.inventory_writes) stale += !write.empty() && write[0].instance_guid == test_mail_saver_hex(51) ? 1 : 0;
+    CHECK(stale == 0, "the older queued bag of the claiming character is never written after the claim");
+}
+
+static void test_mail_saver_claim_throw_answers_unavailable() {
+    std::printf("a throw in the claim call is caught and answered Unavailable\n");
     std::fflush(stdout);
     MailSaverApi api;
     CharacterSaver saver(api);
-    CHECK(saver.save_inventory_now("char-a", {test_mail_saver_item(41)}, {}, {}, {}, {}) == svc::CallStatus::Ok,
-          "the direct save works before the throw");
+    const std::vector<svc::MailClaim> claims = {{test_mail_saver_hex(8), test_mail_saver_hex(41)}};
+    CHECK(saver.claim_mail_items("char-a", claims, {test_mail_saver_item(41)}, {}, {}, {}, {}).status == svc::CallStatus::Ok, "the claim works before the throw");
     api.throw_inventory = true;
-    CHECK(saver.save_inventory_now("char-a", {test_mail_saver_item(42)}, {}, {}, {}, {}) == svc::CallStatus::Unavailable,
-          "a throwing direct save answers Unavailable");
+    CHECK(saver.claim_mail_items("char-a", claims, {test_mail_saver_item(42)}, {}, {}, {}, {}).status == svc::CallStatus::Unavailable, "a throwing claim answers Unavailable");
 }
+static void test_login_waits_for_the_savers_queued_bag_write() {
+    std::printf("a log-in waits while a bag write of its character is queued or running in the saver, and loads the bags of the last one\n");
+    std::fflush(stdout);
+    MailSaverApi api;
+    const std::string id = test_mail_saver_hex(0xbbec);
+    api.inventory_writes.push_back({test_mail_saver_item(61)});   // what the service holds from an earlier save
+    api.inventory_gate_id = id;
+    api.inventory_gate_on = true;
+    CharacterSaver saver(api);
+    CHECK(!saver.character_busy(id), "a character with nothing queued is not busy");
+    saver.save_inventory(id, {test_mail_saver_item(62)});   // the old session's earlier save: held in the worker
+    CHECK(api.inventory_gate.wait_entered(), "the worker reached the held write");
+    saver.save_inventory(id, {test_mail_saver_item(63)});   // its final save, queued behind
+    CHECK(saver.character_busy(id), "the character is busy: one write runs and one is queued");
+    CHECK(!saver.character_busy(test_mail_saver_hex(1)), "another character is not");
+    SaverLoginGateway gateway;
+    SaverLoginCharacters characters(api);
+    LoginService service(gateway, characters);
+    LoginService::Barrier barrier;
+    barrier.writes_pending = [&saver](const std::string& who) { return saver.character_busy(who); };
+    barrier.bound = std::chrono::seconds(10);
+    barrier.poll = std::chrono::milliseconds(2);
+    service.set_barrier(barrier);
+    auto login = std::async(std::launch::async, [&] { return service.login(LoginRequest{id, std::string(32, 'a')}, 7); });
+    CHECK(login.wait_for(std::chrono::milliseconds(150)) == std::future_status::timeout, "the log-in waits");
+    CHECK(characters.loads == 0, "and loads nothing meanwhile");
+    api.inventory_gate.release();
+    CHECK(login.wait_for(std::chrono::seconds(5)) == std::future_status::ready, "it goes on when both writes are done");
+    const LoginResult r = login.get();
+    CHECK(r.accepted && r.character.items.size() == 1 && r.character.items[0].instance_guid == test_mail_saver_hex(63), "it loads the bags of the final save, not the older ones");
+    CHECK(saver.flush(std::chrono::seconds(5)) && !saver.character_busy(id), "and the saver is idle");
+}
+
+AOC_REGISTER_TEST(test_login_waits_for_the_savers_queued_bag_write);
 AOC_REGISTER_TEST(test_mail_saver_forwards_the_three_mail_calls);
-AOC_REGISTER_TEST(test_mail_saver_save_inventory_now_passes_the_six_arguments);
-AOC_REGISTER_TEST(test_mail_saver_save_inventory_now_waits_for_the_same_characters_inventory);
+AOC_REGISTER_TEST(test_mail_saver_claim_passes_the_claims_and_the_bags);
+AOC_REGISTER_TEST(test_mail_saver_claim_waits_for_the_same_characters_inventory);
+AOC_REGISTER_TEST(test_mail_saver_claim_drops_an_older_queued_bag);
 AOC_REGISTER_TEST(test_mail_saver_mail_throw_answers_failed);
-AOC_REGISTER_TEST(test_mail_saver_inventory_throw_answers_unavailable);
+AOC_REGISTER_TEST(test_mail_saver_claim_throw_answers_unavailable);

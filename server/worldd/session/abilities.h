@@ -33,6 +33,10 @@
 //             montage to its end section and, kRestEndEffectDelay later, removes the effect and puts the regeneration
 //             back; the ability item stays until the next Rest replaces it, as in the capture.  A second Rest while one is
 //             running replaces the first in one step (pkt#8240).  A Sprint or a Dodge ends it.
+//             Every end of a Rest the client started jumps its item with bBranchPredictedOnAutonomous 0: the client keeps its own montage in the loop
+//             and takes the jump only as the server's branch.  kRestMontageEndDelay after the jump, when the montage is over, the item's montage is cleared
+//             (the item stays listed, bBranchPredictedOnAutonomous 0, a new AnimationCounter), as the game's server does for its items; a Rest that replaces
+//             the ended one in that time keeps its own item.  The Rest a /sit starts for itself is not cleared.
 //             A second press (ServerEndAbility with the item's ServerInstanceId) ends it as a cancel does.  A fight ends it too: the Rest effect's fragility breaks it.
 //    anything else, or a Sprint or Dodge that is refused: ClientEndAbility(ClientInstanceId) and nothing else.
 //
@@ -153,6 +157,12 @@ public:
     /// Where the Rest montage's end section ("SitEnd", Ability.CancelSectionName) starts: MontagePosition 5.82606792 in
     /// pkt#8318.
     static constexpr float kRestSitEndPosition = 5.82606792f;
+    /// How long the Rest montage is: its last section, where the jump lands (the stand-up), runs from kRestSitEndPosition to this.
+    static constexpr double kRestMontageLength = 6.89513;
+    /// How long after the jump to the end section the montage is over and the server clears the item's montage (the item stays listed): the montage's length less where the jump
+    /// lands, 1.069 s [R: every item the game's server clears when its montage ends: a Dodge 0.95 s after its start, a cast of the fishing rod 1.97 to 2.04 s after its jump to the last
+    /// section whose montage has 1.93 s left].
+    static constexpr double kRestMontageEndDelay = kRestMontageLength - static_cast<double>(kRestSitEndPosition);
     /// Items.Duration of an infinite effect: FLT_MAX, as in pkt#8228.
     static constexpr float kInfiniteDuration = 3.40282347e+38f;
     /// A player no accepted move has been heard from for this long counts as standing (the e2e capture's moves are 0.21 s
@@ -307,9 +317,11 @@ private:
         int64_t                 instance;
         bool                    ended = false;               // cancelled, or replaced: the item stays, the effect goes
         bool                    by_server = false;           // the server began it (an emote), not the client's own trigger: its item is not one the client predicted
+        bool                    client_told = false;         // ClientEndAbility went out for this instance (it goes out once)
         std::optional<double>   effect_due;                  // the Rest effect is added then
         std::optional<int64_t>  effect_key;                  // the Rest effect, once added
         std::optional<double>   remove_due;                  // and removed then
+        std::optional<double>   clear_due;                   // after the jump to the end section: the item's montage is cleared then (a Rest the client started; the item stays)
     };
     struct PendingEnd {
         int32_t client_id;
@@ -344,9 +356,14 @@ private:
     void   end_evasion(double t);
     void   end_dodge_items(double t);
     void   start_rest(int32_t id, double t, bool by_server = false);
-    void   release_rest(double t, const char* why);
+    /// `tell`: the Rest ends because the client asked (ServerEndAbility), so ClientEndAbility(its id) goes in the same step.
+    void   release_rest(double t, const char* why, bool tell = false);
+    /// A Rest that had ended already, and the client's ServerEndAbility comes now: ClientEndAbility(its id) at once, with the effect that was left.
+    void   tell_rest_end(double t);
     void   add_rest_effect(double t);
     void   remove_rest_effect(double t);
+    /// The jumped Rest's montage is over: its item (still this Rest's) goes on listed with no montage.
+    void   clear_rest_montage(double t);
     void   regenerate(double t);
     /// The StaminaRegeneration item as the pawn should show it at `t`: 0 while regeneration is stopped, its rate otherwise (put into `c` when it differs
     /// from what the pawn shows; nothing when the pawn has no such item).

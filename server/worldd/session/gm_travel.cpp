@@ -1118,27 +1118,21 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
             }
             out.message = out.character + ": mail " + r.mail_id + " sent; " + std::to_string(r.unread) + " unread";
         } else {
-            PositionSink* sink = world_.position_sink();
-            if (!sink) return failed(GmStatus::FailedPrecondition, "this world has no character service: a character who is not in the world cannot be mailed");
-            const svc::CharacterResult found = sink->character_by_name(who);
-            if (found.status == svc::CallStatus::NotFound) return failed(GmStatus::NotFound, "no character is named \"" + who + "\"");
-            if (found.status != svc::CallStatus::Ok) {
-                return failed(GmStatus::FailedPrecondition, "the character service could not look up \"" + who + "\": " + svc::call_status_name(found.status));
-            }
-            if (found.character.id.empty()) return failed(GmStatus::NotFound, "no character is named \"" + who + "\"");
-            out.character = found.character.name;
-            svc::NewMail mail;
-            mail.sender = sender;
-            mail.subject = subject;
-            mail.body = body;
-            mail.items = std::move(stacks);
-            const svc::MailResult r = sink->create_mail(found.character.id, mail);
-            if (r.status != svc::CallStatus::Ok) {
-                const bool missing = r.status == svc::CallStatus::NotFound;
-                return failed(missing ? GmStatus::NotFound : GmStatus::FailedPrecondition,
-                              r.reason.empty() ? "the character service refused the mail: " + std::string(svc::call_status_name(r.status)) : r.reason);
-            }
-            out.message = out.character + ": mail " + r.mail.id + " is in the store; it waits for the character's next login";
+            if (!world_.position_sink()) return failed(GmStatus::FailedPrecondition, "this world has no character service: a character who is not in the world cannot be mailed");
+            // The lookup by name and the create are two calls of the character service: they run on the world's mail worker, never on this thread (a slow or down service
+            // must not stop the world).  The answer is the pending ticket, filled by poll() when the worker has it.
+            MailJobRequest request;
+            request.kind = MailJobKind::GmSend;
+            request.character_name = who;
+            request.new_mail.sender = sender;
+            request.new_mail.subject = subject;
+            request.new_mail.body = body;
+            request.new_mail.items = std::move(stacks);
+            const uint64_t ticket = world_.submit_mail_job(std::move(request));
+            offline_sends_[ticket] = OfflineSend{who, by, fields_for_log(fields), std::move(when_done)};
+            out.pending = true;
+            out.ticket = ticket;
+            return out;
         }
     } else if (def->name == "give-experience") {
         const PlayerSession::GmXpResult r = handle.player->gm_give_experience(*handle.connection, whole("amount"), now_(), by);
@@ -1227,7 +1221,45 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
     return out;
 }
 
+void GmTravel::poll() {
+    for (auto it = offline_sends_.begin(); it != offline_sends_.end();) {
+        MailJobAnswer answer;
+        if (!world_.take_mail_job(it->first, answer)) {
+            ++it;
+            continue;
+        }
+        const uint64_t ticket = it->first;
+        OfflineSend send = std::move(it->second);
+        it = offline_sends_.erase(it);
+        GmRunResult done;
+        done.command = "send-mail";
+        done.character = send.typed;
+        bool refused = true;
+        if (answer.lookup == svc::CallStatus::NotFound) {
+            done.status = GmStatus::NotFound;
+            done.message = "no character is named \"" + send.typed + "\"";
+        } else if (answer.lookup != svc::CallStatus::Ok) {
+            done.status = GmStatus::FailedPrecondition;
+            done.message = "the character service could not look up \"" + send.typed + "\": " + svc::call_status_name(answer.lookup);
+        } else if (answer.created.status != svc::CallStatus::Ok) {
+            done.character = answer.lookup_name;
+            const bool missing = answer.created.status == svc::CallStatus::NotFound;
+            done.status = missing ? GmStatus::NotFound : GmStatus::FailedPrecondition;
+            done.message = answer.created.reason.empty() ? "the character service refused the mail: " + std::string(svc::call_status_name(answer.created.status)) : answer.created.reason;
+        } else {
+            refused = false;
+            done.status = GmStatus::Ok;
+            done.character = answer.lookup_name;
+            done.message = done.character + ": mail " + answer.created.mail.id + " is in the store; it waits for the character's next login";
+        }
+        spdlog::info("[admin] run send-mail by {}: character=\"{}\" fields={} -> {}{}", log_text(send.by), log_text(done.character), send.fields, refused ? "refused: " : "", log_text(done.message));
+        if (send.when_done) send.when_done(done);
+        else pending_runs_[ticket] = std::move(done);
+    }
+}
+
 bool GmTravel::take_run(uint64_t ticket, GmRunResult& out) {
+    poll();   // (a caller that polls for the answer needs no loop of its own to learn that the worker has it)
     const auto it = pending_runs_.find(ticket);
     if (it == pending_runs_.end()) return false;
     out = std::move(it->second);

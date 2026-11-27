@@ -655,8 +655,8 @@ void PlayerSession::finish(const char* why) {
     }
     saved_ = loaded_;
     if (handed_over_ > 0 || position_changed(/*with_yaw=*/true)) hand_over(why, /*periodic=*/false);
-    // the inventory, too, if it changed at all: what an earlier hand-over gave the saver may have been lost, and the latest wins
-    if (inventory_changed_) hand_over_inventory(why, /*periodic=*/false);
+    // the inventory, too, if it changed at all: what an earlier hand-over gave the saver may have been lost, and the latest wins; a mail claim still in flight is settled first
+    if (!mail_settle_on_finish() && inventory_changed_) hand_over_inventory(why, /*periodic=*/false);
     // and the progress (plan D1): handed over at once when it changed, and once more here for the same reason
     if (progress_changed_) hand_over_progress(why);
 }
@@ -718,7 +718,7 @@ void PlayerSession::hand_over_progress(const char* why) {
 }
 
 void PlayerSession::hand_over_inventory(const char* why, bool periodic) {
-    inventory_dirty_ = false;
+    if (mail_defers_hand_over(why, periodic)) return;   // (a claim in flight stores these bags: the save waits for its answer; otherwise this clears inventory_dirty_)
     if (!sink_) return;
     std::vector<svc::InventoryItem> items = inventory_.items();
     const size_t n = items.size();

@@ -176,7 +176,7 @@ void Endpoint::on_handshake(const Address& from, const uint8_t* data, size_t len
                 carried_result->character.friend_requests = old.player->friend_requests();
             }
         }
-        remove(from, carried ? "reconnected, keeping its login" : "reconnected");
+        remove(from, carried ? "reconnected, keeping its login" : "reconnected", /*keep_login_mark=*/carried);
     }
 
     const auto seqs = conn::initial_sequences(p->cookie);
@@ -232,6 +232,7 @@ void Endpoint::post_login_result(uint64_t session_id, LoginResult result) {
 }
 
 void Endpoint::on_login_result(Session& s, LoginResult result, Clock::time_point now) {
+    if (cfg_.players) cfg_.players->login_ended(s.id);
     if (s.closing) return;  // already kicked or refused
     if (result.accepted) {
         bool took_lists = false;   // the old session was still here, and its list was taken from it
@@ -339,11 +340,12 @@ void Endpoint::start_player(Session& s, Clock::time_point now) {
     }
 }
 
-void Endpoint::remove(const Address& a, const char* why) {
+void Endpoint::remove(const Address& a, const char* why, bool keep_login_mark) {
     auto it = sessions_.find(a);
     if (it == sessions_.end()) return;
     Session& s = *it->second;
     spdlog::info("[endpoint] {} ({}): {}", a.to_string(), s.request.character_id, why);
+    if (cfg_.players && !keep_login_mark) cfg_.players->login_ended(s.id);   // (a log-in that goes on under the same id keeps its mark)
     if (s.player) s.player->finish(why);   // the last good position is saved whatever ended the session
     auto c = by_character_.find(s.request.character_id);
     if (c != by_character_.end() && c->second == a) by_character_.erase(c);
@@ -384,9 +386,9 @@ void Endpoint::tick(Clock::time_point now) {
     }
     for (auto& [id, result] : done) {
         const auto at = by_id_.find(id);
-        if (at == by_id_.end()) continue;  // its session is gone
-        const auto s = sessions_.find(at->second);
+        const auto s = at == by_id_.end() ? sessions_.end() : sessions_.find(at->second);
         if (s != sessions_.end() && s->second->id == id) on_login_result(*s->second, std::move(result), now);
+        else if (cfg_.players) cfg_.players->login_ended(id);   // its session is gone: the mark its log-in set after that ends here
     }
     log_refused_for_limit(now);
 // [C_Y_B - CoA]

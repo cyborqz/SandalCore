@@ -14,7 +14,9 @@
 #pragma once
 
 #include "svc/services.h"
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace aoc { namespace worldd {
@@ -63,14 +65,43 @@ public:
     LoginService(svc::GatewayApi& gateway, svc::CharacterApi& characters, svc::QuestApi* quests = nullptr)
         : gateway_(gateway), characters_(characters), quests_(quests) {}
 
-    /// Redeems the ticket for this server and loads the character.  Blocks
-    /// on the services: call it off the network thread.
-    LoginResult login(const LoginRequest& req, uint32_t server_id);
+    /// The log-in barrier: before the character is read, the log-in waits until `writes_pending(character id)` is false (the world answers true while the character has a mail
+    /// claim without its answer, in a session or on the mail worker, or a write still queued or running in the saver), so a log-in never starts from bags that such a write can still
+    /// change.  The wait never holds the log-in thread: advance() answers "wait" with a time, and the LoginWorker serves the other log-ins until then.  Past `bound` the log-in is
+    /// refused with the "try again" text and nothing is loaded.
+    struct Barrier {
+        /// Called on the log-in's thread right after the gateway redeemed the ticket for the character, before the barrier is asked: the world marks the character (an id named in a
+        /// handshake that was never redeemed marks nothing).  Whoever applies or refuses the log-in's result ends the mark.
+        std::function<void(uint64_t session_id, const std::string& character_id)> redeemed;
+        std::function<bool(const std::string&)> writes_pending;
+        std::chrono::milliseconds                bound{20000};   // well under the client's 120 s for a log-in
+        std::chrono::milliseconds                poll{25};
+    };
+    void set_barrier(Barrier barrier) { barrier_ = std::move(barrier); }
+
+    /// One log-in on its way: what advance() remembers between its calls, so a log-in that waits is not started over (its ticket is redeemed once).
+    struct Attempt {
+        uint64_t     session_id = 0;
+        LoginRequest request;
+        bool         redeemed = false;   // the ticket was redeemed for the character
+        int64_t      account_id = 0;     // the account the gateway redeemed it for
+        bool         held = false;       // the barrier held it at least once
+        std::chrono::steady_clock::time_point held_since{};   // when it first did
+        std::chrono::steady_clock::time_point not_before{};   // a held log-in is looked at again then
+    };
+
+    /// Takes the log-in as far as it goes without waiting.  True: it is finished and `out` is its result.  False: the barrier holds it; ask again at `attempt.not_before` (the
+    /// LoginWorker does, between other log-ins).  Blocks only on the services' own calls: call it off the network thread.
+    bool advance(Attempt& attempt, uint32_t server_id, LoginResult& out);
+
+    /// Redeems the ticket for this server and loads the character, sleeping where the barrier holds it (a caller with other log-ins to serve uses advance() instead).
+    LoginResult login(const LoginRequest& req, uint32_t server_id, uint64_t session_id = 0);
 
 private:
     svc::GatewayApi& gateway_;
     svc::CharacterApi& characters_;
     svc::QuestApi*     quests_ = nullptr;
+    Barrier            barrier_;
 };
 
 }} // namespace aoc::worldd

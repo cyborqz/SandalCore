@@ -6,6 +6,9 @@
 // ============================================================================
 #include "login/login_worker.h"
 
+#include <algorithm>
+#include <chrono>
+
 namespace aoc { namespace worldd {
 
 LoginWorker::LoginWorker(LoginService& service, uint32_t server_id, Done done)
@@ -23,22 +26,42 @@ LoginWorker::~LoginWorker() {
 void LoginWorker::submit(uint64_t session_id, LoginRequest request) {
     {
         std::lock_guard<std::mutex> lock(mu_);
-        queue_.emplace_back(session_id, std::move(request));
+        LoginService::Attempt attempt;
+        attempt.session_id = session_id;
+        attempt.request = std::move(request);
+        queue_.push_back(std::move(attempt));
     }
     cv_.notify_one();
 }
 
 void LoginWorker::run() {
+    std::unique_lock<std::mutex> lock(mu_);
     for (;;) {
-        std::pair<uint64_t, LoginRequest> job;
-        {
-            std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
-            if (stop_) return;
-            job = std::move(queue_.front());
-            queue_.pop_front();
+        if (stop_) return;
+        // The first login that may be looked at now: one that waits for its character is passed over until its time.
+        const auto now = std::chrono::steady_clock::now();
+        auto wake = std::chrono::steady_clock::time_point::max();
+        auto pick = queue_.end();
+        for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+            if (it->not_before <= now) {
+                pick = it;
+                break;
+            }
+            wake = std::min(wake, it->not_before);
         }
-        done_(job.first, service_.login(job.second, server_id_));
+        if (pick == queue_.end()) {
+            if (wake == std::chrono::steady_clock::time_point::max()) cv_.wait(lock);
+            else cv_.wait_until(lock, wake);
+            continue;
+        }
+        LoginService::Attempt attempt = std::move(*pick);
+        queue_.erase(pick);
+        lock.unlock();
+        LoginResult result;
+        const bool finished = service_.advance(attempt, server_id_, result);
+        if (finished) done_(attempt.session_id, std::move(result));
+        lock.lock();
+        if (!finished) queue_.push_back(std::move(attempt));   // (it waits for its character: the others go first)
     }
 }
 

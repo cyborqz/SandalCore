@@ -23,17 +23,23 @@ static void test_rest_and_sprint_end_by_server_instance() {
         CHECK(e.rt().resting() && e.m.has_effect(kRestEffect), "(the Rest is on)");
         const auto server = e.m.server_of.find(id);
         CHECK(server != e.m.server_of.end(), "(the Rest's item names its ServerInstanceId)");
+        CHECK(e.m.end_ids().empty(), "(the client has not been told of an end yet)");
         if (server != e.m.server_of.end()) end_instance(e, server->second);
         e.play(0.1, false);
         bool jumped = false;
         for (const auto& [eid, a] : e.m.abilities) jumped = jumped || (a.ability == kRest && a.may_jump && a.montage_position == AbilityRuntime::kRestSitEndPosition);
         CHECK(jumped && !e.rt().resting(), "ServerEndAbility stands the character up: the Rest ends and the montage jumps to its end section");
+        CHECK(e.m.end_ids() == std::vector<int32_t>{id} && id == 42, "the client is told in the same step: exactly one ClientEndAbility, with the Rest's client id 42");
         e.play(0.3, false);
         CHECK(!e.m.has_effect(kRestEffect) && e.m.stats[kHealthRegen] == 0.6f && e.m.stats[kManaRegen] == 0.6f,
               "the Rest's effect is removed a moment later and the regeneration is back");
-        CHECK(!e.m.end_before_removal && !e.h.s->abilities_failed() && e.m.unreadable == 0, "(nothing failed)");
+        if (server != e.m.server_of.end()) end_instance(e, server->second);
+        e.play(0.3, false);
+        CHECK(e.m.end_ids() == std::vector<int32_t>{id}, "a second ServerEndAbility for the same instance tells the client nothing more");
+        // (the Rest's item stays listed after its end, as in the recorded game: the client's end of it came while the item was still there, so end_before_removal does not apply here)
+        CHECK(!e.h.s->abilities_failed() && e.m.unreadable == 0, "(nothing failed)");
     }
-    // the Sprint: the same server id, and the client is not told again
+    // the Sprint: the same server id; the server ends it, so the client is told in the same step
     {
         Run s;
         s.next_id = 7;
@@ -47,7 +53,10 @@ static void test_rest_and_sprint_end_by_server_instance() {
         s.play(0.3, true);
         CHECK(!s.rt().sprinting() && !s.m.has_ability(kSprint) && !s.m.has_effect(kSprintEffect) && s.m.stats[kMoveSpeedMult] == 1.0f,
               "ServerEndAbility with the server's instance id ends the Sprint and its effect");
-        CHECK(s.m.end_ids().empty(), "... and the client is not told again: it ended it");
+        CHECK(s.m.end_ids() == std::vector<int32_t>{id} && id == 7, "... and the client is told in that step: exactly one ClientEndAbility, with the Sprint's client id 7");
+        end_instance(s, server->second);
+        s.play(0.3, true);
+        CHECK(s.m.end_ids() == std::vector<int32_t>{id}, "a second ServerEndAbility for the same instance tells the client nothing more");
     }
 }
 AOC_REGISTER_TEST(test_rest_and_sprint_end_by_server_instance);

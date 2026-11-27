@@ -26,3 +26,4 @@
 #include "session_raid_tests.inc"
 #include "session_social_scope_tests.inc"
 #include "session_mail_tests.inc"
+#include "session_mail_claim_tests.inc"

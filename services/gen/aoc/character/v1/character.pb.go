@@ -3726,6 +3726,173 @@ func (x *CreateMailResponse) GetMail() *Mail {
 	return nil
 }
 
+// Mail: one attachment a claim takes: the mail and the attachment's instance guid.
+type MailClaim struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MailId        string                 `protobuf:"bytes,1,opt,name=mail_id,json=mailId,proto3" json:"mail_id,omitempty"`                   // 32 lowercase hex digits, not all zero
+	InstanceGuid  string                 `protobuf:"bytes,2,opt,name=instance_guid,json=instanceGuid,proto3" json:"instance_guid,omitempty"` // 32 lowercase hex digits, not all zero
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MailClaim) Reset() {
+	*x = MailClaim{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MailClaim) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MailClaim) ProtoMessage() {}
+
+func (x *MailClaim) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MailClaim.ProtoReflect.Descriptor instead.
+func (*MailClaim) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *MailClaim) GetMailId() string {
+	if x != nil {
+		return x.MailId
+	}
+	return ""
+}
+
+func (x *MailClaim) GetInstanceGuid() string {
+	if x != nil {
+		return x.InstanceGuid
+	}
+	return ""
+}
+
+// Mail: the attachments to claim and the bags that hold them after the claim (see ClaimMailItems). The bags are what SaveInventory takes: the items, and the wallet,
+// processing jobs, known recipes and warehouse when their replace flags say so.
+type ClaimMailItemsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId   string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"`
+	Claims        []*MailClaim           `protobuf:"bytes,2,rep,name=claims,proto3" json:"claims,omitempty"`       // at least one, each attachment once
+	Inventory     *SaveInventoryRequest  `protobuf:"bytes,3,opt,name=inventory,proto3" json:"inventory,omitempty"` // id is ignored: character_id names the character
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClaimMailItemsRequest) Reset() {
+	*x = ClaimMailItemsRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimMailItemsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimMailItemsRequest) ProtoMessage() {}
+
+func (x *ClaimMailItemsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimMailItemsRequest.ProtoReflect.Descriptor instead.
+func (*ClaimMailItemsRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *ClaimMailItemsRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *ClaimMailItemsRequest) GetClaims() []*MailClaim {
+	if x != nil {
+		return x.Claims
+	}
+	return nil
+}
+
+func (x *ClaimMailItemsRequest) GetInventory() *SaveInventoryRequest {
+	if x != nil {
+		return x.Inventory
+	}
+	return nil
+}
+
+type ClaimMailItemsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Claimed       int32                  `protobuf:"varint,1,opt,name=claimed,proto3" json:"claimed,omitempty"`   // how many attachments the request marked claimed now
+	Replayed      bool                   `protobuf:"varint,2,opt,name=replayed,proto3" json:"replayed,omitempty"` // true: the request repeated an earlier one, so nothing was written now
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClaimMailItemsResponse) Reset() {
+	*x = ClaimMailItemsResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimMailItemsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimMailItemsResponse) ProtoMessage() {}
+
+func (x *ClaimMailItemsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimMailItemsResponse.ProtoReflect.Descriptor instead.
+func (*ClaimMailItemsResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ClaimMailItemsResponse) GetClaimed() int32 {
+	if x != nil {
+		return x.Claimed
+	}
+	return 0
+}
+
+func (x *ClaimMailItemsResponse) GetReplayed() bool {
+	if x != nil {
+		return x.Replayed
+	}
+	return false
+}
+
 var File_aoc_character_v1_character_proto protoreflect.FileDescriptor
 
 const file_aoc_character_v1_character_proto_rawDesc = "" +
@@ -4069,7 +4236,17 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x05items\x18\x05 \x03(\v2\x1a.aoc.character.v1.MailItemR\x05items\x12\"\n" +
 	"\rexpires_in_ms\x18\x06 \x01(\x03R\vexpiresInMs\"@\n" +
 	"\x12CreateMailResponse\x12*\n" +
-	"\x04mail\x18\x01 \x01(\v2\x16.aoc.character.v1.MailR\x04mail*\xde\x01\n" +
+	"\x04mail\x18\x01 \x01(\v2\x16.aoc.character.v1.MailR\x04mail\"I\n" +
+	"\tMailClaim\x12\x17\n" +
+	"\amail_id\x18\x01 \x01(\tR\x06mailId\x12#\n" +
+	"\rinstance_guid\x18\x02 \x01(\tR\finstanceGuid\"\xb5\x01\n" +
+	"\x15ClaimMailItemsRequest\x12!\n" +
+	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x123\n" +
+	"\x06claims\x18\x02 \x03(\v2\x1b.aoc.character.v1.MailClaimR\x06claims\x12D\n" +
+	"\tinventory\x18\x03 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\tinventory\"N\n" +
+	"\x16ClaimMailItemsResponse\x12\x18\n" +
+	"\aclaimed\x18\x01 \x01(\x05R\aclaimed\x12\x1a\n" +
+	"\breplayed\x18\x02 \x01(\bR\breplayed*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +
 	"\x1aITEM_CONTAINER_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ITEM_CONTAINER_BACKPACK\x10\x01\x12\x1c\n" +
@@ -4077,7 +4254,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x14ITEM_CONTAINER_QUEST\x10\x03\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE0\x10\x04\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE1\x10\x05\x12\x1c\n" +
-	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\x8c\n" +
+	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\xf1\n" +
 	"\n" +
 	"\x10CharacterService\x12f\n" +
 	"\x0fCreateCharacter\x12(.aoc.character.v1.CreateCharacterRequest\x1a).aoc.character.v1.CreateCharacterResponse\x12c\n" +
@@ -4093,7 +4270,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\bGetMails\x12!.aoc.character.v1.GetMailsRequest\x1a\".aoc.character.v1.GetMailsResponse\x12Q\n" +
 	"\bSaveMail\x12!.aoc.character.v1.SaveMailRequest\x1a\".aoc.character.v1.SaveMailResponse\x12W\n" +
 	"\n" +
-	"CreateMail\x12#.aoc.character.v1.CreateMailRequest\x1a$.aoc.character.v1.CreateMailResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
+	"CreateMail\x12#.aoc.character.v1.CreateMailRequest\x1a$.aoc.character.v1.CreateMailResponse\x12c\n" +
+	"\x0eClaimMailItems\x12'.aoc.character.v1.ClaimMailItemsRequest\x1a(.aoc.character.v1.ClaimMailItemsResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
 
 var (
 	file_aoc_character_v1_character_proto_rawDescOnce sync.Once
@@ -4108,7 +4286,7 @@ func file_aoc_character_v1_character_proto_rawDescGZIP() []byte {
 }
 
 var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_aoc_character_v1_character_proto_goTypes = []any{
 	(ItemContainer)(0),                 // 0: aoc.character.v1.ItemContainer
 	(*Position)(nil),                   // 1: aoc.character.v1.Position
@@ -4157,6 +4335,9 @@ var file_aoc_character_v1_character_proto_goTypes = []any{
 	(*SaveMailResponse)(nil),           // 44: aoc.character.v1.SaveMailResponse
 	(*CreateMailRequest)(nil),          // 45: aoc.character.v1.CreateMailRequest
 	(*CreateMailResponse)(nil),         // 46: aoc.character.v1.CreateMailResponse
+	(*MailClaim)(nil),                  // 47: aoc.character.v1.MailClaim
+	(*ClaimMailItemsRequest)(nil),      // 48: aoc.character.v1.ClaimMailItemsRequest
+	(*ClaimMailItemsResponse)(nil),     // 49: aoc.character.v1.ClaimMailItemsResponse
 }
 var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	1,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
@@ -4201,37 +4382,41 @@ var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	40, // 39: aoc.character.v1.SaveMailRequest.mail:type_name -> aoc.character.v1.Mail
 	39, // 40: aoc.character.v1.CreateMailRequest.items:type_name -> aoc.character.v1.MailItem
 	40, // 41: aoc.character.v1.CreateMailResponse.mail:type_name -> aoc.character.v1.Mail
-	19, // 42: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
-	21, // 43: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
-	23, // 44: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
-	25, // 45: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
-	27, // 46: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
-	29, // 47: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
-	31, // 48: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
-	33, // 49: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
-	35, // 50: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
-	37, // 51: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
-	41, // 52: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
-	43, // 53: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
-	45, // 54: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
-	20, // 55: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
-	22, // 56: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
-	24, // 57: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
-	26, // 58: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
-	28, // 59: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
-	30, // 60: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
-	32, // 61: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
-	34, // 62: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
-	36, // 63: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
-	38, // 64: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
-	42, // 65: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
-	44, // 66: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
-	46, // 67: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
-	55, // [55:68] is the sub-list for method output_type
-	42, // [42:55] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	47, // 42: aoc.character.v1.ClaimMailItemsRequest.claims:type_name -> aoc.character.v1.MailClaim
+	31, // 43: aoc.character.v1.ClaimMailItemsRequest.inventory:type_name -> aoc.character.v1.SaveInventoryRequest
+	19, // 44: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
+	21, // 45: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
+	23, // 46: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
+	25, // 47: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
+	27, // 48: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
+	29, // 49: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
+	31, // 50: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
+	33, // 51: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
+	35, // 52: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
+	37, // 53: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
+	41, // 54: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
+	43, // 55: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
+	45, // 56: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
+	48, // 57: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
+	20, // 58: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
+	22, // 59: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
+	24, // 60: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
+	26, // 61: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
+	28, // 62: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
+	30, // 63: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
+	32, // 64: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
+	34, // 65: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
+	36, // 66: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
+	38, // 67: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
+	42, // 68: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
+	44, // 69: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
+	46, // 70: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
+	49, // 71: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
+	58, // [58:72] is the sub-list for method output_type
+	44, // [44:58] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_aoc_character_v1_character_proto_init() }
@@ -4248,7 +4433,7 @@ func file_aoc_character_v1_character_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_character_v1_character_proto_rawDesc), len(file_aoc_character_v1_character_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   46,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -4,7 +4,7 @@
 package charactergrpc
 
 // Mail (migration 0027) over gRPC: GetMails maps a character's mails and their attachments, SaveMail passes one mail whole and maps a stale save to
-// FailedPrecondition, CreateMail passes the admin send's fields and returns the stored mail, a store without mails answers Unimplemented, and on the real store the
+// FailedPrecondition, CreateMail passes the admin send's fields and returns the stored mail (ClaimMailItems is in charactergrpc_mailclaim_test.go), a store without mails answers Unimplemented, and on the real store the
 // whole path works: an admin send, a read with the detail, a read mark and a claim, a stale save refused, a delete that hides the mail, and NotFound for an unknown
 // character or mail. GetCharacter with the items carries the unread count at the login.
 
@@ -45,6 +45,11 @@ type mailFake struct {
 	unreadErr   error
 	unreadID    string
 	unreadAsked int
+	claimID     string
+	claimed     []character.MailClaim
+	claimBags   character.ClaimBags
+	claimRet    character.ClaimResult
+	claimAsked  int
 }
 
 var _ MailStore = (*mailFake)(nil)
@@ -68,6 +73,13 @@ func (m *mailFake) SaveMail(_ context.Context, id string, mail character.Mail) e
 	m.saveAsked++
 	m.saveID, m.saved = id, mail
 	return m.err
+}
+
+func (m *mailFake) ClaimMailItems(_ context.Context, id string, claims []character.MailClaim, bags character.ClaimBags) (character.ClaimResult, error) {
+	m.asked++
+	m.claimAsked++
+	m.claimID, m.claimed, m.claimBags = id, claims, bags
+	return m.claimRet, m.err
 }
 
 func (m *mailFake) CreateMail(_ context.Context, id string, mail character.NewMail) (character.Mail, error) {
@@ -258,6 +270,9 @@ func TestMailCallsOnAStoreWithoutMails(t *testing.T) {
 	if _, err := c.CreateMail(ctx, &characterv1.CreateMailRequest{CharacterId: mailProtoGUID, Sender: "Brannoc", Subject: "Welcome"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CreateMail on a store without mails: %v, want Unimplemented", err)
 	}
+	if _, err := c.ClaimMailItems(ctx, &characterv1.ClaimMailItemsRequest{CharacterId: mailProtoGUID, Inventory: &characterv1.SaveInventoryRequest{}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("ClaimMailItems on a store without mails: %v, want Unimplemented", err)
+	}
 }
 
 // The unread count comes with the character load (with the items) as one count query, a failing count still answers the character with 0,
@@ -340,11 +355,24 @@ func TestMailsThroughTheServiceOnTheRealStore(t *testing.T) {
 	if !proto.Equal(got, mail) {
 		t.Errorf("the mail read back is %v, want the stored %v", got, mail)
 	}
-	// mark it read and claim the first attachment
+	// claim the first attachment (the bags and the mark in one call: a save does not claim), then mark the mail read
+	claim := claimRequest(id, mail.GetId(), mail.GetItems()[0].GetInstanceGuid())
+	claim.GetInventory().GetItems()[0].CreatedAtMs = mail.GetItems()[0].GetCreatedAtMs()
+	if _, err := c.ClaimMailItems(ctx, claim); err != nil {
+		t.Fatalf("ClaimMailItems for the first attachment: %v", err)
+	}
+	got = read()
 	got.Status = got.GetStatus() | character.MailStatusRead
-	got.Items[0].Claimed = true
+	forged := proto.Clone(got).(*characterv1.Mail)
+	forged.Items[1].Claimed = true
+	if _, err := c.SaveMail(ctx, &characterv1.SaveMailRequest{CharacterId: id, Mail: forged}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SaveMail that claims the second attachment: %v, want InvalidArgument", err)
+	}
+	if again := read(); again.GetItems()[1].GetClaimed() || again.GetStatus() != 0 {
+		t.Errorf("the refused save changed the mail to %v; want the second attachment unclaimed and no mark", again)
+	}
 	if _, err := c.SaveMail(ctx, &characterv1.SaveMailRequest{CharacterId: id, Mail: got}); err != nil {
-		t.Fatalf("SaveMail with the read mark and the claim: %v", err)
+		t.Fatalf("SaveMail with the read mark: %v", err)
 	}
 	after := read()
 	if after.GetStatus() != character.MailStatusRead || !after.GetItems()[0].GetClaimed() || after.GetItems()[1].GetClaimed() {

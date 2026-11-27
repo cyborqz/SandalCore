@@ -181,6 +181,13 @@ struct Characters final : characterv1::CharacterService::Service {
     std::string got_mails_character, got_save_mail_character, got_create_mail_character;
     int32_t reply_unread_mail_count = 0;
     int mails_calls = 0, save_mail_calls = 0, create_mail_calls = 0;
+    // the claim (ClaimMailItems): what the call carried and what the service answers
+    grpc::StatusCode claim_code = grpc::StatusCode::OK;
+    std::string claim_reason = "the claim is refused";
+    characterv1::ClaimMailItemsRequest got_claim;
+    int32_t reply_claimed = 0;
+    bool reply_replayed = false;
+    int claim_calls = 0;
     grpc::Status GetMails(grpc::ServerContext* ctx, const characterv1::GetMailsRequest* req, characterv1::GetMailsResponse* resp) override {
         auth = auth_of(ctx);
         ++mails_calls;
@@ -195,6 +202,15 @@ struct Characters final : characterv1::CharacterService::Service {
         got_save_mail_character = req->character_id();
         got_mail = mail_from_proto(req->mail());
         if (save_mail_code != grpc::StatusCode::OK) return grpc::Status(save_mail_code, save_mail_reason);
+        return grpc::Status::OK;
+    }
+    grpc::Status ClaimMailItems(grpc::ServerContext* ctx, const characterv1::ClaimMailItemsRequest* req, characterv1::ClaimMailItemsResponse* resp) override {
+        auth = auth_of(ctx);
+        ++claim_calls;
+        got_claim = *req;
+        if (claim_code != grpc::StatusCode::OK) return grpc::Status(claim_code, claim_reason);
+        resp->set_claimed(reply_claimed);
+        resp->set_replayed(reply_replayed);
         return grpc::Status::OK;
     }
     grpc::Status CreateMail(grpc::ServerContext* ctx, const characterv1::CreateMailRequest* req, characterv1::CreateMailResponse* resp) override {
@@ -544,6 +560,80 @@ static void test_mail_mapping(svc::GrpcServices& s, Characters& ch) {
     ch.reply_created = {};
 }
 
+/// Mail claim: the one call carries the attachments and the whole bags (items, wallet, jobs, recipes and warehouse, each replaced), and each answer of the service ends with the
+/// status the caller needs to tell "nothing was stored" (Refused, NotFound) from "no answer" (Unavailable, Failed).
+static void test_mail_claim_mapping(svc::GrpcServices& s, Characters& ch) {
+    std::printf("mail claim (ClaimMailItems)\n");
+    svc::InventoryItem bag;
+    bag.container = svc::ItemContainer::Resource1;
+    bag.slot = 7;
+    bag.item_record_id = 7001;
+    bag.instance_guid = "0123456789abcdef0123456789abcdef";
+    bag.quantity = 3;
+    bag.quality = 4;
+    bag.durability = 1.5f;
+    bag.created_at_ms = 1'700'000'000'000ll;
+    bag.persisted_health = 10.5f;
+    bag.lock_expiration = 99;
+    svc::WarehouseItem stored;
+    stored.area = "Riverlands";
+    stored.node_guid = 5;
+    stored.container_guid = 6;
+    stored.item = bag;
+    stored.item.instance_guid = "fedcba9876543210fedcba9876543210";
+    stored.item.slot = 2;
+    svc::ProcessingJob job;
+    job.job_guid = "aaaaaaaabbbbbbbbccccccccdddddddd";
+    job.station_key = "0123456789abcdef";
+    job.recipe_guid = 9;
+    job.quantity = 2;
+    job.duration_ms = 1000;
+    const std::vector<svc::MailClaim> claims = {{"11111111222222223333333344444444", bag.instance_guid}, {"55555555666666667777777788888888", "99999999aaaaaaaabbbbbbbbcccccccc"}};
+    ch.auth.clear();
+    ch.reply_claimed = 2;
+    const svc::MailClaimResult ok = s.claim_mail_items("char-a", claims, {bag}, {{1, 40}}, {job}, {11, 12}, {stored});
+    CHECK(ok.status == svc::CallStatus::Ok && ok.claimed == 2 && !ok.replayed && ok.reason.empty() && ch.auth == "Bearer " + kToken && ch.claim_calls == 1,
+          "claim_mail_items answers Ok with the count the service gave, carries the token, and is one call");
+    const characterv1::ClaimMailItemsRequest& got = ch.got_claim;
+    CHECK(got.character_id() == "char-a" && got.claims_size() == 2 && got.claims(0).mail_id() == claims[0].mail_id && got.claims(0).instance_guid() == claims[0].instance_guid &&
+              got.claims(1).mail_id() == claims[1].mail_id && got.claims(1).instance_guid() == claims[1].instance_guid,
+          "the request names the character and both attachments in order");
+    const characterv1::SaveInventoryRequest& inv = got.inventory();
+    CHECK(inv.items_size() == 1 && inv.items(0).container() == characterv1::ITEM_CONTAINER_RESOURCE1 && inv.items(0).slot() == 7 && inv.items(0).instance_guid() == bag.instance_guid &&
+              inv.items(0).quantity() == 3 && inv.items(0).quality() == 4 && inv.items(0).created_at_ms() == bag.created_at_ms && inv.items(0).persisted_health() == 10.5f &&
+              inv.items(0).lock_expiration() == 99,
+          "the bags go whole: every field of the item");
+    CHECK(inv.replace_wallet() && inv.wallet_size() == 1 && inv.wallet(0).currency_guid() == 1 && inv.wallet(0).amount() == 40 && inv.replace_processing_jobs() &&
+              inv.processing_jobs_size() == 1 && inv.processing_jobs(0).job_guid() == job.job_guid && inv.replace_known_recipes() && inv.known_recipes_size() == 2 &&
+              inv.replace_warehouse() && inv.warehouse_items_size() == 1 && inv.warehouse_items(0).area() == "Riverlands" && inv.warehouse_items(0).instance_guid() == stored.item.instance_guid,
+          "the wallet, the jobs, the recipes and the warehouse are replaced in the same call");
+    ch.reply_claimed = 0;
+    ch.reply_replayed = true;
+    const svc::MailClaimResult repeat = s.claim_mail_items("char-a", claims, {bag}, {}, {}, {}, {});
+    CHECK(repeat.status == svc::CallStatus::Ok && repeat.replayed && repeat.claimed == 0, "a repeat the service had already stored is Ok and says so");
+    ch.reply_replayed = false;
+    struct Case {
+        grpc::StatusCode code;
+        svc::CallStatus want;
+        const char* what;
+    };
+    for (const Case& c : {Case{grpc::StatusCode::ALREADY_EXISTS, svc::CallStatus::Refused, "AlreadyExists (claimed before with other bags)"},
+                          Case{grpc::StatusCode::INVALID_ARGUMENT, svc::CallStatus::Refused, "InvalidArgument (bags the rules refuse)"},
+                          Case{grpc::StatusCode::NOT_FOUND, svc::CallStatus::NotFound, "NotFound (not the character's mail)"},
+                          Case{grpc::StatusCode::UNAVAILABLE, svc::CallStatus::Unavailable, "Unavailable (no answer)"},
+                          Case{grpc::StatusCode::DEADLINE_EXCEEDED, svc::CallStatus::Unavailable, "DeadlineExceeded (no answer)"},
+                          Case{grpc::StatusCode::INTERNAL, svc::CallStatus::Failed, "Internal (the store failed: no answer either)"},
+                          Case{grpc::StatusCode::UNIMPLEMENTED, svc::CallStatus::Unsupported, "Unimplemented (a store that keeps no mails)"}}) {
+        ch.claim_code = c.code;
+        const svc::MailClaimResult r = s.claim_mail_items("char-a", claims, {bag}, {}, {}, {}, {});
+        const std::string what = std::string("claim_mail_items: ") + c.what;
+        CHECK(r.status == c.want && r.reason == "the claim is refused" && r.claimed == 0, what.c_str());
+        // only AlreadyExists says "an attachment is claimed already": the world logs it and treats it as a refusal
+        CHECK(r.claimed_before == (c.code == grpc::StatusCode::ALREADY_EXISTS), (what + (c.code == grpc::StatusCode::ALREADY_EXISTS ? " is marked claimed before" : " is not marked claimed before")).c_str());
+    }
+    ch.claim_code = grpc::StatusCode::OK;
+}
+
 /// Mail (migration 0027): the unread count at the login comes with the character load (GetCharacter with the items).
 static void test_unread_mail_count_at_login(svc::GrpcServices& s, Characters& ch) {
     std::printf("mail unread count at login\n");
@@ -678,6 +768,7 @@ int main() {
     test_friends_mapping(s, ch);
     test_name_lookup(s, ch);
     test_mail_mapping(s, ch);
+    test_mail_claim_mapping(s, ch);
     test_unread_mail_count_at_login(s, ch);
 
     std::printf("save_position (plan A6)\n");

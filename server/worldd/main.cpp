@@ -869,6 +869,8 @@ int main(int argc, char** argv) {
 
     CookieSigner signer;
     LoginService login(services, services, &quest_api);
+    login.set_barrier({[&players](uint64_t session, const std::string& id) { players.login_began(id, session); },   // (a redeemed log-in marks its character: new claims wait)
+                       [&players](const std::string& id) { return players.character_writes_pending(id); }});     // (a log-in waits for the character's unanswered claim and queued saves)
     Endpoint* endpoint_ptr = nullptr;
     LoginWorker worker(login, reg.server_id, [&](uint64_t id, LoginResult r) {
         endpoint_ptr->post_login_result(id, std::move(r));
@@ -1014,6 +1016,7 @@ int main(int argc, char** argv) {
             }
             guarded_tick(now);
             admin_queue.drain();
+            travel.poll();
             if (stream) {
                 stream->publish();
                 stream->note_loop(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - now));
@@ -1040,6 +1043,7 @@ int main(int argc, char** argv) {
             const auto started = Clock::now();
             guarded_tick(t);
             admin_queue.drain();
+            travel.poll();
             if (stream) stream->publish();
             const auto done = Clock::now();
             if (stream) stream->note_loop(std::chrono::duration_cast<std::chrono::microseconds>(done - started));

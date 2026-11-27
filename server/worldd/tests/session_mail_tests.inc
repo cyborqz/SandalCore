@@ -4,7 +4,8 @@
 //  tests/session_mail_tests.inc: the mail window's nine calls, the session's cache, the claim order and the unread count.
 //
 //  A fake mail store (PositionSink) keeps the character's mails the way the character service does: live mails newest first, a whole mail
-//  written at once, and the item's instance guid on every attachment.  The tests send the client's calls through the fake client and read the
+//  written at once, the item's instance guid on every attachment, and a claim as ONE call that stores the bags and the claimed marks together or
+//  neither (a repeat of a stored claim is answered Ok and stores nothing).  The tests send the client's calls through the fake client and read the
 //  PlayerController's chains (the headers, the storage events and the status answers) and the social component's blocks (the detail, the claim
 //  answers and the unread count).
 // ============================================================================
@@ -80,27 +81,40 @@ static svc::Character test_mail_record(const char* name, const std::array<uint32
 /// that is down is one answer pushed before the call.
 struct TestMailStore : PositionSink {
     void save(const std::string&, const svc::Position&) override {}
+    /// What a claim call answers and whether the store keeps the claim: Ok and stored is the normal call; Refused or NotFound stores nothing; Unavailable with `store` false is a call
+    /// that never arrived, with `store` true it is one whose answer was lost after the store had it.  `claimed_before` marks a Refused that says an attachment was claimed already.
+    struct ClaimStep {
+        svc::CallStatus status = svc::CallStatus::Ok;
+        bool            store = true;
+        bool            claimed_before = false;
+    };
+    std::mutex                      store_mu;   // the claim runs on the worker and a hand-over on the test's thread
     std::vector<svc::Mail>          mails;      // newest first, as load_mails answers
-    std::vector<svc::InventoryItem> bag_items;  // the last save_inventory_now
+    std::vector<svc::InventoryItem> bag_items;  // the bags the store holds: the last stored claim's, or the last bags a hand-over saved
     std::vector<svc::WalletEntry>   bag_wallet;
     std::vector<svc::ProcessingJob> bag_jobs;
     std::vector<int64_t>            bag_recipes;
     std::vector<svc::WarehouseItem> bag_warehouse;
-    std::vector<std::string>        ops;        // "load", "bag", "mail <id>", "create", in call order
+    std::vector<std::vector<svc::InventoryItem>> saved_bags;   // every bag a hand-over gave the saver (save_inventory), oldest first
+    std::vector<svc::MailClaim>     last_claims;
+    std::vector<std::string>        ops;        // "load", "claim", "mail <id>", "create", in call order
     svc::NewMail                    last_created;
-    std::deque<svc::CallStatus>     bag_answers;
+    std::deque<ClaimStep>           claim_script;   // one step per claim call; none left: Ok, stored (or Unavailable, not stored, while `claims_down`)
+    std::atomic<bool>               claims_down{false};   // the service does not answer a claim once the script is used up
+    std::atomic<int>                save_delay_ms{0};     // a bag hand-over (save_inventory) takes this long before the store has it
+    std::function<void()>           on_save;              // called as a bag hand-over (save_inventory) begins
     std::deque<svc::CallStatus>     mail_answers;
     svc::CallStatus                 load_status = svc::CallStatus::Ok;
     svc::CallStatus                 create_status = svc::CallStatus::Ok;
     std::string                     create_reason = "the store refused the mail";
-    std::atomic<size_t>             loads{0}, bag_saves{0}, mail_saves{0}, creates{0};
+    std::atomic<size_t>             loads{0}, claims{0}, mail_saves{0}, creates{0}, handovers{0};
     uint32_t                        next_mail = 500, next_item = 5'000;
     int                             gate_bits = 0;
     std::atomic<bool>               gate_open{true};
     std::mutex                      gate_mu;
     std::condition_variable         gate_cv;
 
-    // A call may be held at the worker (the test then sees the tick go on while the store is busy): bit 1 load, 2 bags, 4 mail, 8 create.
+    // A call may be held at the worker (the test then sees the tick go on while the store is busy): bit 1 load, 2 claim, 4 mail, 8 create.
     void block(int bits) {
         gate_bits = bits;
         gate_open = false;
@@ -180,20 +194,86 @@ struct TestMailStore : PositionSink {
         return result;
     }
 
-    svc::CallStatus save_inventory_now(const std::string&, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
-                                       std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
-                                       std::vector<svc::WarehouseItem> warehouse) override {
-        ++bag_saves;
-        ops.push_back("bag");
+    /// The whole claim is one call: every named attachment must be there and unclaimed, then the bags and the marks are stored together.  A claim that names attachments claimed
+    /// before is a repeat when the bags are the stored ones (Ok, nothing stored) and a refusal otherwise.
+    svc::MailClaimResult claim_mail_items(const std::string&, const std::vector<svc::MailClaim>& wanted, std::vector<svc::InventoryItem> items,
+                                          std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                          std::vector<svc::WarehouseItem> warehouse) override {
+        ++claims;
         wait_gate(2);
+        std::lock_guard<std::mutex> lock(store_mu);
+        ops.push_back("claim");
+        last_claims = wanted;
+        ClaimStep step;
+        if (!claim_script.empty()) {
+            step = claim_script.front();
+            claim_script.pop_front();
+        } else if (claims_down) {
+            step.status = svc::CallStatus::Unavailable;
+            step.store = false;
+        }
+        svc::MailClaimResult result;
+        result.status = step.status;
+        if (!step.store) {
+            result.reason = "the claim was not stored";
+            result.claimed_before = step.claimed_before;
+            return result;
+        }
+        size_t already = 0;
+        std::vector<svc::MailItem*> targets;
+        for (const svc::MailClaim& claim : wanted) {
+            svc::MailItem* found = nullptr;
+            for (svc::Mail& mail : mails) {
+                if (mail.id != claim.mail_id) continue;
+                for (svc::MailItem& item : mail.items) {
+                    if (item.item.instance_guid == claim.instance_guid) found = &item;
+                }
+            }
+            if (!found) {
+                result.status = svc::CallStatus::NotFound;
+                result.reason = "no such attachment";
+                return result;
+            }
+            already += found->claimed ? 1 : 0;
+            targets.push_back(found);
+        }
+        if (already > 0) {
+            bool same = already == wanted.size() && items.size() == bag_items.size();
+            for (size_t i = 0; same && i < items.size(); ++i) {
+                same = items[i].instance_guid == bag_items[i].instance_guid && items[i].slot == bag_items[i].slot && items[i].quantity == bag_items[i].quantity;
+            }
+            if (!same) {
+                result.status = svc::CallStatus::Refused;
+                result.reason = "claimed before";
+                result.claimed_before = true;
+                return result;
+            }
+            result.replayed = true;
+            return result;
+        }
         bag_items = std::move(items);
         bag_wallet = std::move(wallet);
         bag_jobs = std::move(jobs);
         bag_recipes = std::move(known_recipes);
         bag_warehouse = std::move(warehouse);
-        const svc::CallStatus answer = bag_answers.empty() ? svc::CallStatus::Ok : bag_answers.front();
-        if (!bag_answers.empty()) bag_answers.pop_front();
-        return answer;
+        for (svc::MailItem* target : targets) target->claimed = true;
+        result.claimed = static_cast<int32_t>(wanted.size());
+        return result;
+    }
+
+    /// A hand-over of the bags (what the periodic save, the logout and the other saves give the saver): it is the bags the store holds from then on.
+    void save_inventory(const std::string&, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                        std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) override {
+        if (on_save) on_save();
+        if (save_delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(save_delay_ms.load()));   // (a slow save: a log-in that does not wait for it reads the old bags)
+        std::lock_guard<std::mutex> lock(store_mu);
+        ++handovers;
+        saved_bags.push_back(items);
+        bag_items = std::move(items);
+        bag_wallet = std::move(wallet);
+        bag_jobs = std::move(jobs);
+        bag_recipes = std::move(known_recipes);
+        bag_warehouse = std::move(warehouse);
     }
 
     const svc::Mail* by_id(const std::string& id) const {
@@ -532,7 +612,7 @@ static void test_mail_load_does_not_hold_the_tick() {
 }
 
 static void test_mail_claim_does_not_hold_the_tick() {
-    std::printf("a claim's bag save runs on the worker: the tick goes on and the claim answers when the store answers\n");
+    std::printf("a claim runs on the worker: the tick goes on and the claim answers when the store answers\n");
     std::fflush(stdout);
     TestMailStore store;
     const std::string id = test_mail_hex(41), item_guid = test_mail_hex(7301);
@@ -548,7 +628,7 @@ static void test_mail_claim_does_not_hold_the_tick() {
     const size_t from = w[0].got.size();
     store.block(2);
     CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent");
-    CHECK(test_mail_wait_for(store.bag_saves, 1), "the worker took the bag save");
+    CHECK(test_mail_wait_for(store.claims, 1), "the worker took the claim");
     w.step();
     CHECK(w[0].s->mail_pending() == 1, "the tick ended with the claim still pending");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0, "no claim answer is sent before the store answers");
@@ -556,7 +636,7 @@ static void test_mail_claim_does_not_hold_the_tick() {
     w.settle();
     CHECK(w[0].s->inventory().find_guid(item_guid) != nullptr, "the item is in the bags after the answer");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 1, "one claim answer is sent");
-    CHECK(store.bag_saves == 1 && store.mail_saves == 1, "one bag save and one mail save");
+    CHECK(store.claims == 1 && store.mail_saves == 0, "one claim call and no separate mail save");
 }
 
 static void test_mail_bulk_status_is_one_job() {
@@ -638,15 +718,15 @@ static void test_mail_double_claim_while_in_flight_grants_once() {
     w.settle();
     store.block(2);
     CHECK(test_mail_claim(w, 0, id, 0, true), "the first claim is sent");
-    CHECK(test_mail_wait_for(store.bag_saves, 1), "the worker took the first claim's bags");
+    CHECK(test_mail_wait_for(store.claims, 1), "the worker took the first claim");
     const size_t from = w[0].got.size();
     CHECK(test_mail_claim(w, 0, id, 0, true), "the second claim is sent while the first is in flight");
-    CHECK(store.bag_saves == 1, "the second claim writes no bags");
+    CHECK(store.claims == 1, "the second claim is not sent to the store");
     CHECK(test_mail_log_count("item 0 of " + id + " is already claimed: ignored") == 1, "the second claim is logged as already claimed");
     store.release();
     w.settle();
     CHECK(w[0].s->inventory().find_guid(item_guid) != nullptr && store.bag_items_with(item_guid) == 1, "the item is granted once");
-    CHECK(store.mail_saves == 1 && store.by_id(id) && store.by_id(id)->items[0].claimed, "the mail is saved claimed once");
+    CHECK(store.claims == 1 && store.by_id(id) && store.by_id(id)->items[0].claimed, "the mail is stored claimed once");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 1, "one claim answer is sent");
 }
 
@@ -750,8 +830,8 @@ static void test_mail_claim_sends_both_events_of_a_split() {
     CHECK(twenty == 1 && five == 1, "the two Adds are the twenty and the five");
 }
 
-static void test_mail_retry_after_a_failed_mail_save_keeps_the_events() {
-    std::printf("a retry after a failed mail save grants nothing more and sends the first placement's event\n");
+static void test_mail_retry_after_a_refused_claim_grants_again_and_sends_the_events() {
+    std::printf("a refused claim gives the top-up back; the retry grants it once more and sends the placement's event\n");
     std::fflush(stdout);
     TestMailStore store;
     const std::string id = test_mail_hex(51), held_guid = test_mail_hex(7306), attachment_guid = test_mail_hex(7307);
@@ -766,20 +846,21 @@ static void test_mail_retry_after_a_failed_mail_save_keeps_the_events() {
     }
     CHECK(test_mail_fetch(w, 0), "ServerFetchMail is sent");
     w.settle();
-    store.mail_answers = {svc::CallStatus::Refused};
-    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent with a refused mail save");
+    store.claim_script = {{svc::CallStatus::Refused, false}};
+    size_t from = w[0].got.size();
+    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent and the store refuses it");
     w.settle();
-    CHECK(w[0].s->inventory().find_guid(held_guid) && w[0].s->inventory().find_guid(held_guid)->quantity == 3, "the top-up is kept");
+    CHECK(w[0].s->inventory().find_guid(held_guid) && w[0].s->inventory().find_guid(held_guid)->quantity == 1, "the top-up was given back: the stack holds its own one again");
     CHECK(store.by_id(id) && !store.by_id(id)->items[0].claimed, "the mail stays unclaimed");
-    const size_t bag_saves = store.bag_saves;
-    const size_t from = w[0].got.size();
+    CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty() && test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0,
+          "the client is sent no Add and no claim answer for a claim that was refused");
+    from = w[0].got.size();
     CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is retried");
     w.settle();
-    CHECK(w[0].s->inventory().find_guid(held_guid) && w[0].s->inventory().find_guid(held_guid)->quantity == 3, "the retry grants nothing more");
-    CHECK(store.bag_saves == bag_saves + 1 && store.by_id(id) && store.by_id(id)->items[0].claimed, "the retry saves the bags and the mail");
+    CHECK(w[0].s->inventory().find_guid(held_guid) && w[0].s->inventory().find_guid(held_guid)->quantity == 3, "the retry tops the stack up once");
+    CHECK(store.claims == 2 && store.by_id(id) && store.by_id(id)->items[0].claimed, "the retry is the second claim call and marks the mail claimed");
     const std::vector<repl::ItemStorageEvent> events = test_guild_storage_events(test_mail_pc_calls(w, 0, from));
-    CHECK(events.size() == 1 && events[0].item.guid == *items::guid_of(held_guid) && events[0].item.quantity == 2,
-          "the first placement's Add is sent with the retry");
+    CHECK(events.size() == 1 && events[0].item.guid == *items::guid_of(held_guid) && events[0].item.quantity == 2, "the retry sends the placement's Add");
 }
 
 static void test_mail_calls_are_registered() {
@@ -1003,7 +1084,7 @@ static void test_mail_refresh_budget() {
 }
 
 static void test_mail_claim_one_item() {
-    std::printf("one item's claim moves it into a free bag slot, saves the bags first, then marks the mail claimed\n");
+    std::printf("one item's claim moves it into a free bag slot and stores the bags and the claimed mark in one call\n");
     std::fflush(stdout);
     TestMailStore store;
     const std::string id = test_mail_hex(12), item_guid = test_mail_hex(7031);
@@ -1026,8 +1107,9 @@ static void test_mail_claim_one_item() {
     CHECK(held && held->container == svc::ItemContainer::Backpack, "it is in the item bag");
     const svc::Mail* stored = store.by_id(id);
     CHECK(stored && stored->items.size() == 1 && stored->items[0].claimed, "the store's mail holds the claimed flag");
-    CHECK(store.bag_saves == 1 && store.mail_saves == 1, "one bag save and one mail save");
-    CHECK(store.ops.size() >= 2 && store.ops[0] == "bag" && store.ops[1] == "mail " + id, "the bags are saved before the mail");
+    CHECK(store.claims == 1 && store.mail_saves == 0, "one claim call and no separate mail save");
+    CHECK(store.ops.size() == 1 && store.ops[0] == "claim", "the bags and the claimed mark go in that one call");
+    CHECK(store.bag_items_with(item_guid) == 1, "the stored bags hold the item once");
     const std::vector<repl::ItemStorageEvent> events = test_guild_storage_events(test_mail_pc_calls(w, 0, from));
     CHECK(events.size() == 1 && events[0].type == 0, "one Add storage event is sent");
     CHECK(!events.empty() && events[0].item.record_id == content_fixture::item::kChest, "the event names the mail's item");
@@ -1042,12 +1124,12 @@ static void test_mail_claim_one_item() {
     CHECK(test_mail_claim(w, 0, id, 0, false), "the same claim is sent again");
     w.settle();
     CHECK(w[0].s->inventory().items().size() == items_before, "the second claim moves nothing");
-    CHECK(store.bag_saves == 1 && store.mail_saves == 1, "the second claim saves nothing");
+    CHECK(store.claims == 1, "the second claim stores nothing");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, got_before), "ClientClaimMailItem") == 0, "the second claim answers nothing");
 }
 
 static void test_mail_claim_all_items() {
-    std::printf("claim all moves every unclaimed item of the listed mails with one bag save and one mail save per mail\n");
+    std::printf("claim all moves every unclaimed item of the listed mails with one call that stores the bags and every mark\n");
     std::fflush(stdout);
     TestMailStore store;
     const std::string a = test_mail_hex(13), b = test_mail_hex(14);
@@ -1070,10 +1152,8 @@ static void test_mail_claim_all_items() {
     CHECK(w[0].s->inventory().find_guid(a0) != nullptr && w[0].s->inventory().find_guid(a1) != nullptr &&
               w[0].s->inventory().find_guid(b0) != nullptr,
           "all three items are in the bags under their own guids");
-    CHECK(store.bag_saves == 1, "one bag save carries all three");
-    CHECK(store.mail_saves == 2, "each mail is saved once");
-    CHECK(store.ops.size() == 3 && store.ops[0] == "bag" && store.ops[1] == "mail " + a && store.ops[2] == "mail " + b,
-          "the bag is saved before either mail, and the mails in the request's order");
+    CHECK(store.claims == 1 && store.mail_saves == 0, "one call carries all three items and the marks of both mails");
+    CHECK(store.ops.size() == 1 && store.ops[0] == "claim" && store.last_claims.size() == 3, "it is the only call, and it names the three attachments");
     const svc::Mail* stored_a = store.by_id(a);
     const svc::Mail* stored_b = store.by_id(b);
     CHECK(stored_a && stored_a->items.size() == 2 && stored_a->items[0].claimed && stored_a->items[1].claimed, "the first mail's two items are claimed");
@@ -1095,12 +1175,12 @@ static void test_mail_claim_all_items() {
     CHECK(test_mail_claim_all(w, 0, {a, b}), "the same claim-all is sent again");
     w.settle();
     CHECK(w[0].s->inventory().items().size() == items_before, "the second call adds no second copy");
-    CHECK(store.bag_saves == 1 && store.mail_saves == 2, "the second call saves nothing");
+    CHECK(store.claims == 1, "the second call stores nothing");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, got_before), "ClientClaimMailItem") == 0, "the second call answers nothing");
 }
 
-static void test_mail_claim_all_stops_at_unavailable() {
-    std::printf("claim all stops at the first Unavailable mail save: the later mails are not saved or answered\n");
+static void test_mail_claim_all_is_all_or_nothing() {
+    std::printf("a claim-all that the store refuses gives every item back and marks no mail; the next one stores all of them\n");
     std::fflush(stdout);
     TestMailStore store;
     const std::string a = test_mail_hex(15), b = test_mail_hex(16), c = test_mail_hex(17);
@@ -1116,23 +1196,23 @@ static void test_mail_claim_all_stops_at_unavailable() {
     }
     CHECK(test_mail_fetch(w, 0), "ServerFetchMail is sent");
     w.settle();
-    store.mail_answers = {svc::CallStatus::Ok, svc::CallStatus::Unavailable, svc::CallStatus::Ok};
-    const size_t from = w[0].got.size();
-    CHECK(test_mail_claim_all(w, 0, {a, b, c}), "ServerClaimAllMail names all three mails");
+    store.claim_script = {{svc::CallStatus::Refused, false}};
+    size_t from = w[0].got.size();
+    CHECK(test_mail_claim_all(w, 0, {a, b, c}), "ServerClaimAllMail names all three mails and the store refuses the claim");
     w.settle();
-    CHECK(w[0].s->inventory().find_guid(a0) != nullptr, "the first mail's item is in the bags");
-    CHECK(w[0].s->inventory().find_guid(b0) != nullptr && w[0].s->inventory().find_guid(c0) != nullptr,
-          "the second and third items are in the one saved bag change too");
-    const svc::Mail* stored_a = store.by_id(a);
-    const svc::Mail* stored_b = store.by_id(b);
-    const svc::Mail* stored_c = store.by_id(c);
-    CHECK(stored_a && stored_a->items[0].claimed, "the first mail is saved claimed");
-    CHECK(stored_b && !stored_b->items[0].claimed && stored_c && !stored_c->items[0].claimed, "the later mails stay unclaimed");
-    CHECK(store.mail_saves == 2, "the third mail is not tried after the Unavailable one");
-    const std::vector<repl::RpcCall> social = test_mail_social_calls(w, 0, from);
-    CHECK(test_mail_count_named(social, "ClientClaimMailItem") == 1, "only the first mail's item is answered");
-    const std::vector<repl::ItemStorageEvent> events = test_guild_storage_events(test_mail_pc_calls(w, 0, from));
-    CHECK(events.size() == 1, "only the first mail's item gets a storage event");
+    CHECK(w[0].s->inventory().find_guid(a0) == nullptr && w[0].s->inventory().find_guid(b0) == nullptr && w[0].s->inventory().find_guid(c0) == nullptr,
+          "none of the three items stays in the bags");
+    CHECK(store.by_id(a) && !store.by_id(a)->items[0].claimed && store.by_id(b) && !store.by_id(b)->items[0].claimed && store.by_id(c) && !store.by_id(c)->items[0].claimed,
+          "no mail is marked claimed");
+    CHECK(store.claims == 1, "it was one call, so there was no half of it to keep");
+    CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0 && test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty(),
+          "the client is told of nothing");
+    from = w[0].got.size();
+    CHECK(test_mail_claim_all(w, 0, {a, b, c}), "the claim-all is sent again");
+    w.settle();
+    CHECK(w[0].s->inventory().find_guid(a0) && w[0].s->inventory().find_guid(b0) && w[0].s->inventory().find_guid(c0), "all three items are in the bags");
+    CHECK(store.by_id(a)->items[0].claimed && store.by_id(b)->items[0].claimed && store.by_id(c)->items[0].claimed && store.claims == 2, "all three marks are stored by the second call");
+    CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 3, "all three are answered");
 }
 
 static void test_mail_read_and_delete_marks_are_kept() {
@@ -1388,15 +1468,15 @@ static void test_mail_full_bag_keeps_the_second_item_unclaimed() {
     w.settle();
     const svc::InventoryItem* first = w[0].s->inventory().find_guid(a0);
     CHECK(first != nullptr && first->slot == items::kBackpackSlots - 1, "the first item takes the last free slot");
-    CHECK(store.bag_saves == 1 && store.mail_saves == 1, "the first item's claim saved the bags and the mail");
-    const size_t bag_saves = store.bag_saves, mail_saves = store.mail_saves;
+    CHECK(store.claims == 1, "the first item's claim stored the bags and the mark");
+    const size_t claims_before = store.claims.load();
     const size_t from = w[0].got.size();
     CHECK(test_mail_claim(w, 0, a, 1, true), "the second item's claim is sent");
     w.settle();
     CHECK(w[0].s->inventory().find_guid(a1) == nullptr, "the second item did not move");
     const svc::Mail* stored_a = store.by_id(a);
     CHECK(stored_a && stored_a->items.size() == 2 && !stored_a->items[1].claimed, "the second item stays unclaimed in the store");
-    CHECK(store.bag_saves == bag_saves && store.mail_saves == mail_saves, "a full bag saves nothing");
+    CHECK(store.claims == claims_before, "a full bag stores nothing");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0, "a full bag answers no claim");
     CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty(), "a full bag sends no storage event");
     const auto lines = chat_lines_in(w[0].got, test_mail_pc_cls(), from);
@@ -1407,53 +1487,46 @@ static void test_mail_full_bag_keeps_the_second_item_unclaimed() {
     w.settle();
     CHECK(w[0].s->inventory().find_guid(b0) == nullptr, "the claim-all moved nothing");
     CHECK(store.by_id(b) && !store.by_id(b)->items[0].claimed, "the second mail stays unclaimed");
-    CHECK(store.bag_saves == bag_saves && store.mail_saves == mail_saves, "the full-bag claim-all saves nothing");
+    CHECK(store.claims == claims_before, "the full-bag claim-all stores nothing");
     const auto lines_after = chat_lines_in(w[0].got, test_mail_pc_cls(), after_line);
     CHECK(lines_after.size() == 1 && lines_after[0].message == "Your bags are full.", "the claim-all says it once as well");
 }
 
 static void test_mail_save_failures() {
-    std::printf("a refused bag save moves nothing; a failed mail save keeps the item and the next claim marks the mail\n");
+    std::printf("a claim the store refuses moves nothing; a claim that never arrived is asked again until the store answers, and only the answer decides the item\n");
     std::fflush(stdout);
     TestMailStore store;
     const std::string id = test_mail_hex(28), item_guid = test_mail_hex(7081);
     store.mails.push_back(test_mail_mail(id, "Sender", "Subject", "Body", 0, {test_mail_attachment(item_guid, content_fixture::item::kChest)}));
     PartyWorld w;
     w.fx.world->set_position_sink(&store);
+    w.fx.world->set_mail_job_config(MailJobs::Config{std::chrono::milliseconds(1), std::chrono::milliseconds(4)});
     if (!w.enter(0, test_mail_record("mailer", {0x4d11, 0, 0, 1}, 1), identity())) {
         CHECK(false, "the character joins");
         return;
     }
     CHECK(test_mail_fetch(w, 0), "ServerFetchMail is sent");
     w.settle();
-    store.bag_answers = {svc::CallStatus::Refused};
+    store.claim_script = {{svc::CallStatus::Refused, false}};
     size_t from = w[0].got.size();
-    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent with a refused bag save");
+    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent and the store refuses it");
     w.settle();
-    CHECK(w[0].s->inventory().find_guid(item_guid) == nullptr, "the refused bag save rolled the item back");
+    CHECK(w[0].s->inventory().find_guid(item_guid) == nullptr, "the refusal gave the item back");
     CHECK(store.by_id(id) && !store.by_id(id)->items[0].claimed, "the mail stays unclaimed");
-    CHECK(store.bag_saves == 1 && store.mail_saves == 0, "no mail save follows a refused bag save");
+    CHECK(store.claims == 1, "a refusal is final: the claim is not asked again");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0, "no claim answer follows");
     CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty(), "no storage event follows");
-    store.bag_answers = {svc::CallStatus::Ok};
-    store.mail_answers = {svc::CallStatus::Refused};
+    store.claim_script = {{svc::CallStatus::Unavailable, false}, {svc::CallStatus::Unavailable, false}, {svc::CallStatus::Unavailable, false}};
     from = w[0].got.size();
-    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent with a refused mail save");
+    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is sent while the store does not answer");
     w.settle();
-    CHECK(w[0].s->inventory().find_guid(item_guid) != nullptr, "the refused mail save keeps the bag change");
-    CHECK(store.by_id(id) && !store.by_id(id)->items[0].claimed, "the mail stays unclaimed");
-    CHECK(store.bag_saves == 2 && store.mail_saves == 1, "the bags are saved before the refused mail save");
-    CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0, "no claim answer follows the refused mail save");
-    CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty(), "no storage event follows the refused mail save");
-    from = w[0].got.size();
-    CHECK(test_mail_claim(w, 0, id, 0, true), "the claim is tried again");
-    w.settle();
+    CHECK(store.claims == 5, "the worker asked three times without an answer and a fourth time with it (after the refused claim's one ask): the same request each time");
     const svc::InventoryItem* held = w[0].s->inventory().find_guid(item_guid);
-    CHECK(held != nullptr && w[0].s->inventory().items().size() == 1, "the bag holds the item once");
-    CHECK(store.by_id(id) && store.by_id(id)->items[0].claimed, "the retry marks the mail claimed");
-    CHECK(store.bag_saves == 3 && store.mail_saves == 2, "the retry saves the bags again, then the mail");
-    CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).size() == 1, "the retry sends the item's Add from the bag copy");
-    CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 1, "the retry answers the claim");
+    CHECK(held != nullptr && w[0].s->inventory().items().size() == 1, "the bag holds the item once: the missing answers did not take it back");
+    CHECK(store.by_id(id) && store.by_id(id)->items[0].claimed && store.bag_items_with(item_guid) == 1, "the store has the item and the mark together");
+    CHECK(!w[0].s->mail_claim_pending(), "the claim is no longer in flight");
+    CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).size() == 1, "its Add is sent from the bag copy");
+    CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 1, "and the claim is answered once");
 }
 
 static void test_mail_logout_and_restart_through_the_store() {
@@ -1623,14 +1696,14 @@ static void test_mail_unknown_mail_changes_nothing() {
     CHECK(test_mail_fetch(w, 0), "ServerFetchMail is sent");
     w.settle();
     const size_t from = w[0].got.size();
-    const size_t bag_saves = store.bag_saves, mail_saves = store.mail_saves;
+    const size_t claims_before = store.claims.load(), mail_saves = store.mail_saves.load();
     CHECK(test_mail_detail(w, 0, unknown), "a detail for an unknown mail is sent");
     CHECK(test_mail_claim(w, 0, unknown, 0, true), "a claim for an unknown mail is sent");
     CHECK(test_mail_currency(w, 0, unknown), "a currency claim for an unknown mail is sent");
     CHECK(test_mail_status(w, 0, unknown, svc::kMailStatusRead, true), "a status for an unknown mail is sent");
     CHECK(test_mail_claim_all(w, 0, {unknown}), "a claim-all for an unknown mail is sent");
     w.settle();
-    CHECK(store.bag_saves == bag_saves && store.mail_saves == mail_saves, "the unknown mail saves nothing");
+    CHECK(store.claims == claims_before && store.mail_saves == mail_saves, "the unknown mail saves nothing");
     CHECK(w[0].s->inventory().find_guid(item_guid) == nullptr, "the known mail's item did not move");
     CHECK(store.by_id(known) && !store.by_id(known)->items[0].claimed && store.by_id(known)->status == 0, "the known mail is unchanged");
     const std::vector<repl::RpcCall> social = test_mail_social_calls(w, 0, from);
@@ -1707,7 +1780,7 @@ static void test_mail_bad_item_index_changes_nothing() {
     CHECK(test_mail_claim(w, 0, id, -1, true), "a claim with index -1 is sent");
     CHECK(test_mail_claim(w, 0, id, 9, true), "a claim with index 9 is sent");
     w.settle();
-    CHECK(store.bag_saves == 0 && store.mail_saves == 0, "neither bad index saves anything");
+    CHECK(store.claims == 0 && store.mail_saves == 0, "neither bad index saves anything");
     CHECK(w[0].s->inventory().find_guid(first) == nullptr && w[0].s->inventory().find_guid(second) == nullptr, "neither item moved");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0, "neither bad index is answered");
     CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty(), "neither bad index sends an event");
@@ -1788,14 +1861,14 @@ static void test_mail_no_sink_refuses_before_the_bag_change() {
     w.settle();
     CHECK(w[0].s->inventory().find_guid(a0) != nullptr, "the first claim moves its item");
     w[0].s->set_mail_sink(nullptr);
-    const size_t bag_saves = store.bag_saves, mail_saves = store.mail_saves;
+    const size_t claims_before = store.claims.load(), mail_saves = store.mail_saves.load();
     const size_t from = w[0].got.size();
     CHECK(test_mail_claim(w, 0, b, 0, true), "the second mail's claim without a sink is sent");
     CHECK(test_mail_claim_all(w, 0, {b}), "a claim-all without a sink is sent");
     w.settle();
     CHECK(w[0].s->inventory().find_guid(b0) == nullptr, "the second item did not move");
     CHECK(store.by_id(b) && !store.by_id(b)->items[0].claimed, "the second mail stays unclaimed");
-    CHECK(store.bag_saves == bag_saves && store.mail_saves == mail_saves, "no sink saves nothing");
+    CHECK(store.claims == claims_before && store.mail_saves == mail_saves, "no sink saves nothing");
     CHECK(test_mail_count_named(test_mail_social_calls(w, 0, from), "ClientClaimMailItem") == 0, "no sink answers no claim");
     CHECK(test_guild_storage_events(test_mail_pc_calls(w, 0, from)).empty(), "no sink sends no storage event");
 }
@@ -1841,7 +1914,7 @@ static void test_mail_currency_claim_changes_nothing() {
     const size_t from = w[0].got.size();
     CHECK(test_mail_currency(w, 0, id), "ServerClaimMailCurrency is sent");
     w.settle();
-    CHECK(store.bag_saves == 0 && store.mail_saves == 0, "the currency claim saves nothing");
+    CHECK(store.claims == 0 && store.mail_saves == 0, "the currency claim saves nothing");
     const std::vector<repl::RpcCall> social = test_mail_social_calls(w, 0, from);
     CHECK(test_mail_count_named(social, "ClientClaimMailCurrency") == 0, "the currency claim answers nothing");
     CHECK(test_mail_log_count("ignoring the client's ServerClaimMailCurrency") == 0, "the currency call is registered");
@@ -1858,7 +1931,7 @@ AOC_REGISTER_TEST(test_mail_refresh_reads_the_store_again);
 AOC_REGISTER_TEST(test_mail_refresh_budget);
 AOC_REGISTER_TEST(test_mail_claim_one_item);
 AOC_REGISTER_TEST(test_mail_claim_all_items);
-AOC_REGISTER_TEST(test_mail_claim_all_stops_at_unavailable);
+AOC_REGISTER_TEST(test_mail_claim_all_is_all_or_nothing);
 AOC_REGISTER_TEST(test_mail_read_and_delete_marks_are_kept);
 AOC_REGISTER_TEST(test_mail_default_parameters_are_zero);
 AOC_REGISTER_TEST(test_mail_bulk_status_updates);
@@ -1887,4 +1960,4 @@ AOC_REGISTER_TEST(test_mail_noop_status_makes_no_save);
 AOC_REGISTER_TEST(test_mail_session_removed_with_a_job_in_flight);
 AOC_REGISTER_TEST(test_mail_claim_sends_the_top_up_event);
 AOC_REGISTER_TEST(test_mail_claim_sends_both_events_of_a_split);
-AOC_REGISTER_TEST(test_mail_retry_after_a_failed_mail_save_keeps_the_events);
+AOC_REGISTER_TEST(test_mail_retry_after_a_refused_claim_grants_again_and_sends_the_events);

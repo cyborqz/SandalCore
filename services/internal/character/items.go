@@ -258,6 +258,16 @@ func (s *Store) saveInventory(ctx context.Context, characterID string, items []I
 	if err := lockCharacter(ctx, tx, characterID); err != nil {
 		return err
 	}
+	if err := writeInventory(ctx, tx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown, warehouse, replaceWarehouse); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// writeInventory is what saveInventory writes inside its transaction, with the character already locked: the items in both tables, the wallet, and the jobs, recipes and
+// warehouse when they are replaced. ClaimMailItems writes the bags with it in the same transaction that marks the attachments claimed.
+func writeInventory(ctx context.Context, tx pgx.Tx, characterID string, items []Item, wallet []WalletEntry, jobs []ProcessingJob, replaceJobs bool, known []int64, replaceKnown bool,
+	warehouse []WarehouseItem, replaceWarehouse bool) error {
 	for _, table := range []string{"character_items", "character_resource_items"} {
 		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE character_id = $1`, characterID); err != nil {
 			return err
@@ -284,7 +294,7 @@ func (s *Store) saveInventory(ctx context.Context, characterID string, items []I
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // lockCharacter takes the row lock of the character (what serialises a save, a kit grant and a delete), ErrNotFound when

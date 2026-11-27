@@ -357,6 +357,25 @@ struct MailResult {
     Mail mail;
 };
 
+/// Mail: one attachment a claim takes (aoc.character.v1.MailClaim): its mail and its instance guid.
+struct MailClaim {
+    std::string mail_id;        // 32 lowercase hex digits
+    std::string instance_guid;  // 32 lowercase hex digits
+    bool operator==(const MailClaim&) const = default;
+};
+
+/// Mail: what ClaimMailItems answers.  Ok: the bags and the claimed marks are stored (`replayed`: the request repeated an earlier one, so nothing was written now).
+/// Refused, NotFound: the claim wrote nothing and never will (bags the rules refuse, an attachment that is not the character's or was claimed before): the item goes back.
+/// Unavailable, Failed: no answer is known, so the claim may or may not have been stored.  It is never settled by a guess: it is asked again, the same request, until the service
+/// answers.  `claimed_before` marks a Refused that says "an attachment is claimed already": it is a refusal like any other, the world only logs it (session/mail_jobs.inc).
+struct MailClaimResult {
+    CallStatus  status = CallStatus::Failed;
+    std::string reason;         // the service's message when status is not Ok
+    int32_t     claimed = 0;    // the attachments the request marked claimed now
+    bool        replayed = false;
+    bool        claimed_before = false;   // Refused because an attachment was claimed already (the service's AlreadyExists)
+};
+
 /// Mail: the mails the window counts as unread: live (no delete bit) and without the read bit.
 inline int32_t unread_count(const std::vector<Mail>& mails) {
     int32_t n = 0;
@@ -597,6 +616,22 @@ public:
     virtual MailResult create_mail(const std::string& character_id, const NewMail& mail) {
         (void)character_id;
         (void)mail;
+        return {};
+    }
+    /// Mail: ClaimMailItems stores the character's bags (the items, wallet, processing jobs, known recipes and warehouse, all replaced as SaveInventory does) and marks the named
+    /// attachments claimed in ONE transaction: both are stored or neither is.  A request that repeats an earlier one whole answers Ok, so a retry after a lost answer is safe.
+    /// Refused: bags the rules refuse, or an attachment claimed before by a request with other bags; NotFound: no such character, or an attachment that is not the character's;
+    /// Unsupported: the service keeps no mails.  Blocks; the caller is the mail worker, never the network thread.  A fake that does not care answers Failed.
+    virtual MailClaimResult claim_mail_items(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<InventoryItem>& items,
+                                             const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs, const std::vector<int64_t>& known_recipes,
+                                             const std::vector<WarehouseItem>& warehouse) {
+        (void)character_id;
+        (void)claims;
+        (void)items;
+        (void)wallet;
+        (void)jobs;
+        (void)known_recipes;
+        (void)warehouse;
         return {};
     }
 };

@@ -56,16 +56,22 @@ service CharacterService {
   // Mail (migration 0027): the character's live mails (status bit 2 clear), newest first by issued_at_ms with the mail id breaking a tie, with their attachments
   // and status. NotFound for an unknown character; a character with no mail has none.
   rpc GetMails(GetMailsRequest) returns (GetMailsResponse);
-  // Mail: writes one mail whole (its sender, subject, body, status and times, and its items with their claimed flags). A mail with the delete bit stays as a row
+  // Mail: writes one mail whole (its sender, subject, body, status and times, and its items; their claimed flags are the store's: a save never claims). A mail with the delete bit stays as a row
   // but is not returned by GetMails again. A save that clears a stored status bit, or that sends a stored claimed item back unclaimed or drops it, is a stale
-  // save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse; NotFound for an unknown
-  // character or mail.
+  // save: FailedPrecondition, with nothing changed. InvalidArgument, with nothing changed, for a mail the store's rules refuse, and for an item sent claimed that the
+  // store holds unclaimed (only ClaimMailItems claims); NotFound for an unknown character or mail.
   rpc SaveMail(SaveMailRequest) returns (SaveMailResponse);
   // Mail: the admin send. It takes the expiry as a duration (the client's FMailData carries ExpirationDurationMs; 0: none) and stores one mail with the sender,
   // subject, body and attachments given; the service gives it its id, its issue time and its absolute expiry (the issue time plus the duration) and returns the
   // stored mail. The store gives every new attachment its instance guid and creation time. InvalidArgument, with nothing changed, for a mail the rules refuse
   // (an attachment sent as claimed included) or a full mailbox (200 live mails); NotFound for an unknown character.
   rpc CreateMail(CreateMailRequest) returns (CreateMailResponse);
+  // Mail: claims attachments into the bags in ONE transaction. It checks that each mail is the character's, that it is not deleted and that each named attachment is
+  // unclaimed, writes the character's bags (and wallet, jobs, recipes and warehouse as SaveInventory does) and marks the attachments claimed; if any check or write
+  // fails it writes nothing. NotFound for an unknown character, mail or attachment (another character's mail looks the same); AlreadyExists for an attachment that was
+  // claimed before by a request with other bags; InvalidArgument, with nothing changed, for bags that break SaveInventory's rules. A request that repeats an earlier one
+  // whole (every named attachment claimed and the stored bags the same as the request's) answers Ok and writes nothing, so a retry after a lost answer is safe.
+  rpc ClaimMailItems(ClaimMailItemsRequest) returns (ClaimMailItemsResponse);
 }
 
 message Position {
@@ -565,3 +571,21 @@ message CreateMailRequest {
   int64 expires_in_ms = 6;
 }
 message CreateMailResponse { Mail mail = 1; }
+
+// Mail: one attachment a claim takes: the mail and the attachment's instance guid.
+message MailClaim {
+  string mail_id = 1;       // 32 lowercase hex digits, not all zero
+  string instance_guid = 2; // 32 lowercase hex digits, not all zero
+}
+
+// Mail: the attachments to claim and the bags that hold them after the claim (see ClaimMailItems). The bags are what SaveInventory takes: the items, and the wallet,
+// processing jobs, known recipes and warehouse when their replace flags say so.
+message ClaimMailItemsRequest {
+  string character_id = 1;
+  repeated MailClaim claims = 2; // at least one, each attachment once
+  SaveInventoryRequest inventory = 3; // id is ignored: character_id names the character
+}
+message ClaimMailItemsResponse {
+  int32 claimed = 1;  // how many attachments the request marked claimed now
+  bool replayed = 2;  // true: the request repeated an earlier one, so nothing was written now
+}

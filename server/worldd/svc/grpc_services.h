@@ -59,6 +59,8 @@ public:
     MailsResult load_mails(const std::string& character_id) override;
     MailSaveResult save_mail(const std::string& character_id, const Mail& mail) override;
     MailResult create_mail(const std::string& character_id, const NewMail& mail) override;
+    MailClaimResult claim_mail_items(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet,
+                                     const std::vector<ProcessingJob>& jobs, const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) override;
     RegisterResult register_server(const std::string& address,
                                    const std::vector<std::string>& regions) override;
     CallStatus heartbeat(uint32_t server_id) override;

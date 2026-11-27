@@ -198,7 +198,7 @@ private:
     /// starts from where that one is (its last good position goes into the record) and that session's position is
     /// handed over before the new one can save anything.
     void on_login_result(Session& s, LoginResult result, Clock::time_point now);
-    void remove(const Address& a, const char* why);
+    void remove(const Address& a, const char* why, bool keep_login_mark = false);
     /// Whether the session cap refuses a handshake from `from` (an address with a session is never refused:
     /// its newer Response replaces the session).  Counts the refusal for the log.
     bool session_limit_reached(const Address& from, Clock::time_point now);

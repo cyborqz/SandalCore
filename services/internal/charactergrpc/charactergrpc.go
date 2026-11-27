@@ -120,12 +120,13 @@ type GuildStore interface {
 
 var _ GuildStore = (*character.Store)(nil)
 
-// MailStore is the part of character.Store that keeps a character's mails (migration 0027). A store without it keeps none: the three mail calls are refused.
+// MailStore is the part of character.Store that keeps a character's mails (migration 0027). A store without it keeps none: the four mail calls are refused.
 type MailStore interface {
 	Mails(ctx context.Context, id string) ([]character.Mail, error)
 	SaveMail(ctx context.Context, id string, mail character.Mail) error
 	CreateMail(ctx context.Context, id string, mail character.NewMail) (character.Mail, error)
 	UnreadMails(ctx context.Context, id string) (int32, error)
+	ClaimMailItems(ctx context.Context, id string, claims []character.MailClaim, bags character.ClaimBags) (character.ClaimResult, error)
 }
 
 var _ MailStore = (*character.Store)(nil)
@@ -569,6 +570,59 @@ func (s *Server) CreateMail(ctx context.Context, r *characterv1.CreateMailReques
 	return &characterv1.CreateMailResponse{Mail: toProtoMail(mail)}, nil
 }
 
+// ClaimMailItems claims attachments into the bags in one transaction (see character.Store.ClaimMailItems): the bags and the claimed marks are written together or not at
+// all. NotFound for an unknown character, mail or attachment (another character's mail looks the same); AlreadyExists for an attachment claimed before by a request with other
+// bags; InvalidArgument, with nothing changed, for names or bags the rules refuse. A request that repeats an earlier one whole answers Ok with replayed set.
+func (s *Server) ClaimMailItems(ctx context.Context, r *characterv1.ClaimMailItemsRequest) (*characterv1.ClaimMailItemsResponse, error) {
+	ms, ok := s.store.(MailStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no mails")
+	}
+	inv := r.GetInventory()
+	if inv == nil {
+		return nil, status.Error(codes.InvalidArgument, "no bags are given")
+	}
+	claims := make([]character.MailClaim, 0, len(r.GetClaims()))
+	for _, c := range r.GetClaims() {
+		claims = append(claims, character.MailClaim{MailID: c.GetMailId(), InstanceGUID: c.GetInstanceGuid()})
+	}
+	bags := character.ClaimBags{Items: make([]character.Item, 0, len(inv.GetItems()))}
+	for i, it := range inv.GetItems() {
+		item, err := fromProtoItem(it)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "item %d: %s", i, err)
+		}
+		bags.Items = append(bags.Items, item)
+	}
+	if inv.GetReplaceWallet() {
+		bags.ReplaceWallet = true
+		bags.Wallet = make([]character.WalletEntry, 0, len(inv.GetWallet()))
+		for _, e := range inv.GetWallet() {
+			bags.Wallet = append(bags.Wallet, character.WalletEntry{CurrencyGuid: e.GetCurrencyGuid(), Amount: e.GetAmount()})
+		}
+	}
+	if inv.GetReplaceProcessingJobs() {
+		bags.ReplaceJobs = true
+		bags.Jobs = fromProtoJobs(inv.GetProcessingJobs())
+	}
+	if inv.GetReplaceKnownRecipes() {
+		bags.ReplaceKnown = true
+		bags.KnownRecipes = inv.GetKnownRecipes()
+	}
+	if inv.GetReplaceWarehouse() {
+		bags.ReplaceWarehouse = true
+		bags.Warehouse = make([]character.WarehouseItem, 0, len(inv.GetWarehouseItems()))
+		for _, w := range inv.GetWarehouseItems() {
+			bags.Warehouse = append(bags.Warehouse, fromProtoWarehouse(w))
+		}
+	}
+	res, err := ms.ClaimMailItems(ctx, r.GetCharacterId(), claims, bags)
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.ClaimMailItemsResponse{Claimed: int32(res.Claimed), Replayed: res.Replayed}, nil
+}
+
 // addTalents puts the character's bought ranks and its action bar (plan D1, stage 2) into a reply.
 func (s *Server) addTalents(ctx context.Context, id string, out *characterv1.Character) error {
 	ranks, err := s.store.SkillRanks(ctx, id)
@@ -769,6 +823,8 @@ func toStatus(ctx context.Context, err error) error {
 		return status.Error(codes.AlreadyExists, err.Error())
 	case errors.Is(err, character.ErrGuildVersion), errors.Is(err, character.ErrMailStale):
 		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, character.ErrMailClaimed):
+		return status.Error(codes.AlreadyExists, err.Error())
 	case errors.Is(err, character.ErrNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, character.ErrInvalid):

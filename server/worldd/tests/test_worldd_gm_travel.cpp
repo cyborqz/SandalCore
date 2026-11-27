@@ -1658,6 +1658,7 @@ struct Admin {
         while (!done) {
             if (tick && harness) harness->step();
             queue->drain();
+            travel->poll();   // (the offline send-mail's answer, as the network thread's loop hands it over)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         t.join();

@@ -275,6 +275,8 @@ public:
                             GmRunDone when_done = {});
     /// Takes the answer of a run whose result was pending; false while it is not there.
     bool take_run(uint64_t ticket, GmRunResult& out);
+    /// Hands the answers of the offline send-mails whose worker jobs are done to their callers (the network thread's loop calls it every pass; take_run does too).
+    void poll();
 
     /// The values the field `field` of the command `command` can take, read from the world's own data (session/gm_options.cpp), for a form's drop-down: the places, the city nodes, the free
     /// plots of a node and the stations a plot takes, the items (searched by `filter`, `limit` at a time from the `offset`th), the rarities one item can show, the recipes, the quests and the
@@ -289,7 +291,15 @@ private:
     PlayerWorld& world_;
     Directory    directory_;
     Now          now_;
-    std::map<uint64_t, GmRunResult> pending_runs_;   // the online send-mail answers a direct caller polls
+    std::map<uint64_t, GmRunResult> pending_runs_;   // the send-mail answers a direct caller polls
+    /// A send-mail to a character who is not in the world, waiting for the mail worker's lookup and create (the key is the job's ticket).
+    struct OfflineSend {
+        std::string typed;       // the name as it was typed
+        std::string by;
+        std::string fields;      // the fields as the log shows them
+        GmRunDone   when_done;
+    };
+    std::map<uint64_t, OfflineSend> offline_sends_;
     uint64_t                        next_run_ticket_ = 1;
 };
 

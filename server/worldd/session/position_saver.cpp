@@ -329,39 +329,52 @@ svc::MailResult CharacterSaver::create_mail(const std::string& character_id, con
     }
 }
 
-svc::CallStatus CharacterSaver::save_inventory_now(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
-                                                   std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
-                                                   std::vector<svc::WarehouseItem> warehouse) {
-    {
-        std::unique_lock<std::mutex> lock(mu_);
-        if (stop_ || abandon_) return svc::CallStatus::Unavailable;
-        // only an inventory write of this character can overwrite the claim; a position or progress write does not wait
-        idle_cv_.wait(lock, [this, &character_id] {
-            return stop_ || abandon_ || !(in_flight_ && in_flight_inventory_ && in_flight_character_ == character_id);
-        });
-        if (stop_ || abandon_) return svc::CallStatus::Unavailable;
-        // the caller's bag is the newer one: a queued inventory of this character is dropped, so the worker cannot write it after this save
-        const auto it = entries_.find(character_id);
-        if (it != entries_.end()) {
-            it->second.inventory.reset();
-            it->second.wallet.reset();
-            it->second.jobs.reset();
-            it->second.known_recipes.reset();
-            it->second.warehouse.reset();
-            it->second.inventory_attempts = 0;
-        }
+bool CharacterSaver::claim_the_inventory_write(const std::string& character_id) {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (stop_ || abandon_) return false;
+    // only an inventory write of this character can overwrite the claim; a position or progress write does not wait
+    idle_cv_.wait(lock, [this, &character_id] {
+        return stop_ || abandon_ || !(in_flight_ && in_flight_inventory_ && in_flight_character_ == character_id);
+    });
+    if (stop_ || abandon_) return false;
+    // the caller's bag is the newer one: a queued inventory of this character is dropped, so the worker cannot write it after this save
+    const auto it = entries_.find(character_id);
+    if (it != entries_.end()) {
+        it->second.inventory.reset();
+        it->second.wallet.reset();
+        it->second.jobs.reset();
+        it->second.known_recipes.reset();
+        it->second.warehouse.reset();
+        it->second.inventory_attempts = 0;
     }
+    return true;
+}
+
+svc::MailClaimResult CharacterSaver::claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>& claims, std::vector<svc::InventoryItem> items,
+                                                      std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                                      std::vector<svc::WarehouseItem> warehouse) {
+    svc::MailClaimResult result;
+    result.status = svc::CallStatus::Unavailable;
+    if (!claim_the_inventory_write(character_id)) return result;
     try {
-        const svc::CallStatus status = api_.save_inventory(character_id, items, wallet, jobs, known_recipes, warehouse);
-        if (status == svc::CallStatus::Ok) {
+        result = api_.claim_mail_items(character_id, claims, items, wallet, jobs, known_recipes, warehouse);
+        if (result.status == svc::CallStatus::Ok) {
             std::lock_guard<std::mutex> lock(mu_);
             ++inventories_saved_;
         }
-        return status;
+        return result;
     } catch (const std::exception& e) {
-        spdlog::error("[saver] the direct inventory save of {} threw {}", character_id, e.what());
-        return svc::CallStatus::Unavailable;
+        spdlog::error("[saver] the mail claim of {} threw {}", character_id, e.what());
+        result = {};
+        result.status = svc::CallStatus::Unavailable;
+        return result;
     }
+}
+
+bool CharacterSaver::character_busy(const std::string& character_id) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (abandon_) return false;
+    return (in_flight_ && in_flight_character_ == character_id) || entries_.count(character_id) != 0;
 }
 
 bool CharacterSaver::flush(std::chrono::milliseconds max_wait) {

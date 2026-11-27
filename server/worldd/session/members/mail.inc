@@ -12,6 +12,10 @@ public:
     bool    mail_loaded() const { return mail_loaded_; }
     /// Mail: the worker jobs this session still waits for (a test runs ticks until it is 0).
     size_t  mail_pending() const { return mail_pending_.size(); }
+    /// Mail: whether a claim of this character is in flight: no bag save is made until its answer (hand_over_inventory waits), and the claims that come meanwhile wait behind it.
+    bool    mail_claim_pending() const { return !mail_claim_in_flight_.empty(); }
+    /// Mail: how many claim requests wait behind the one in flight.
+    size_t  mail_claims_waiting() const { return mail_claims_waiting_.size(); }
 
     /// Mail: what the admin mail entry answers: the store's refusal, or the new mail's id and the character's unread count.
     /// A pending answer carries its ticket; take_gm_mail returns it when the create job lands.
@@ -36,14 +40,13 @@ public:
 
 private:
     /// What a request that needed the list does when the load lands.
-    enum class MailWaitKind : uint8_t { None, Fetch, Refresh, Detail, Claim, ClaimAll, Status, BulkStatus, StaleClaim, StaleClaimAll };
+    enum class MailWaitKind : uint8_t { None, Fetch, Refresh, Detail, Claim, ClaimAll, Status, BulkStatus };
     struct MailWait {
         MailWaitKind               kind = MailWaitKind::None;
-        std::string                id;        // Detail, Claim, Status, StaleClaim
+        std::string                id;        // Detail, Claim, Status
         int32_t                    item = 0;   // Claim
         int32_t                    status = 0; // Status/BulkStatus
-        std::vector<std::string>   ids;        // ClaimAll/BulkStatus/StaleClaimAll
-        std::vector<std::string>   guids;      // StaleClaim: the events to send when the store shows the claim
+        std::vector<std::string>   ids;        // ClaimAll/BulkStatus
     };
     /// One attachment this request placed (a placement may carry several events: a top-up and a split).
     struct MailPlaced {
@@ -59,11 +62,10 @@ private:
         std::string                id;
         std::string                guid;       // Claim: the attachment's instance guid
         int32_t                    item = 0;
-        std::vector<std::string>   ids;        // ClaimAll/BulkStatus
-        std::vector<std::vector<size_t>> items; // ClaimAll: the item indices of each id
-        std::vector<svc::Mail>     mails;      // ClaimAll/BulkStatus/SaveMail: the copies the worker writes
+        std::vector<std::string>   ids;        // Claim/ClaimAll/BulkStatus
+        std::vector<std::vector<size_t>> items; // Claim/ClaimAll: the item indices of each id
+        std::vector<svc::Mail>     mails;      // Claim/ClaimAll: each mail as it is once its claim is stored; BulkStatus/SaveMail: the copies the worker writes
         std::vector<MailPlaced>    placed;     // Claim/ClaimAll: what the tick changed in the bags
-        bool                       dirty_before = false, changed_before = false;
         GmMailDone                 gm_done;    // CreateMail: the admin entry's answer
     };
 
@@ -74,11 +76,20 @@ private:
     bool mail_wait_for_load(MailWait wait, Clock::time_point now, const char* why);
     int  mail_find(const std::string& id) const;
     bool mail_place(const svc::InventoryItem& item, items::Outcome& added, std::string& why);
-    void mail_roll_back(const items::Outcome& added, bool dirty_before, bool changed_before);
+    void mail_roll_back(const items::Outcome& added);
+    void mail_resync_bags(Connection& conn);
+    bool mail_claim_place(PendingMail& job, const svc::MailItem& attachment, Connection& conn);
+    void mail_claim_undo_placed(PendingMail& job);
+    bool mail_claim_submit(PendingMail job, const std::vector<svc::Mail>& claimed_mails);
+    bool mail_claim_apply_state(PendingMail& job, const svc::MailClaimResult& claim);
+    void mail_claim_settled(Connection& conn);
+    bool mail_defers_hand_over(const char* why, bool periodic);
+    bool mail_settle_on_finish();
+    bool mail_claims_held() const;
     void mail_send_headers(Connection& conn);
     void mail_send_unread(Connection& conn, const char* why);
     void mail_send_events(Connection& conn, std::vector<bootstrap::ItemEvent> events);
-    void mail_send_added(Connection& conn, const std::vector<std::string>& guids, bool require_claimed);
+    void mail_send_added(Connection& conn, const std::vector<std::string>& guids);
     void mail_say_bags_full(Connection& conn);
     void mail_send_detail(Connection& conn, const std::string& id);
     void mail_send_status_answers(Connection& conn, const std::vector<std::pair<std::string, int32_t>>& answers);
@@ -91,7 +102,6 @@ private:
     void mail_apply(Connection& conn, Clock::time_point now, PendingMail job, MailJobAnswer answer);
     void mail_load_landed(Connection& conn, PendingMail job, const svc::MailsResult& loaded);
     void mail_claim_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer);
-    void mail_claim_all_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer);
     void mail_status_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer);
     void mail_bulk_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer);
     void mail_create_landed(Connection& conn, PendingMail job, const svc::MailResult& made);
@@ -120,6 +130,8 @@ private:
 
     std::deque<PendingMail>        mail_pending_;          // the jobs in flight, oldest first
     std::set<std::string>          mail_claim_in_flight_;  // the mails whose claim the worker is writing
+    std::deque<MailWait>           mail_claims_waiting_;   // the claim requests that came while one was in flight, in the order they came
+    bool                           inventory_save_deferred_ = false;   // a bag hand-over came while a claim was in flight: it is made when the claim is answered
     std::map<uint64_t, GmMailResult> mail_gm_done_;        // the admin sends' answers, for a caller that polls
     uint32_t                       mail_load_failures_ = 0;
     Clock::time_point              mail_load_retry_at_{};  // the first moment a failed load may be tried again

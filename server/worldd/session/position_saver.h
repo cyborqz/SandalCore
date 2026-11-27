@@ -116,18 +116,28 @@ public:
         (void)mail;
         return {};
     }
-    /// The claim's bag save: it answers before the mail is marked claimed, so a claim knows the bags are stored.  Blocks; a sink that cannot
-    /// save answers Unavailable, and the claim keeps the bag change and leaves the mail unclaimed.
-    virtual svc::CallStatus save_inventory_now(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
-                                               std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
-                                               std::vector<svc::WarehouseItem> warehouse) {
+    /// Mail: the claim.  Stores the bags and marks the attachments claimed in ONE call of the character service, so the item is in the stored bags exactly when its mail says
+    /// claimed.  Blocks; the caller is the mail worker.  Ok: both stored (or an earlier identical claim already did).  Refused, NotFound: nothing was stored and nothing will be.
+    /// Unavailable, Failed: unknown.  A sink that cannot ask answers Unavailable.
+    virtual svc::MailClaimResult claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>& claims, std::vector<svc::InventoryItem> items,
+                                                  std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                                  std::vector<svc::WarehouseItem> warehouse) {
         (void)character_id;
+        (void)claims;
         (void)items;
         (void)wallet;
         (void)jobs;
         (void)known_recipes;
         (void)warehouse;
-        return svc::CallStatus::Unavailable;
+        svc::MailClaimResult result;
+        result.status = svc::CallStatus::Unavailable;
+        return result;
+    }
+    /// Whether a write of the character is still queued or running in this sink (its position, bags, progress, friend lists).  The log-in waits for false before it reads the
+    /// character (login/login_service.h), so it never reads state a write can still change.  Safe to ask from any thread.  A sink that keeps nothing (a test's) answers false.
+    virtual bool character_busy(const std::string& character_id) const {
+        (void)character_id;
+        return false;
     }
     /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
     /// keeps nothing (a test's) answers false.
@@ -207,10 +217,13 @@ public:
     svc::MailsResult load_mails(const std::string& character_id) override;
     svc::MailSaveResult save_mail(const std::string& character_id, const svc::Mail& mail) override;
     svc::MailResult create_mail(const std::string& character_id, const svc::NewMail& mail) override;
-    /// Mail: the claim's blocking bag save (see PositionSink); it waits for a same-character inventory write in flight and drops a queued older bag.
-    svc::CallStatus save_inventory_now(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
-                                       std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
-                                       std::vector<svc::WarehouseItem> warehouse) override;
+    /// Mail: the claim, one call (see PositionSink); it waits for a same-character inventory write in flight and drops a queued older bag.
+    svc::MailClaimResult claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>& claims, std::vector<svc::InventoryItem> items,
+                                          std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
+                                          std::vector<svc::WarehouseItem> warehouse) override;
+
+    /// A write of the character is queued, or the worker is writing it now (including the pause before a retry): see PositionSink.  A saver that gave up its queue is never busy.
+    bool character_busy(const std::string& character_id) const override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);
@@ -247,6 +260,8 @@ private:
     };
 
     void run();
+    /// Waits for an inventory write of this character that is running now and drops a queued older one: what the claim does first.  False when the saver is stopping.
+    bool claim_the_inventory_write(const std::string& character_id);
     void save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet,
                               std::optional<std::vector<svc::ProcessingJob>> jobs = std::nullopt, std::optional<std::vector<int64_t>> known_recipes = std::nullopt,
                               std::optional<std::vector<svc::WarehouseItem>> warehouse = std::nullopt);

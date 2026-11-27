@@ -380,6 +380,7 @@ struct Mirror {
         bool    may_jump = false;
         int32_t animation_counter = 0;
         bool    has_target = false, has_montage = false;
+        bool    branch_predicted = false;   // bBranchPredictedOnAutonomous
         std::string montage_group;
         uint16_t    mesh_yaw = 0;
         uint64_t    montage = 0;
@@ -648,6 +649,8 @@ private:
             a.has_target = targets && targets->get_if<repl::ArrayValue>() && !targets->get_if<repl::ArrayValue>()->elements.empty();
             const repl::Value* montage = val(c.values, 11);
             a.has_montage = montage && montage->get_if<emit::FIntrepidNetworkGUID>() && montage->get_if<emit::FIntrepidNetworkGUID>()->ObjectId != 0;
+            const repl::Value* predicted = val(c.values, 9);
+            a.branch_predicted = predicted && predicted->get_if<bool>() && *predicted->get_if<bool>();
             const repl::Value* group = val(c.values, 10);
             a.montage_group = group && group->get_if<repl::NameValue>() ? group->get_if<repl::NameValue>()->text : std::string();
             a.montage = montage && montage->get_if<emit::FIntrepidNetworkGUID>() ? montage->get_if<emit::FIntrepidNetworkGUID>()->ObjectId : 0;
@@ -1265,11 +1268,15 @@ static void test_laggy_client() {
     r.play(0.5, false);
     CHECK(r.m.abilities.empty() && r.h.s->ability_updates_sent() == 2, "(two updates went out while the client heard nothing: the Rest and its cancel)");
     r.h.release();
-    r.play(1.0, false);
+    r.play(0.4, false);   // (0.9 s after the jump: the montage the jump left is not over yet, so its clear is not among the updates read here)
     CHECK(r.m.chains_with_exports == 2, "the montage's export rides in both updates: the first was not acknowledged when the second was built");
     bool jumped = false;
     for (const auto& [eid, a] : r.m.abilities) jumped = a.ability == kRest && a.may_jump && a.animation_counter == 1;
     CHECK(jumped && r.m.unreadable == 0 && !r.h.s->abilities_failed(), "the client reads both, in order: the Rest, then its jump to the end section");
+    r.play(0.8, false);
+    bool cleared = false;
+    for (const auto& [eid, a] : r.m.abilities) cleared = a.ability == kRest && a.may_jump && a.animation_counter == 2 && !a.has_montage && !a.branch_predicted;
+    CHECK(cleared && r.m.unreadable == 0 && !r.h.s->abilities_failed(), "and the third, the clear of the item's montage once it is over, in order after the jump");
     r.trigger(kRest);
     CHECK(r.m.chains_with_exports == 2, "once the export is acknowledged it is not sent again");
 

@@ -51,6 +51,49 @@ static void test_two_players() {
 
 AOC_REGISTER_TEST(test_two_players);
 
+static LoginResult accepted_for_mark() {
+    LoginResult r;
+    r.accepted = true;
+    r.character = cyb_record();
+    return r;
+}
+
+static void test_a_login_mark_ends_when_its_result_is_applied_refused_or_dropped() {
+    std::printf("the endpoint marks no character at the handshake (the mark is the log-in's, once its ticket is redeemed) and ends the mark when the result is applied, refused, or its session is dropped\n");
+    Fixture fx;
+    EndpointConfig cfg;
+    cfg.players = fx.world.get();
+    Rig rig(cfg);
+    CHECK(!fx.world->login_pending(kCyb), "no log-in is pending at the start");
+    Joined a = handshake(rig, kA, t0);
+    CHECK(!fx.world->login_pending(kCyb), "a handshake marks nothing: a client that names a character has not proved it is its player");
+    fx.world->login_began(kCyb, a.session);   // (the log-in thread does this once the ticket is redeemed)
+    CHECK(fx.world->login_pending(kCyb), "the log-in's mark holds the character");
+    log_in(rig, a, kA, cyb_record(), t0);
+    CHECK(!fx.world->login_pending(kCyb), "its accepted result ends the mark");
+    Joined b = handshake(rig, kB, t0 + milliseconds(50));
+    fx.world->login_began(kCyb, b.session);
+    LoginResult no;
+    no.error = "not today";
+    rig.ep.post_login_result(b.session, no);
+    rig.ep.tick(t0 + milliseconds(60));
+    CHECK(!fx.world->login_pending(kCyb), "a refused result ends the mark");
+    const Address third{0x7F000001u, 50512};
+    Joined c = handshake(rig, third, t0 + milliseconds(70));
+    fx.world->login_began(kCyb, c.session);
+    rig.ep.drop(third, "the client went away");
+    CHECK(!fx.world->login_pending(kCyb), "dropping the session before its result ends the mark");
+    const Address fourth{0x7F000001u, 50513};
+    Joined d = handshake(rig, fourth, t0 + milliseconds(80));
+    rig.ep.drop(fourth, "the client went away before its ticket was redeemed");
+    fx.world->login_began(kCyb, d.session);   // (the log-in thread redeems it a moment later)
+    rig.ep.post_login_result(d.session, accepted_for_mark());
+    rig.ep.tick(t0 + milliseconds(90));
+    CHECK(!fx.world->login_pending(kCyb), "a result that finds its session gone ends the mark too");
+}
+
+AOC_REGISTER_TEST(test_a_login_mark_ends_when_its_result_is_applied_refused_or_dropped);
+
 static void test_kicked_session_answers_nothing() {
     std::printf("a duplicate login kicks a session whose join is still unacknowledged, and the kicked one answers nothing more\n");
     Fixture fx;

@@ -6,7 +6,10 @@
 //
 //  Runs logins off the network thread: one worker thread takes submitted
 //  logins in order, calls the services, and hands each result to `done`
-//  (Endpoint::post_login_result).
+//  (Endpoint::post_login_result).  A login that the barrier holds (its character
+//  has an unanswered claim or save) goes back in the queue with a not-before
+//  time and the others are served meanwhile: the one thread never waits for a
+//  character.
 // ============================================================================
 #pragma once
 
@@ -39,7 +42,7 @@ private:
     Done done_;
     std::mutex mu_;
     std::condition_variable cv_;
-    std::deque<std::pair<uint64_t, LoginRequest>> queue_;
+    std::deque<LoginService::Attempt> queue_;   // in the order they came; an attempt that waits keeps its place and is passed over until its not_before
     bool stop_ = false;
     std::thread thread_;
 };

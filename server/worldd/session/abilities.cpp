@@ -206,6 +206,7 @@ double AbilityRuntime::next_due() const {
     if (pause_effect_) due = std::min(due, pause_effect_->until);
     if (rest_ && rest_->effect_due) due = std::min(due, *rest_->effect_due);
     if (rest_ && rest_->remove_due) due = std::min(due, *rest_->remove_due);
+    if (rest_ && rest_->clear_due) due = std::min(due, *rest_->clear_due);
     for (const PendingEnd& e : pending_ends_) due = std::min(due, e.due);
     return due;
 }
@@ -237,6 +238,7 @@ void AbilityRuntime::run_due(double t) {
     if (pause_effect_ && pause_effect_->until <= t) return end_pause_effect(t);
     if (rest_ && rest_->effect_due && *rest_->effect_due <= t) return add_rest_effect(t);
     if (rest_ && rest_->remove_due && *rest_->remove_due <= t) return remove_rest_effect(t);
+    if (rest_ && rest_->clear_due && *rest_->clear_due <= t) return clear_rest_montage(t);
     if (next_regen_ <= t) return regenerate(t);
 }
 // [Cyb ~ C O A]
@@ -410,18 +412,22 @@ bool AbilityRuntime::cancel(int32_t client_instance_id, double now) {
 }
 
 // Rest and Sprint end: contributed by war-drayv in #20.
+// [R: the retail server ends the instance and tells the client in the same step, once.]
 bool AbilityRuntime::end_server_instance(int64_t server_instance_id, double now) {
     if (!ok()) return false;
     advance(now);
     if (sprint_ && sprint_->instance == server_instance_id) {
-        end_sprint(now_, Tell::No, "the Sprint is released");
+        end_sprint(now_, Tell::Now, "the Sprint is released by the client's end");
         return true;
     }
     if (rest_ && rest_->instance == server_instance_id) {
         if (!rest_->ended) {
-            release_rest(now_, "the Rest is released");
+            release_rest(now_, "the Rest is released", /*tell=*/true);
+        } else if (!rest_->client_told && !rest_->by_server) {
+            // The Rest had ended already (the client's own cancel, or the player stood up) and the client asks only now: it is told at once, with the effect that was left.
+            tell_rest_end(now_);
         } else {
-            // The client ended the instance after the SitEnd jump (or before the effect's own removal): take the effect now.
+            // A second end of the same instance, after the SitEnd jump or before the effect's own removal: the effect that is left goes now, and the client is told nothing more.
             remove_rest_effect(now_);
         }
         return true;
@@ -605,7 +611,7 @@ void AbilityRuntime::start_rest(int32_t id, double t, bool by_server) {
     emit({std::move(c), std::nullopt, t, "the Rest starts"});
 }
 
-void AbilityRuntime::release_rest(double t, const char* why) {
+void AbilityRuntime::release_rest(double t, const char* why, bool tell) {
     if (!rest_ || rest_->ended) return;
     rest_->ended = true;
     rest_->effect_due.reset();
@@ -614,11 +620,34 @@ void AbilityRuntime::release_rest(double t, const char* why) {
     item.montage_position = kRestSitEndPosition;
     item.may_jump_to_position = true;
     item.animation_counter = ++rest_animation_counter_;
-    item.branch_predicted = !rest_->by_server;
+    // The jump is the server's decision whoever began the Rest: the client keeps its own predicted montage in its sit loop and takes a jump only when the item says it did not
+    // predict it (bBranchPredictedOnAutonomous 0); with the bit set the client ignores the jump and the character stays sitting.
+    item.branch_predicted = false;
     if (rest_->effect_key) rest_->remove_due = t + kRestEndEffectDelay;
+    // When the montage is over the game's server clears the item's montage and keeps the item listed.  A Rest a /sit started has never been cleared here: it stays as it was.
+    if (!rest_->by_server) rest_->clear_due = t + kRestMontageEndDelay;
     AbilityChange c;
     c.abilities_changed.push_back(item);
-    emit({std::move(c), std::nullopt, t, why});
+    AbilityEvent ev{std::move(c), std::nullopt, t, why};
+    if (tell && !rest_->by_server && !rest_->client_told) {   // (an emote's Rest has no instance of the client's: there is nothing to end there)
+        rest_->client_told = true;
+        ev.end_ability = rest_->client_id;
+    }
+    emit(std::move(ev));
+}
+
+void AbilityRuntime::tell_rest_end(double t) {
+    rest_->client_told = true;
+    rest_->remove_due.reset();
+    AbilityChange c;
+    if (rest_->effect_key) {
+        c.effects_removed.push_back(*rest_->effect_key);
+        rest_->effect_key.reset();
+        revert_mods(c, *rules_.effect(rules_.rest.effect_guid));
+    }
+    AbilityEvent ev{std::move(c), std::nullopt, t, "the Rest's end is told to the client"};
+    ev.end_ability = rest_->client_id;
+    emit(std::move(ev));
 }
 
 void AbilityRuntime::add_rest_effect(double t) {
@@ -640,6 +669,22 @@ void AbilityRuntime::remove_rest_effect(double t) {
     rest_->effect_key.reset();
     revert_mods(c, *rules_.effect(rules_.rest.effect_guid));
     emit({std::move(c), std::nullopt, t, "the Rest effect ends"});
+}
+
+void AbilityRuntime::clear_rest_montage(double t) {
+    rest_->clear_due.reset();
+    // The item stays where the jump left it (the end section, the jump flag) with no montage, and a new counter.  `rest_` is the Rest whose item this is: a Rest that replaced it has
+    // its own record and its own timers, so this never runs for an item that is gone.
+    bootstrap::ActiveAbilityItem item = ability_item(rules_.rest, rest_->instance);
+    item.montage_path.clear();
+    item.montage_guid = 0;
+    item.montage_position = kRestSitEndPosition;
+    item.may_jump_to_position = true;
+    item.animation_counter = ++rest_animation_counter_;
+    item.branch_predicted = false;
+    AbilityChange c;
+    c.abilities_changed.push_back(std::move(item));
+    emit({std::move(c), std::nullopt, t, "the Rest's montage is over: its item is cleared"});
 }
 
 }}  // namespace aoc::worldd

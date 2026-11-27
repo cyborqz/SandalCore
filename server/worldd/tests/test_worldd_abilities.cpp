@@ -42,6 +42,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -719,6 +720,236 @@ static void test_rest(const Rules& r) {
     d.run_to(3.0);
     d.trigger(content::kGuidDodge, 1);
     CHECK(!d.rt.resting() && d.with("the Rest ends").size() == 1, "a Dodge ends a Rest (the item jumps to its end section)");
+}
+
+/// The ServerInstanceId an ability's item carries, from the event that adds it.
+static int64_t server_instance_of(const Sim& s, const char* note) {
+    const auto started = s.with(note);
+    return started.empty() || started[0]->change.abilities_added.empty() ? -1 : started[0]->change.abilities_added[0].server_instance_id;
+}
+
+/// ServerEndAbility names the server's instance: the Sprint or the Rest ends and the client is told (ClientEndAbility with its own id) in the same step, once.
+/// [R: the retail server ends the instance and tells the client in the same step.]
+static void test_end_by_server_instance(const Rules& r) {
+    std::printf("ServerEndAbility of a Sprint and of a Rest: the end and ClientEndAbility(the client's id) in one step, once\n");
+    {   // the Sprint (client id 7)
+        Sim s(r.rules);
+        s.move(true);
+        CHECK(s.trigger(content::kGuidSprint, 7) == Refusal::None && s.rt.sprinting(), "(the Sprint runs)");
+        s.run_to(1.0);
+        const int64_t server = server_instance_of(s, "the Sprint starts");
+        CHECK(server >= 0 && server != 7, "(the Sprint's item has a server instance that is not the client's id)");
+        const size_t before = s.log.size();
+        CHECK(s.rt.end_server_instance(server, s.now), "the server's instance ends the Sprint");
+        s.take();
+        CHECK(!s.rt.sprinting() && s.log.size() == before + 1, "the end is one step");
+        CHECK(s.log.size() == before + 1 && s.log.back().end_ability == 7 && !s.log.back().change.abilities_removed.empty() && !s.log.back().change.effects_removed.empty(),
+              "the step that removes the Sprint's items carries ClientEndAbility(7)");
+        s.run_to(s.now + 1.0);
+        CHECK(s.ends() == ints({7}), "ClientEndAbility(7) is sent once: nothing follows it later");
+        CHECK(!s.rt.end_server_instance(server, s.now) && s.ends() == ints({7}), "a second ServerEndAbility for it finds nothing and tells nothing");
+        CHECK(!s.cancel(7) && s.ends() == ints({7}), "a cancel after it tells nothing either");
+    }
+    {   // the Rest (client id 42), effect on
+        Sim s(r.rules);
+        CHECK(s.trigger(content::kGuidRest, 42) == Refusal::None, "(the Rest starts)");
+        s.run_to(2.2);
+        const int64_t server = server_instance_of(s, "the Rest starts");
+        CHECK(s.rt.rest_effect_on() && server >= 0 && server != 42, "(the Rest effect is on; the item has a server instance that is not the client's id)");
+        const size_t before = s.log.size();
+        CHECK(s.rt.end_server_instance(server, s.now), "the server's instance ends the Rest");
+        s.take();
+        CHECK(!s.rt.resting() && s.log.size() == before + 1 && s.log.back().end_ability == 42 && s.log.back().change.abilities_changed.size() == 1 &&
+                  s.log.back().change.abilities_changed[0].may_jump_to_position && s.log.back().change.abilities_changed[0].montage_position == AbilityRuntime::kRestSitEndPosition,
+              "the step of the SitEnd jump carries ClientEndAbility(42)");
+        CHECK(s.rt.rest_effect_on(), "(the effect is still on in that step)");
+        s.run_to(s.now + 0.1);
+        CHECK(!s.rt.rest_effect_on() && s.ends() == ints({42}), "the effect goes kRestEndEffectDelay later, as before, and nothing tells the client again");
+        CHECK(s.rt.end_server_instance(server, s.now) && s.ends() == ints({42}), "a second ServerEndAbility for it tells nothing");
+        CHECK(!s.cancel(42) && !s.rt.end_rest(s.now) && s.ends() == ints({42}), "a cancel and a second /sit after it tell nothing");
+    }
+    {   // the Rest ended by the client's own cancel first: the later ServerEndAbility tells at once, once, and takes the effect that was left
+        Sim s(r.rules);
+        s.trigger(content::kGuidRest, 42);
+        s.run_to(2.2);
+        const int64_t server = server_instance_of(s, "the Rest starts");
+        CHECK(s.cancel(42) && s.ends().empty(), "(the cancel ends the Rest and tells nothing: the client ended its own)");
+        CHECK(s.rt.rest_effect_on(), "(the effect waits for its removal)");
+        CHECK(s.rt.end_server_instance(server, s.now), "the server's instance of an ended Rest is still known");
+        s.take();
+        CHECK(s.ends() == ints({42}) && !s.rt.rest_effect_on(), "it tells the client at once, once, and takes the effect that was left");
+        CHECK(s.rt.end_server_instance(server, s.now) && s.ends() == ints({42}), "and not again");
+        s.run_to(s.now + 1.0);
+        CHECK(s.ends() == ints({42}), "(nothing follows later)");
+    }
+    {   // the Rest ended by the player standing up (a second /sit): nothing is told until the client asks, then once
+        Sim s(r.rules);
+        s.trigger(content::kGuidRest, 42);
+        s.run_to(2.2);
+        const int64_t server = server_instance_of(s, "the Rest starts");
+        CHECK(s.rt.end_rest(s.now), "(the player stands up)");
+        s.take();
+        s.run_to(s.now + 0.2);
+        CHECK(s.ends().empty(), "the server's own end of a Rest still tells nothing");
+        CHECK(s.rt.end_server_instance(server, s.now), "the client's ServerEndAbility follows");
+        s.take();
+        CHECK(s.ends() == ints({42}) && !s.rt.end_server_instance(0x7fffffff, s.now), "and is answered once; an instance that is not the Rest's is not ours");
+    }
+}
+
+// ---- a Rest the client started stands up on the client: the jump is the server's branch, the montage is cleared when it is over --------------------------------------------------------
+
+/// The montage's own numbers: it is 6.89513 s long and its last section, the stand-up, begins at 5.82606792, so it is over 1.069 s after the jump to that section.
+static constexpr double kStandUpSeconds = 6.89513 - 5.82606792;
+
+/// The events that change a Rest item, in order: the jump to the end section, then the clear of its montage.
+static std::vector<const AbilityEvent*> rest_item_changes(const Sim& s) {
+    std::vector<const AbilityEvent*> out;
+    for (const AbilityEvent& e : s.log) {
+        for (const bs::ActiveAbilityItem& a : e.change.abilities_changed) {
+            if (a.ability_guid == content::kGuidRest) {
+                out.push_back(&e);
+                break;
+            }
+        }
+    }
+    return out;
+}
+
+/// The jump and the clear of the one Rest `instance`: a jump with bBranchPredictedOnAutonomous 0 whose counter is `jump_counter`, then, kStandUpSeconds later, the clear: no montage, no
+/// branch, the next counter, the item still listed (nothing is removed).
+static void check_rest_stand_up(const Sim& s, int64_t instance, int32_t jump_counter, const std::string& what) {
+    const auto changes = rest_item_changes(s);
+    CHECK(changes.size() == 2, (what + ": the item changes twice, the jump and then the clear").c_str());
+    const bs::ActiveAbilityItem* jump = changes.empty() || changes[0]->change.abilities_changed.empty() ? nullptr : &changes[0]->change.abilities_changed[0];
+    const bs::ActiveAbilityItem* clear = changes.size() < 2 || changes[1]->change.abilities_changed.empty() ? nullptr : &changes[1]->change.abilities_changed[0];
+    CHECK(jump && changes[0]->change.abilities_changed.size() == 1 && jump->server_instance_id == instance && jump->may_jump_to_position && jump->montage_position == AbilityRuntime::kRestSitEndPosition &&
+              jump->animation_counter == jump_counter && !jump->branch_predicted && jump->montage_path == bs::kRestMontagePath && changes[0]->change.abilities_removed.empty(),
+          (what + ": the jump to the end section says the server decided it (bBranchPredictedOnAutonomous 0), with the next counter, and the montage is still on the item").c_str());
+    CHECK(clear && changes[1]->change.abilities_changed.size() == 1 && clear->server_instance_id == instance && clear->montage_path.empty() && clear->montage_guid == 0 && !clear->branch_predicted &&
+              clear->animation_counter == jump_counter + 1 && clear->may_jump_to_position && clear->montage_position == AbilityRuntime::kRestSitEndPosition,
+          (what + ": the clear has no montage, bBranchPredictedOnAutonomous 0 and the next counter").c_str());
+    CHECK(clear && changes[1]->change.abilities_removed.empty() && changes[1]->change.abilities_added.empty() && changes[1]->change.effects_removed.empty() && changes[1]->change.stats.empty() &&
+              !changes[1]->end_ability,
+          (what + ": the clear changes nothing else: the item stays listed").c_str());
+    CHECK(clear && near_d(changes[1]->at - changes[0]->at, kStandUpSeconds, 1e-6) && near_d(AbilityRuntime::kRestMontageEndDelay, kStandUpSeconds, 1e-6),
+          (what + ": the clear comes when the montage is over, 1.069 s after the jump").c_str());
+}
+
+/// One way the Rest ends, from a Rest the client started (client id `client_id`) that has run to `end_at`: `end_it` ends it.
+static void rest_stands_up_case(const Rules& r, const char* what, double end_at, const std::function<void(Sim&, int64_t)>& end_it, bool told) {
+    const std::string w = what;
+    Sim s(r.rules);
+    CHECK(s.trigger(content::kGuidRest, 42) == Refusal::None && s.rt.resting(), (w + ": (the client's Rest starts)").c_str());
+    const auto started = s.with("the Rest starts");
+    CHECK(started.size() == 1 && started[0]->change.abilities_added.size() == 1 && started[0]->change.abilities_added[0].branch_predicted &&
+              started[0]->change.abilities_added[0].animation_counter == 0,
+          (w + ": the start keeps bBranchPredictedOnAutonomous 1: the client predicted this Rest").c_str());
+    const int64_t server = server_instance_of(s, "the Rest starts");
+    s.run_to(end_at);
+    end_it(s, server);
+    const double ended_at = s.now;
+    CHECK(!s.rt.resting(), (w + ": the Rest is over on the server").c_str());
+    s.run_to(ended_at + 0.9);
+    CHECK(rest_item_changes(s).size() == 1, (w + ": 0.9 s after the jump the montage is not over: no clear yet").c_str());
+    s.run_to(ended_at + 1.2);
+    check_rest_stand_up(s, server, 1, w);
+    s.run_to(ended_at + 8.0);
+    CHECK(rest_item_changes(s).size() == 2, (w + ": the clear is made once").c_str());
+    CHECK(s.ends() == (told ? ints({42}) : std::vector<int32_t>{}), (w + (told ? ": ClientEndAbility with the client's id, once" : ": no ClientEndAbility")).c_str());
+    const auto effect_end = s.with("the Rest effect ends");
+    const auto changes = rest_item_changes(s);
+    CHECK(end_at < 2.0 || (effect_end.size() == 1 && !changes.empty() && near_d(effect_end[0]->at - changes[0]->at, AbilityRuntime::kRestEndEffectDelay, 1e-9) && !s.rt.rest_effect_on()),
+          (w + ": the Rest effect still goes kRestEndEffectDelay after the jump").c_str());
+}
+
+/// Whichever way a Rest the client started ends, its item jumps with bBranchPredictedOnAutonomous 0 and, when the montage is over, its montage is cleared.
+static void test_rest_stands_up_on_the_client(const Rules& r) {
+    std::printf("Rest: every end jumps the item as the server's branch, then the montage is cleared when it is over\n");
+    CHECK(near_d(AbilityRuntime::kRestMontageLength, 6.89513, 1e-9) && near_d(AbilityRuntime::kRestMontageEndDelay, 1.0690620755, 1e-6), "(the montage is 6.89513 s long: 1.069 s from the jump to its end)");
+    rest_stands_up_case(r, "a walk away", 2.2, [](Sim& s, int64_t) { s.move(true); }, false);
+    rest_stands_up_case(r, "a jump (the client's cancel)", 2.2, [](Sim& s, int64_t) { s.cancel(42); }, false);
+    rest_stands_up_case(r, "a cancel in the sit-down (the effect is not there yet)", 1.0, [](Sim& s, int64_t) { s.cancel(42); }, false);
+    rest_stands_up_case(r, "getting on a mount", 2.2, [](Sim& s, int64_t) { s.rt.set_mounted(true, s.now); s.take(); }, false);
+    rest_stands_up_case(r, "a fight", 2.2, [](Sim& s, int64_t) { s.rt.set_in_combat(true, s.now); s.take(); }, false);
+    rest_stands_up_case(r, "a /sit", 2.2, [](Sim& s, int64_t) { s.rt.end_rest(s.now); s.take(); }, false);
+    rest_stands_up_case(r, "a Dodge", 2.2, [](Sim& s, int64_t) { s.trigger(content::kGuidDodge, 77); }, false);
+    rest_stands_up_case(r, "a Sprint", 2.2, [](Sim& s, int64_t) { s.trigger(content::kGuidSprint, 78); }, false);
+    rest_stands_up_case(r, "ServerEndAbility", 2.2, [](Sim& s, int64_t server) { s.rt.end_server_instance(server, s.now); s.take(); }, true);
+
+    {   // a second press: the client starts a new Rest and cancels it 0.2 s later; the first Rest's item is replaced, the new one stands up
+        Sim s(r.rules);
+        s.trigger(content::kGuidRest, 0);
+        s.run_to(2.5);
+        CHECK(s.rt.rest_effect_on(), "(a second press: the first Rest runs with its effect)");
+        CHECK(s.trigger(content::kGuidRest, 1) == Refusal::None, "(the second press starts a Rest of the client's)");
+        const auto starts = s.with("the Rest starts");
+        CHECK(starts.size() == 2 && starts[1]->change.abilities_removed == std::vector<int64_t>{0} && starts[1]->change.abilities_added.size() == 1 &&
+                  starts[1]->change.abilities_added[0].server_instance_id == 1 && starts[1]->change.abilities_added[0].branch_predicted && starts[1]->change.abilities_added[0].animation_counter == 2,
+              "a second press: the first item is replaced by the new Rest's, which keeps bBranchPredictedOnAutonomous 1");
+        s.run_to(s.now + 0.2);
+        CHECK(s.cancel(1) && rest_item_changes(s).size() == 1, "its cancel 0.2 s later jumps the new item");
+        s.run_to(s.now + 1.2);
+        check_rest_stand_up(s, 1, 3, "a second press");
+        s.run_to(s.now + 8.0);
+        CHECK(rest_item_changes(s).size() == 2 && s.ends().empty(), "a second press: the clear is made once and the client is told nothing");
+    }
+    {   // a new Rest inside the time between the jump and the clear keeps its own item: the late clear never touches it
+        Sim s(r.rules);
+        s.trigger(content::kGuidRest, 0);
+        s.run_to(2.2);
+        CHECK(s.cancel(0), "(the first Rest is cancelled)");
+        s.run_to(s.now + 0.5);
+        CHECK(rest_item_changes(s).size() == 1, "(0.5 s after the jump: the montage is not over)");
+        CHECK(s.trigger(content::kGuidRest, 1) == Refusal::None, "(a new Rest starts inside that time)");
+        const size_t after_start = s.log.size();
+        s.run_to(s.now + 6.0);
+        bool item_touched = false;
+        for (size_t i = after_start; i < s.log.size(); ++i) item_touched = item_touched || !s.log[i].change.abilities_changed.empty() || !s.log[i].change.abilities_removed.empty();
+        CHECK(!item_touched && rest_item_changes(s).size() == 1, "the late clear of the first Rest never comes: the new Rest's item is not changed or removed");
+        CHECK(s.rt.resting() && s.rt.rest_effect_on(), "(the new Rest runs with its effect)");
+        CHECK(s.cancel(1), "(the new Rest is cancelled)");
+        s.run_to(s.now + 1.2);
+        const auto changes = rest_item_changes(s);
+        CHECK(changes.size() == 3 && changes[1]->change.abilities_changed[0].server_instance_id == 1 && changes[1]->change.abilities_changed[0].animation_counter == 4 &&
+                  !changes[1]->change.abilities_changed[0].branch_predicted && changes[2]->change.abilities_changed[0].server_instance_id == 1 &&
+                  changes[2]->change.abilities_changed[0].animation_counter == 5 && changes[2]->change.abilities_changed[0].montage_path.empty(),
+              "the new Rest stands up on its own: its jump (counter 4), then its own clear (counter 5)");
+    }
+    {   // the Rest a /sit starts for itself is unchanged: its item is the server's already (bBranchPredictedOnAutonomous 0), and its montage is not cleared
+        Sim s(r.rules);
+        TriggerInfo ask;
+        ask.by_server = true;
+        CHECK(s.trigger(content::kGuidRest, -1, ask) == Refusal::None && s.rt.resting(), "(a /sit starts a Rest of the server's)");
+        const auto started = s.with("the Rest starts");
+        CHECK(started.size() == 1 && !started[0]->change.abilities_added[0].branch_predicted, "its start item says the client did not predict it, as before");
+        s.run_to(2.2);
+        CHECK(s.rt.end_rest(s.now), "(the player stands up)");
+        s.take();
+        s.run_to(s.now + 8.0);
+        const auto changes = rest_item_changes(s);
+        CHECK(changes.size() == 1 && changes[0]->change.abilities_changed[0].may_jump_to_position && changes[0]->change.abilities_changed[0].montage_position == AbilityRuntime::kRestSitEndPosition &&
+                  changes[0]->change.abilities_changed[0].animation_counter == 1 && !changes[0]->change.abilities_changed[0].branch_predicted &&
+                  !changes[0]->change.abilities_changed[0].montage_path.empty(),
+              "its end is the jump alone, as before: bBranchPredictedOnAutonomous 0, counter 1, the montage still on the item, no clear");
+        CHECK(s.with("the Rest effect ends").size() == 1 && s.ends().empty(), "(its effect goes as before, nothing is told to the client)");
+    }
+    {   // ServerEndAbility after the clear: the client is told once, nothing about the item changes again
+        Sim s(r.rules);
+        s.trigger(content::kGuidRest, 42);
+        s.run_to(2.2);
+        const int64_t server = server_instance_of(s, "the Rest starts");
+        CHECK(s.cancel(42), "(the client's cancel ends the Rest)");
+        s.run_to(s.now + 3.0);
+        check_rest_stand_up(s, server, 1, "a late ServerEndAbility");
+        CHECK(s.ends().empty() && !s.rt.rest_effect_on(), "(the client was told nothing, the effect is gone)");
+        CHECK(s.rt.end_server_instance(server, s.now), "(the instance is still known after its montage is cleared)");
+        s.take();
+        CHECK(s.ends() == ints({42}) && rest_item_changes(s).size() == 2, "the late ServerEndAbility tells the client once and changes no item");
+        CHECK(s.rt.end_server_instance(server, s.now) && s.ends() == ints({42}), "and not again");
+        s.run_to(s.now + 3.0);
+        CHECK(rest_item_changes(s).size() == 2 && s.ends() == ints({42}), "(nothing follows later)");
+    }
 }
 
 /// The mounts milestone, stage 3 fix 2: a mounted rider has no Sprint and no Stamina use (the user's run of 2026-10-08: a Sprint started before the mount-up ran on while mounted
@@ -1613,6 +1844,8 @@ int main() {
     test_clock_never_goes_back(r);
     test_dodge_items(r);
     test_rest(r);
+    test_end_by_server_instance(r);
+    test_rest_stands_up_on_the_client(r);
     test_other_abilities(r);
     test_mounted(r);
     test_instances(r);
