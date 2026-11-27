@@ -173,6 +173,11 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
         combat_flag_ = combat_side_->wants_in_combat;
         stats_->set_in_combat(combat_flag_);
         if (abilities_) abilities_->set_in_combat(combat_flag_, sec);
+        // a meal's or a drink's own Resting breaks in a fight like the Rest's (its record's fragility: IsInCombat(GetOwner())); the meal's Nourishment and buff stay
+        if (combat_flag_ && abilities_) {
+            pipeline_->end_effects_of(abilities_->rules().rest.effect_guid, "the Resting effect a use held breaks: combat starts");
+            pipeline_->stand_up_uses(sec);   // ... and the character stands up from it as the Rest's does: the montage jumps to its end
+        }
         pipeline_->refresh(sec, combat_flag_ ? "combat starts" : "combat ends", true);   // the regeneration is five times faster out of combat
         if (pb_.set_in_combat(combat_flag_)) {
             queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("combat state"); }, conn, /*must_build=*/true);

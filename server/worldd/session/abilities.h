@@ -286,6 +286,11 @@ public:
     size_t refused() const { return refused_; }
     /// The ServerInstanceId of the running (or released, for a Rest) instance the client knows as `client_instance_id`.
     std::optional<int64_t> instance_of(int32_t client_instance_id) const;
+    /// Whether `server_instance_id` is the ServerInstanceId of the ability item of a Sprint, a Dodge or a Rest this runtime holds (a Rest's item stays until the next Rest replaces it).  The generic
+    /// runtime takes its ids from the same counter, so none of its items shares one with these; it asks this before it writes an item of a use, so that it never clears or overwrites one of them.
+    bool owns_instance(int64_t server_instance_id) const {
+        return (sprint_ && sprint_->instance == server_instance_id) || (dodge_ && dodge_->instance == server_instance_id) || (rest_ && rest_->instance == server_instance_id);
+    }
     /// Whether a client that dodged may still move at the dash's speed (the A6 checker's allowance): from a Dodge's trigger to
     /// the end of its Evasion plus kDashMargin.
     bool   dash_allowed(double now) const { return now <= dash_until_; }

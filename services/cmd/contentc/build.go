@@ -40,8 +40,9 @@ import (
 // division of two whole numbers in the ability formulas, truncated toward zero as the game does. 49 adds the
 // indexes record_by_guid and record_by_schema, so a lookup of a record by its guid no longer reads every row.
 // 50 seeds the PvP effects (the corruption tiers' Corruption_1..5 and the PvP opt-in protections) into the
-// ability tables.
-const Version = "50"
+// ability tables. 51 folds GetAbilityItemInstance/GetItemInstanceStat into the consumed-item op (a
+// potion's HealingMod reads its own Health), so the stat program changes.
+const Version = "51"
 
 // Options say what Build reads and writes.
 type Options struct {

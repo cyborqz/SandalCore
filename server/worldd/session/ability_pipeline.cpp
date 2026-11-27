@@ -1263,6 +1263,7 @@ void AbilityPipeline::set_moving(bool moving) {
         for (size_t i = casts_.size(); i-- > 0;) {
             if (pets::for_ability(casts_[i].def->row.guid) && casts_[i].cost_due) abort_cast(i, now_, "the summoner moved before completion");
         }
+        stand_up_uses(now_);   // (the eating ability's own branch is IsMoving: a seated eater who walks stands up)
     }
 }
 
@@ -1365,6 +1366,16 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
     const content::EffectRow& row = def.row;
     if (stacks_in < 1) stacks_in = 1;
     if (row.guid == bootstrap::kEffectRogueStealth && stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;   // its damage count starts with it
+    // The Resting effect is one: a food or drink use's own Resting never adds a second instance — not while the Rest's own is on (the meal's joins the Rest's),
+    // and not while an earlier use's instance is (that use's own end takes it off)
+    if (rest_effect_guid_ != 0 && row.guid == rest_effect_guid_ && ((rest_effect_on_ && rest_effect_on_()) || stacks_of(rest_effect_guid_) > 0)) {
+        AbilityEvent e;
+        e.at = t;
+        e.note = "the effect " + row.name + " is not applied: the Resting effect is already on";
+        e.refusal = false;
+        events_.push_back(std::move(e));
+        return;
+    }
     // the duration: the hit row's, the record's (a number of seconds), or none: infinite
     double dur = kInf;
     if (duration) {
@@ -1381,6 +1392,8 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
         if (!(dur >= 0)) dur = 0;
     }
+    // One application of an effect per use: the cast's own step, its end and the client's hit share this set; the one that comes later does nothing.
+    if (applied_ && !applied_->insert(row.guid).second) return;
     // Abilities between players: contributed by MrJambix in #23.
     // the values of its stat mods, for one stack, as the character is now (another player's effect: as its caster worked them out)
     const GivenEffect* given = given_effect_;
@@ -1437,6 +1450,7 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         if (extend && !std::isinf(e.end) && !std::isinf(dur)) total = (e.end - t) + dur;   // the remaining time plus the full one
         e.start = t;
         e.end = std::isinf(total) ? kInf : t + total;
+        if (consumable_item_) e.item = consumable_item_;   // a tick after the refresh reads the item of the use that refreshed it
     };
     auto fresh = [&](int stacks) {
         EffectInst e;
@@ -1450,6 +1464,7 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         e.start = t;
         e.end = std::isinf(dur) ? kInf : t + dur;
         e.mods = mods;
+        e.item = consumable_item_;
         e.next_tick = row.tick_timer > 0 ? (row.ignore_initial_tick ? t + row.tick_timer : t) : kInf;
         give_shield(e);
         for (uint32_t& w : e.shield_guid) w = static_cast<uint32_t>(guid_rng_.next() >> 16);
@@ -1657,6 +1672,10 @@ void AbilityPipeline::run_effect_hits(AbilityChange& c, const EffectInst& e, con
     const bool tick = n == 1 && std::string_view(phases[0]) == "Tick";
     src.simulated = tick;
     src.autonomous = tick;
+    // A tick runs long after the use that applied the effect: the item's numbers (GetConsumedItemStat) are read from the item the effect remembers, not from a cast that
+    // is over by then (a meal's 121 Health a second, a salve's 162).
+    std::optional<ConsumedScope> consumed;
+    if (e.item) consumed.emplace(*this, e.item);
     for (const auto& [phase, hit_guid] : e.def->hits) {
         bool wanted = false;
         for (size_t i = 0; i < n; ++i) wanted = wanted || phase == phases[i];
@@ -2597,6 +2616,7 @@ void AbilityPipeline::set_dead(bool dead) {
         swing_steps_.clear();
         delayed_.clear();   // the hits a hit was to fire later are not fired
         taken_.clear();     // ... and the reactions to a hit he took are not run
+        montage_clears_.clear();   // ... and an eating use's montage that jumped to its end is not cleared later
         // every cast ends with the caster, except a ball that has left: it flies on and goes on hurting what it touches. Its own steps and the hits they sent stay; nothing else of its cast does
         for (size_t i = casts_.size(); i-- > 0;) {
             Cast& c = casts_[i];
@@ -2673,6 +2693,7 @@ double AbilityPipeline::next_due() const {
         for (const HitSlot& s : r.slots) due = std::min(due, slot_due(r, s));
     }
     for (const DelayedChild& d : delayed_) due = std::min(due, d.due);
+    for (const MontageClear& m : montage_clears_) due = std::min(due, m.due);
     for (const TakenHit& h : taken_) due = std::min(due, h.at);
     for (const Held& h : held_) {
         if (h.end_due) due = std::min(due, *h.end_due);
@@ -2722,6 +2743,13 @@ void AbilityPipeline::run_due(double t) {
         const DelayedChild child = std::move(delayed_[i]);
         delayed_.erase(delayed_.begin() + static_cast<std::ptrdiff_t>(i));
         land_delayed(child, t);
+        return;
+    }
+    for (size_t i = 0; i < montage_clears_.size(); ++i) {   // the montage of a use the character stood up from has reached its end
+        if (montage_clears_[i].due > t) continue;
+        const MontageClear clear = std::move(montage_clears_[i]);
+        montage_clears_.erase(montage_clears_.begin() + static_cast<std::ptrdiff_t>(i));
+        clear_montage(clear, t);
         return;
     }
     for (size_t i = 0; i < casts_.size(); ++i) {
@@ -2869,7 +2897,11 @@ void AbilityPipeline::run_due(double t) {
 
 void AbilityPipeline::finish_cast_if_done(size_t index) {
     const Cast& c = casts_[index];
-    if (!c.item_due && !c.cost_due && !c.hit_due && !c.projectile_due && !c.loop_due && !c.own_due && !c.branch_due && !c.end_due && !c.ground && c.missiles.empty()) {
+    // A consumable's own infinite effects are on the caster, not a step: the cast stays until its montage ends (step_end clears `own_effects`) or the client ends it, so that a
+    // meal's Resting can be taken off when the player stands up.  An eating or drinking use also keeps its place while its timed effects (the buff) wait for the
+    // end of the use.  Every other cast is done as soon as its last step is.
+    if (!c.item_due && !c.cost_due && !c.hit_due && !c.projectile_due && !c.loop_due && !c.own_due && !c.branch_due && !c.end_due && !c.ground && c.missiles.empty() &&
+        (!c.item_cast || (c.own_effects.empty() && !(c.effects_at_end && !c.timed_effects.empty())))) {
         casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
     }
 }
@@ -3146,6 +3178,12 @@ void AbilityPipeline::drop_record(int32_t client_id) {
     }
 }
 
+int64_t AbilityPipeline::instance_of(int32_t client_instance_id) const {
+    for (const Cast& cast : casts_)
+        if (cast.client_id == client_instance_id) return cast.instance;
+    return -1;
+}
+
 void AbilityPipeline::prune_records(double t) {
     for (auto it = records_.begin(); it != records_.end();) {
         bool pending = false;
@@ -3257,6 +3295,10 @@ bool AbilityPipeline::hit_request_spent(int64_t ability, int64_t hit_guid, doubl
 void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting) {
     // (a request the client made before the caster died runs after it: nothing of him lands any more)
     if (dead_) return;
+    std::optional<AppliedScope> applied;
+    if (rec.item_cast) {
+        if (Cast* cast = cast_of(rec.client_id)) applied.emplace(*this, &cast->applied_effects);
+    }
     rec.launched = true;   // (a hit of the cast is out: a Dodge no longer cancels it)
     const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
     const ConsumedScope consumed(*this, rec.item_cast);   // (a consumable's hit reads the item's numbers)
@@ -3456,7 +3498,7 @@ void AbilityPipeline::abort_cast(size_t index, double t, const char* why, bool g
                  paid ? (give_back ? "its cost was paid before the bar's end and is given back, nothing more happens" : "its cost was paid and is kept, nothing more happens") : "nothing is paid and nothing fires");
     AbilityChange c;
     if (give_back) refund(c, cast);
-    if (cast.montage_branch && !cast.item_due && item_instance_ && *item_instance_ == cast.instance) {   // (its item was sent and is still the pawn's: it keeps its place, the montage cleared)
+    if (cast.montage_branch && !cast.item_due && holds_item(cast.instance)) {   // (its item was sent and is still the pawn's: it keeps its place, the montage cleared)
         cast.item.montage_path.clear();
         cast.item.montage_guid = 0;
         cast.item.branch_predicted = cast.branch_predicted;
@@ -3794,6 +3836,18 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
         release_held(i.client_id, now_);
         stop_swing(i.server_id);
         i.end_due = now_ + kEndDelay;
+        // A consumable's cast has no fixed montage end (a meal's eating runs as long as the character stays seated, until it stands up).  The game's client sends no end
+        // for it; one that does ends it here: its own lasting states (Resting) go with the montage, while its timed effects (the buff) are granted here if the item was
+        // taken and no hit has given them.  A cast that cleared its montage by itself is already done and is left alone.  The record goes with it: a hit request that
+        // arrives after the use ended finds no cast and applies nothing (a meal ended early would otherwise leave its Resting on for good).  A use the client ended
+        // before its cost step gives the reserved item back.
+        for (Cast& cast : casts_) {
+            if (cast.item_cast && cast.instance == server_instance_id && !cast.end_due) {
+                if (!cast.paid && item_release_) item_release_(cast.client_id);
+                cast.end_due = now_ + kEndDelay;
+                drop_record(cast.client_id);
+            }
+        }
         return true;
     }
     return false;
@@ -3817,10 +3871,12 @@ void AbilityPipeline::stop_swing(int64_t instance) {
 void AbilityPipeline::end_instance(size_t index, double t, const std::string& why) {
     const Instance inst = instances_[index];
     instances_.erase(instances_.begin() + static_cast<std::ptrdiff_t>(index));
+    drop_montage_clears(inst.server_id);   // (the use is over: the clear its montage's end would send never comes)
     AbilityEvent e;
     e.at = t;
-    // the item (when it is still the ability item the pawn lists) keeps its place with the montage cleared, and the client is told the instance ended
-    if (item_instance_ && *item_instance_ == inst.server_id) {
+    // the item (when it is still the ability item the pawn lists) keeps its place with the montage cleared, and the client is told the instance ended; an item the montage's end
+    // cleared already is not cleared a second time
+    if (!inst.montage_cleared && holds_item(inst.server_id)) {
         if (const AbilityDef* a = catalog_ ? catalog_->ability(inst.ability) : nullptr) {
             bootstrap::ActiveAbilityItem item;
             item.ability_guid = inst.ability;
@@ -4086,25 +4142,43 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     const bool needs_target = row.target_requirement.find("Always") != std::string::npos;
     constexpr int kFriendly = 1 | 4 | 8 | 16;   // Self, Ally, Party, Raid
     if (needs_target && info.target_count == 0 && (row.applicable_targets & kFriendly) != 0) return refused(Refusal::NeedsTarget);
+    // A health potion at full Health would heal nothing and still take its item and start its cooldown: the use is refused before any of that.
+    if (info.item_cast && row.name.rfind("Consumable_Potion_Health_", 0) == 0 &&
+        stat_now(content::kGuidHealth) >= stat_now(content::kGuidMaxHealth)) {
+        return refused(Refusal::Requirement, " (Health is at its maximum)");
+    }
     // A song (a press, an infinite effect with a tick) is a loop: its effects start kLoopDelay on and the next press ends it. Any other ability's infinite
     // effect that no hit applies (Guard, Reflect, Tank_IronAura, a consumable's Rest) is its own: it goes on the caster with the cast, and ends with a
     // toggle's second press or a held ability's release; the ones a hit applies come with the hit (the client asks for it).
     bool loop = false;
     int64_t loop_effect = 0;
     std::vector<const EffectDef*> own_effects;
+    std::vector<const EffectDef*> timed_effects;
     const bool single_press = row.activation_input.find("Single") != std::string::npos;
     const std::set<int64_t> by_hits = effects_applied_by_hits(*def);
     for (const auto& [key, effect_guid] : def->effects) {
         const EffectDef* e = catalog_->effect(effect_guid);
-        if (!e || !e->row.infinite_duration) continue;
-        if (e->row.tick_timer > 0 && single_press) {
-            loop = true;
-            loop_effect = effect_guid;
-        } else if (!by_hits.count(effect_guid)) {
-            own_effects.push_back(e);
+        if (!e) continue;
+        if (e->row.infinite_duration) {
+            if (e->row.tick_timer > 0 && single_press) {
+                loop = true;
+                loop_effect = effect_guid;
+            } else if (!by_hits.count(effect_guid) || info.item_cast) {
+                // An item cast applies what its ability carries itself even when a hit lists it too (the Rations' Resting is a direct effect a hit also names, and no
+                // montage notify of a consumable asks for that hit): the effect goes on with the cast, and the hit the client does ask for only refreshes it.
+                own_effects.push_back(e);
+            }
+        } else if (!by_hits.count(effect_guid) || info.item_cast) {
+            // A timed effect the ability carries itself (a consumable's Nourishment: 20 s, a tick a second) starts with the own effects and keeps its own life.  A normal
+            // ability carries its timed effects in its hits; one that does not would have been dropped before (meals, potions and salves were not served).
+            timed_effects.push_back(e);
         }
     }
     const bool is_toggle = row.held_behavior.find("Toggle") != std::string::npos;
+    // A loop (a song) applies every effect it carries on each of its steps (step_loop), so the timed ones must not get a second, one-shot copy.  And an ordinary ability's
+    // finite effects are carried by its hits; a timed effect of its own that no hit applies is not a shape the game's abilities use (Rogue_UmbralCloak), so this reading is
+    // the consumables' alone: the item cast that names a meal's Nourishment or a salve's ticks.
+    if (loop || !info.item_cast) timed_effects.clear();
 
     // the other actors the call names: each must be there, of the side the ability reaches, in the life state it reaches (alive, or dead for a
     // Resurrection), in range and in sight [plan E1, stage 3; social, seeing other players: their death].  The caster's own mount is no combat world
@@ -4169,7 +4243,10 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     cast.place = info.place;
     cast.loop = loop;
     cast.toggle_off = (loop && stacks_of(loop_effect) > 0) || (is_toggle && !own_effects.empty() && stacks_of(own_effects[0]->row.guid) > 0);   // on: this press ends it
-    if (!cast.toggle_off) cast.own_effects = own_effects;
+    if (!cast.toggle_off) {
+        cast.own_effects = own_effects;
+        cast.timed_effects = timed_effects;
+    }
     cast.group = group_key(row);
     drop_evaluation();   // the character as it is at this trigger
     std::string why;
@@ -4266,6 +4343,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     double zone_end = -1;     // when the dance ends, after the trigger (-1: the zone's life)
     double table_hit = -1;    // when a projectile of the ability first changed Health, after the trigger (-1: the table has none: the cost step + kProjectileDelay)
     double table_end = -1;    // when the ability's montage was cleared, after the trigger (-1: the table has none)
+    double effects_delay = -1;   // an item cast's own effects come this long after the use (-1: with its cost step, as any other cast's)
+    std::string eating_montage, eating_start;   // an item cast's montage asset and the section it starts at
     {
         // what the retail captures show of the ability (ability_timings.h, the median of the recorded casts): the montage's first notify differs from one ability to the next, and a cast that
         // reaches another actor has a row of its own
@@ -4290,7 +4369,12 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     if (info.item_cast) {   // a consumable: the item, the cost and the stack's removal come together, and the montage is cleared where the recordings show (consumable_timings.h)
         item_delay = cost_delay = kItemCastDelay;
         for (const content::MontageRow& m : def->montages) {
-            if (m.anim_index == cast.animation_index) table_end = consumable_montage_end(m.soft_path);
+            if (m.anim_index == cast.animation_index) {
+                table_end = consumable_montage_end(m.soft_path);
+                effects_delay = consumable_effects_delay(m.soft_path);
+                eating_montage = m.soft_path;
+                eating_start = m.start_section;
+            }
         }
     }
     if (pets::for_ability(ability)) {
@@ -4459,7 +4543,41 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     movement_.erase(std::remove_if(movement_.begin(), movement_.end(), [&](const auto& m) { return m.first < t; }), movement_.end());
     ++casts_started_;
     if (loop && !cast.toggle_off) cast.loop_due = t + kLoopDelay;
-    if (!cast.own_effects.empty()) cast.own_due = *cast.cost_due + kHitDelay;
+    // A consumable's timed effects (its buff) come at the END of its use — when the client's eating or drinking bar completes (its ServerEndAbility) or an
+    // interruption ends the use after the item was taken — not with its cost step; its own infinite effects (Resting: while the character eats) go on early and
+    // end with the use.  The instant kinds (a scroll's, a potion's, a salve's, an elixir's) apply both with the cast's own step, as their client asks for their
+    // hit right after the use.
+    cast.effects_at_end = info.item_cast && effects_delay >= 0.0;
+    if (!cast.own_effects.empty() || (!cast.timed_effects.empty() && !cast.effects_at_end))
+        cast.own_due = *cast.cost_due + kHitDelay;
+    // An eating use's montage gives some of the ability's effects itself, when it reaches their notifies (a ration's own effect, and Resting, consumable_effect_notify): they
+    // come then, together, with no hit request, and the character stays seated.  What no notify names but a hit applies (a meal's buff) waits for the hit; what neither gives
+    // (a meal's Nourishment) is never given.
+    if (cast.effects_at_end) {
+        double notify_at = -1;
+        const auto notify_of = [&](const EffectDef* e) {
+            for (const auto& [key, guid] : def->effects) {
+                if (guid == e->row.guid) return consumable_effect_notify(eating_montage, eating_start, static_cast<int>(key));
+            }
+            return -1.0;
+        };
+        std::vector<const EffectDef*> held;
+        for (const EffectDef* e : cast.timed_effects) {
+            const double at = notify_of(e);
+            if (at < 0) {
+                if (by_hits.count(e->row.guid)) held.push_back(e);
+                continue;
+            }
+            cast.notified_effects.push_back(e);
+            notify_at = notify_at < 0 ? at : std::min(notify_at, at);
+        }
+        cast.timed_effects = std::move(held);
+        for (const EffectDef* e : cast.own_effects) {
+            const double at = notify_of(e);
+            if (at >= 0) notify_at = notify_at < 0 ? at : std::min(notify_at, at);
+        }
+        if (notify_at >= 0) cast.own_due = t + notify_at;
+    }
     // the hits the client will ask for: every direct hit that is not aimed at the caster
     CastRecord rec;
     rec.client_id = client_id;
@@ -4471,7 +4589,10 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // than the recording needs (a recorded Prismatic Beam ticked every 0.339 s, a slower client's every 0.385 s), and a little more. What bounds the ticks is the most a hit takes, not the time.
     if (cast.channel && cast.end_due) rec.window_end = std::max(rec.window_end, t + (*cast.end_due - t) * kChannelSlowest + kChannelRequestSlack);
     rec.item_cast = info.item_cast;
+    // A consumable's hit is the one its use makes: one request for each hit of the cast.  The general allowance would let a modified client repeat a potion's heal.
+    if (info.item_cast) rec.max_requests = 1;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
+    if (cast.effects_at_end && effects_delay > rec.hit_delay) rec.hit_delay = effects_delay;   // an eating or drinking use: its hit (the buff's apply) lands no earlier than its bar's least time
     rec.ally_targeting = cast.ally_targeting;
     rec.reach = reach_of(*def);
     // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes its requests closer together.
@@ -4565,6 +4686,13 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
     }
     if (swing_step > 0) swing_steps_[def->row.guid] = swing_step;
+    // The game lets any ability cancel the animation of an eating or drinking use: a seated eater who uses another ability stands up.  A second eating or drinking
+    // use takes the seat when its item comes instead (step_item).
+    if (!(cast.item_cast && cast.effects_at_end)) {
+        for (Cast& other : casts_) {
+            if (seated(other)) stand_up(other, t);
+        }
+    }
     casts_.push_back(std::move(cast));
     return Refusal::None;
 }
@@ -4573,8 +4701,16 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
 void AbilityPipeline::step_item(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
     AbilityChange c;
+    // A second eating or drinking use takes the seat of the first: the first one's Resting goes in this update, with the item it had (the second's own Resting
+    // comes later), and its buff is replaced when the second one's hit gives its own.  Another ability stood a seated use up at its trigger already.
+    for (Cast& other : casts_) {
+        if (&other == &cast || !seated(other)) continue;
+        other.stood_up = true;   // (no jump: its item is taken off below)
+        other.end_due = t;       // ... and its end, which takes its Resting, follows in this step
+    }
     if (item_instance_) {
-        c.abilities_removed.push_back(*item_instance_);
+        if (holds_item(*item_instance_)) c.abilities_removed.push_back(*item_instance_);
+        drop_montage_clears(*item_instance_);   // (the item the clear was for is gone with the new one's coming)
         item_instance_.reset();
     }
     bootstrap::ActiveAbilityItem item;
@@ -4659,7 +4795,7 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
     launch_ball(cast, t);
     if (cast.branched && cast.branched->no_jump) return;   // (the branch ends the bar where it stands: the record's section is none and no montage jump is sent)
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
-    if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
+    if (!cast.montage_branch || !holds_item(cast.instance)) return;
     if (cast.charged && cast.gathered && cast.gathered->charged_montage[0] != '\0') {   // the charged shot has a montage of its own
         cast.item.montage_path = cast.gathered->charged_montage;
         cast.item.montage_guid = cast.gathered->charged_montage_guid;
@@ -5176,23 +5312,152 @@ void AbilityPipeline::send_ground_marks(Cast& cast) {
 void AbilityPipeline::step_end(Cast& cast, double t) {
     // the montage is over: the effects the ability put on its caster itself end with it, and the item keeps its place and its targets with the montage cleared [R: retail's last update of the item]
     AbilityChange c;
+    bool changed = false;
     if (!cast.own_effects.empty()) {
         end_loop(c, cast.def->row.guid, t);
-        recompute(c);
+        cast.own_effects.clear();   // (finish_cast_if_done may let the cast go now: its lasting states are off)
+        changed = true;
     }
-    if ((cast.montage_branch || cast.clears_montage) && item_instance_ && *item_instance_ == cast.instance) {
+    // An eating or drinking use that its client ends before its montage gave its effects does not get them later; one that ends before the apply hit came (the
+    // ServerEndAbility it sends) grants its timed effects here, if its item was taken: a use the character stood up from gives nothing, and a use cancelled before its
+    // cost step is erased outright and never reaches this with `paid`.
+    if (cast.item_cast && cast.effects_at_end) {
+        cast.own_due.reset();
+        cast.notified_effects.clear();
+    }
+    if (!cast.stood_up && grant_timed_effects(cast, c, t)) changed = true;
+    cast.timed_effects.clear();     // they keep their own duration as effects; the cast itself needs them no more    // A consumable's lasting states (Resting: 1 % of Health and Mana a second, an infinite effect) come from a hit of the use rather than from its EffectsIds, so no owner ties
+    // them to the ability: they end with the use too, when its eating or drinking montage does.  The timed effects (Nourishment) are not touched: they keep their own 20 s.
+    if (cast.item_cast) {
+        std::set<int64_t> mine;
+        for (const auto& [key, guid] : cast.def->effects) mine.insert(guid);
+        for (const content::AbilityHitRow& h : cast.def->hits) {
+            if (const HitDef* hit = catalog_->hit(h.hit_guid)) {
+                for (const content::HitEffectRow& row : hit->effects) mine.insert(row.effect_guid);
+            }
+        }
+        for (size_t i = 0; i < effects_.size();) {
+            const EffectInst& e = effects_[i];
+            if (e.owner != 0 || !std::isinf(e.end) || mine.count(e.def->row.guid) == 0) {
+                ++i;
+                continue;
+            }
+            const EffectInst gone = e;
+            remove_instance(c, i);
+            run_effect_hits(c, gone, kExpirePhases, 2, t);
+            changed = true;
+        }
+        if (changed) sync_engine_effects();
+    }
+    if (changed) recompute(c);
+    if ((cast.montage_branch || cast.clears_montage || cast.item_cast) && !cast.stood_up && holds_item(cast.instance)) {
+        // A consumable's item is cleared here too when its client ends the use: a meal/drink has no fixed montage end, and its item would otherwise keep the
+        // eating animation (and the client's sitting state).  A use the character stood up from keeps its item here: its montage plays out the jump it was told, and
+        // clear_montage takes the montage off the item when it ends.
         cast.item.montage_path.clear();
         cast.item.montage_guid = 0;
         cast.item.branch_predicted = cast.branch_predicted;
         cast.item.animation_counter = ++animation_counter_;
         c.abilities_changed.push_back(cast.item);
     }
+    if (cast.item_cast) drop_record(cast.client_id);   // the use is over: a hit request that arrives later finds no cast and applies nothing
     // a ground cast whose client never asked for its branch (the aim point is in the call, so its client's cast bar is not the game's own) has no client
     // end of its own: the server ends it here, so the animation does not play on after the spell is done. A cast aimed at an actor keeps its client's end.
     std::optional<int32_t> end;
     if (cast.montage_branch && !cast.request_heard && cast.place) end = cast.client_id;
     if (c.empty() && !end) return;
     emit({std::move(c), end, t, "the montage of " + cast.def->row.name + " ends"});
+}
+
+bool AbilityPipeline::grant_timed_effects(Cast& cast, AbilityChange& c, double t) {
+    if (!cast.effects_at_end || !cast.paid || cast.timed_effects.empty()) return false;
+    const ConsumedScope consumed(*this, cast.item_cast);   // (the granted buff's numbers read the item the use was made from)
+    const AppliedScope applied(*this, &cast.applied_effects);
+    bool any = false;
+    for (const EffectDef* e : cast.timed_effects) {
+        bool applies = true;
+        std::string why;
+        if (!eval_bool(e->row.requirement_expr, true, applies, why) || !applies) continue;
+        apply_effect(c, *e, 1, std::nullopt, t);
+        any = true;
+    }
+    cast.timed_effects.clear();   // (given once: a later hit or end finds none)
+    return any;
+}
+
+void AbilityPipeline::stand_up(Cast& cast, double t) {
+    cast.stood_up = true;
+    cast.own_due.reset();   // (what its montage has not given yet it never gives: a walk before a ration's effect gives nothing)
+    cast.notified_effects.clear();
+    if (!cast.paid && item_release_) item_release_(cast.client_id);   // (a use stood up from before its cost step gives the item it reserved back, as the client's end of one does)
+    float  end = -1.0f;
+    double length = -1.0;
+    for (const content::MontageRow& m : cast.def->montages) {
+        if (m.anim_index != cast.animation_index) continue;
+        end = consumable_stand_position(m.soft_path);
+        length = consumable_montage_length(m.soft_path);
+    }
+    // The montage jumps to its end section, as the Rest's does when the player walks away; Resting goes kRestEndEffectDelay later, with the use's end (step_end).  The server decides
+    // the jump, so its item no longer says the client took the branch itself [R: the retail server's item for a stood up meal says bBranchPredictedOnAutonomous 0, MontagePosition
+    // the end section, bMayJumpToPosition 1 and a new AnimationCounter].  What is left of the montage plays out, and when it ends the item loses it (clear_montage).
+    if (end >= 0 && holds_item(cast.instance)) {
+        cast.item.montage_position = end;
+        cast.item.may_jump_to_position = true;
+        cast.item.branch_predicted = false;
+        cast.item.animation_counter = ++animation_counter_;
+        AbilityChange c;
+        c.abilities_changed.push_back(cast.item);
+        emit({std::move(c), std::nullopt, t, "the character stands up from " + cast.def->row.name + ": its montage jumps to its end"});
+        if (length > end) {
+            drop_montage_clears(cast.instance);   // (a use has one clear: it is never queued twice)
+            MontageClear clear;
+            clear.instance = cast.instance;
+            clear.due = t + (length - end);
+            clear.item = cast.item;
+            clear.ability = cast.def->row.name;
+            montage_clears_.push_back(std::move(clear));
+        }
+    }
+    cast.end_due = t + AbilityRuntime::kRestEndEffectDelay;
+}
+
+bool AbilityPipeline::holds_item(int64_t instance) const {
+    return item_instance_ && *item_instance_ == instance && !a7_.owns_instance(instance);
+}
+
+void AbilityPipeline::drop_montage_clears(int64_t instance) {
+    montage_clears_.erase(std::remove_if(montage_clears_.begin(), montage_clears_.end(), [instance](const MontageClear& m) { return m.instance == instance; }), montage_clears_.end());
+}
+
+void AbilityPipeline::clear_montage(const MontageClear& clear, double t) {
+    // another ability's item has taken the pawn's place since the jump: the item of the use the character stood up from is gone, and this clear never touches the new one.  The item of a
+    // Sprint, a Dodge or a Rest the runtime holds is never this use's: the clear never clears or overwrites it either
+    if (!holds_item(clear.instance)) return;
+    // The item loses its montage as a consumable's item does when its client ends the use (step_end): the montage path and its id go, the branch flag stays false and the counter goes
+    // one on; the position it jumped to stays, and so does the item in the list [R: the retail server's item for a meal ends with Montage none, MontagePosition the end section,
+    // bMayJumpToPosition 1 and bBranchPredictedOnAutonomous 0, and it is never deleted].
+    bootstrap::ActiveAbilityItem item = clear.item;
+    item.montage_path.clear();
+    item.montage_guid = 0;
+    item.branch_predicted = false;
+    item.animation_counter = ++animation_counter_;
+    for (Instance& in : instances_) {
+        if (in.server_id == clear.instance) in.montage_cleared = true;   // (a client end that comes later finds the item cleared)
+    }
+    AbilityChange c;
+    c.abilities_changed.push_back(std::move(item));
+    emit({std::move(c), std::nullopt, t, "the montage of " + clear.ability + " reaches its end: its item loses it"});
+}
+
+size_t AbilityPipeline::stand_up_uses(double now) {
+    advance(now);
+    size_t n = 0;
+    for (Cast& cast : casts_) {
+        if (!seated(cast)) continue;
+        stand_up(cast, now_);
+        ++n;
+    }
+    return n;
 }
 
 void AbilityPipeline::step_cost(Cast& cast, double t) {
@@ -5349,6 +5614,8 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
 void AbilityPipeline::step_own(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
     const ConsumedScope consumed(*this, cast.item_cast);
+    std::optional<AppliedScope> applied;
+    if (cast.item_cast) applied.emplace(*this, &cast.applied_effects);
     // A quick tap may be released before this delayed step ever creates a Held entry.
     if (cast.held_release_due && *cast.held_release_due <= t) return;
     AbilityChange c;
@@ -5361,6 +5628,24 @@ void AbilityPipeline::step_own(Cast& cast, double t) {
         apply_effect(c, *e, 1, std::nullopt, t, false, def.row.guid);
         started = true;
     }
+    // the ability's own timed effects (a meal's 20 s of regeneration): theirs is the duration the record names, and they belong to no montage, so they outlive it.
+    // An eating or drinking use holds them back: its buff comes at the END of the use (step_end), when its bar completes — not with its own step.
+    if (!cast.effects_at_end) {
+        for (const EffectDef* e : cast.timed_effects) {
+            bool applies = true;
+            std::string why;
+            if (!eval_bool(e->row.requirement_expr, true, applies, why) || !applies) continue;
+            apply_effect(c, *e, 1, std::nullopt, t);
+        }
+    }
+    // an eating use's effects its montage gives (a ration's own 20 s effect): they come with its own effects, when the notify is reached
+    for (const EffectDef* e : cast.notified_effects) {
+        bool applies = true;
+        std::string why;
+        if (!eval_bool(e->row.requirement_expr, true, applies, why) || !applies) continue;
+        apply_effect(c, *e, 1, std::nullopt, t);
+    }
+    cast.notified_effects.clear();
     if (started) mark_launched(cast.client_id);   // (an effect of its own is on: a Dodge no longer cancels the cast)
     sync_engine_effects();
     // a held ability (the key stays down: Guard, Reflect) ends with the client's cancel
@@ -5393,6 +5678,31 @@ void AbilityPipeline::end_held(size_t index, double t) {
     recompute(c);
     const AbilityDef* a = catalog_->ability(ability);
     emit({std::move(c), std::nullopt, t, "the held ability " + (a ? a->row.name : std::string("?")) + " is released"});
+}
+
+bool AbilityPipeline::end_effects_of(int64_t effect_guid, const char* why) {
+    // The Rest's own start takes the Resting effect over from a running food or drink use: every instance of the record the use holds goes here, and the
+    // Rest's own (the runtime's, added beside this) stands in its place — the character never carries two.  The use's own end later finds no instance of its
+    // own and takes nothing off, so the Rest's stays for as long as the Rest runs.
+    bool any = false;
+    for (size_t i = 0; i < effects_.size();) {
+        if (effects_[i].def->row.guid != effect_guid) {
+            ++i;
+            continue;
+        }
+        AbilityChange c;
+        const EffectInst gone = effects_[i];
+        remove_instance(c, i);
+        run_effect_hits(c, gone, kExpirePhases, 2, now_);
+        AbilityEvent e;
+        e.at = now_;
+        e.change = std::move(c);
+        e.note = why ? why : "the Resting effect a use held goes: the Rest's own takes its place";
+        events_.push_back(std::move(e));
+        any = true;
+    }
+    sync_engine_effects();
+    return any;
 }
 
 void AbilityPipeline::end_loop(AbilityChange& c, int64_t ability, double t) {
