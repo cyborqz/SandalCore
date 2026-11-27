@@ -116,7 +116,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Conversations: NPC voice and animation while they talk.
 - Infrastructure: multi-process cell sharding for crowded worlds.
 - Fishing: sport fishing (the lure, the fish that is fought with the line, and the fishing grounds with their fish).
-- Professions: the shops that sell most recipe items (49 of the 2,412 recipes a player has to learn can be bought in game), the node's artisan buildings and the higher-tier stations inside them (most Journeyman recipes need both), and the materials that have no source in the world yet.
+- Professions: the vendors and mob drops of most recipe items (54 of the 2,412 recipes a player has to learn can be bought in game), the node's artisan buildings and the higher-tier stations inside them (most Journeyman recipes need both), and the materials that have no source in the world yet.
 
 ---
 

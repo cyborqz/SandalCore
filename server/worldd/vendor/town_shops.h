@@ -47,12 +47,15 @@
 
 namespace aoc::worldd::vendor {
 
-/// The shops this step switches on, by their def's name.  The last four are the vendors of the artisan outposts the Riverlands start in (Aven's End and Briarmoor Workshops, whose NPCs the
-/// world spawns at their plots): the Smithy and the Woodshop sell the pickaxe, sickle, hunting bow and fishing pole reagents the gathering-tool recipes take, and the Textile Mill and the
+/// The shops this step switches on, by their def's name.  The last six are the vendors of the artisan outposts the Riverlands start in (Aven's End and Briarmoor Workshops, whose NPCs the
+/// world spawns at their plots): the Smithy and the Woodshop sell the pickaxe, sickle, hunting bow and fishing pole reagents the gathering-tool recipes take, the Textile Mill and the
 /// Hideworks sell the Tailoring and Leatherworking recipe items and the reagents of the Weaving, Tanning, Tailoring and Leatherworking chains (their listings are gated by the node's
-/// biome).  The other shops that list these items belong to service buildings no node has built or to no NPC at all, so without these four those recipes have no source in the live world.
+/// biome), and the Laboratory and the Stoneworks sell the reagents of the Alchemy, Arcane Engineering, Scribe, Jeweler, Mining and Stonemasonry tabs, the Mining bag, and the Scribe and
+/// Jeweler recipe items (their six tabs have no biome condition: every listing is sold wherever the shopkeeper stands).  The other shops that list these items belong to service
+/// buildings no node has built or to no NPC at all, so without these six those recipes have no source in the live world.
 inline constexpr const char* kOpenShops[] = {"Marketplace_Vendor", "Node_Vendor_BlackMarket", "Caravansary_VendorDef", "ServiceBuilding_TownHallAdmin_Vendor", "ArtisanshipPOI_Smithy_Vendor",
-                                             "ArtisanshipPOI_Woodshop_Vendor", "ArtisanshipPOI_TextileMill_Vendor", "ArtisanshipPOI_Hideworks_Vendor"};
+                                             "ArtisanshipPOI_Woodshop_Vendor", "ArtisanshipPOI_TextileMill_Vendor", "ArtisanshipPOI_Hideworks_Vendor", "ArtisanshipPOI_Laboratory_Vendor",
+                                             "ArtisanshipPOI_Stoneworks_Vendor"};
 
 /// How far the shopkeeper may be from the player, in cm, in three dimensions, for the shop to open and for a purchase to go through (12 m).
 inline constexpr double kShopRangeCm = 1200.0;
