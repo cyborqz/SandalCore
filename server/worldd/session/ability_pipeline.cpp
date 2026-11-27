@@ -1779,6 +1779,7 @@ double AbilityPipeline::take_damage(double amount, double now) {
     recompute(c);
     const double through = before - stat_now(content::kGuidHealth);
     emit({std::move(c), std::nullopt, now_, "damage reaches the character"});
+    if (amount > 0) stand_up_uses(now_);   // (damage that comes to the session directly is neither a reaction's nor an effect's: the meal's and the drink's rule names it)
     return through;
 }
 
@@ -2268,6 +2269,9 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
     if (damage > 0) break_stealth_on_damage(damage, now_);
+    // The data's cancel rule for a meal or a drink names a Health loss that is neither a reaction's nor an effect's tick (a damage-over-time tick does not end it): a seated eater
+    // stands up as a move makes them, and a use whose item has not come yet is cancelled.  A miss took nothing (`damage` counts none).
+    if (damage > 0 && in.source_type != content::kSourceTypeReaction && in.source_type != content::kSourceTypeEffect) stand_up_uses(now_);
 }
 
 std::vector<double> AbilityPipeline::apply_ally_landing(const combat::PlayerIncomingHit& in, double now) {
@@ -2289,16 +2293,21 @@ std::vector<double> AbilityPipeline::apply_ally_landing(const combat::PlayerInco
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
     uint8_t flags = in.flags;
     const double before = stat_now(content::kGuidHealth);
+    bool health_lost = false;   // (the hit's Health mod is a loss)
     if ((flags & stats::kHitMiss) == 0) {
         for (size_t i = 0; i < in.mods.size(); ++i) {
             const combat::ResolvedMod& m = in.mods[i];
             if (!std::isfinite(m.value)) continue;
             effective[i] = apply_delta(c, m.stat_guid, m.value);
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) health_lost = true;
             h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective[i])});
         }
     }
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;
     h.flags = flags;
+    // The data's cancel rule for a meal or a drink names a Health loss that is neither a reaction's nor an effect's tick.  This call runs none of this runtime's steps and changes none of its
+    // casts (the contract above), so the interrupt waits for the runtime's own next step, at the time this hit landed.
+    if (health_lost && in.source_type != content::kSourceTypeReaction && in.source_type != content::kSourceTypeEffect) use_hit_at_ = use_hit_at_ ? std::min(*use_hit_at_, at) : at;
     confirmations_.push_back(std::move(h));
     // reactions: the character took another player's hit.  They run in this runtime's own next step and not here: a reaction may hit the attacker back (the
     // Tank's Reflect, the Ranger's Thorns), and the attacker's own step is still running when this call comes in, so what lands on him must not drop his evaluation
@@ -2695,6 +2704,7 @@ double AbilityPipeline::next_due() const {
     for (const DelayedChild& d : delayed_) due = std::min(due, d.due);
     for (const MontageClear& m : montage_clears_) due = std::min(due, m.due);
     for (const TakenHit& h : taken_) due = std::min(due, h.at);
+    if (use_hit_at_) due = std::min(due, *use_hit_at_);
     for (const Held& h : held_) {
         if (h.end_due) due = std::min(due, *h.end_due);
     }
@@ -2860,6 +2870,11 @@ void AbilityPipeline::run_due(double t) {
             finish_cast_if_done(i);
             return;
         }
+    }
+    if (use_hit_at_ && *use_hit_at_ <= t) {   // another player's hit took Health off the character (apply_ally_landing): the meals' and drinks' uses are interrupted in this step, after the steps due before it
+        use_hit_at_.reset();
+        interrupt_uses(t);
+        return;
     }
     for (size_t i = 0; i < held_.size(); ++i) {
         if (held_[i].end_due && *held_[i].end_due <= t) return end_held(i, t);
@@ -4686,13 +4701,10 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
     }
     if (swing_step > 0) swing_steps_[def->row.guid] = swing_step;
-    // The game lets any ability cancel the animation of an eating or drinking use: a seated eater who uses another ability stands up.  A second eating or drinking
+    // The game lets any ability cancel the animation of an eating or drinking use: a seated eater who uses another ability stands up, and a use whose item has not come yet
+    // (its first moment) is cancelled with the item kept.  The press was accepted (a refused one returned above): it changes nothing.  A second eating or drinking
     // use takes the seat when its item comes instead (step_item).
-    if (!(cast.item_cast && cast.effects_at_end)) {
-        for (Cast& other : casts_) {
-            if (seated(other)) stand_up(other, t);
-        }
-    }
+    if (!(cast.item_cast && cast.effects_at_end)) interrupt_uses(t);
     casts_.push_back(std::move(cast));
     return Refusal::None;
 }
@@ -5451,13 +5463,45 @@ void AbilityPipeline::clear_montage(const MontageClear& clear, double t) {
 
 size_t AbilityPipeline::stand_up_uses(double now) {
     advance(now);
+    return interrupt_uses(now_);
+}
+
+size_t AbilityPipeline::interrupt_uses(double t) {
     size_t n = 0;
-    for (Cast& cast : casts_) {
-        if (!seated(cast)) continue;
-        stand_up(cast, now_);
-        ++n;
+    for (size_t i = 0; i < casts_.size();) {
+        Cast& cast = casts_[i];
+        if (first_moment(cast)) {
+            cancel_first_moment(i, t);   // (it leaves the list: the next use is at the same index)
+            ++n;
+            continue;
+        }
+        if (seated(cast)) {
+            stand_up(cast, t);
+            ++n;
+        }
+        ++i;
     }
     return n;
+}
+
+// A use whose item and cost step have not come (the first 65 ms): nothing has gone out and the item is still in the bag, so the use is cancelled where a seated one would stand up.  The
+// reservation of its item goes back, its record goes (a hit request that arrives later finds no cast and applies nothing), the cost step never comes (nothing is paid, no cooldown
+// starts, no buff and no Resting follow) and the client is told its instance is over, as for a cast a Dodge cancels before it went out: it has played the use on its own since its press,
+// and the server has sent it no item to say otherwise.
+void AbilityPipeline::cancel_first_moment(size_t index, double t) {
+    const Cast& cast = casts_[index];
+    // Meal and drink interrupt: contributed by war-drayv in #21.
+    const int32_t client_id = cast.client_id;
+    AbilityEvent e;
+    e.at = t;
+    e.end_ability = client_id;
+    e.note = cast.def->row.name + " is over: the character moved, took damage or used another ability before its item was taken; nothing was paid and the item is kept";
+    spdlog::info("[abilities] {} {:.3f} s after the trigger: {}", cast.def->row.name, t - cast.trigger_at, e.note);
+    if (item_release_) item_release_(client_id);
+    drop_record(client_id);
+    end_zones_of(cast, t);
+    casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
+    events_.push_back(std::move(e));
 }
 
 void AbilityPipeline::step_cost(Cast& cast, double t) {

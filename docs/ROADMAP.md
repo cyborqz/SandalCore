@@ -25,7 +25,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Combat and the class abilities; weapon combo finishers and weapon swaps; magic weapon scaling (caster weapons scale with Magical Power, and melee combos hit for their full share).
 - The walking map and NPC spawning; mobs that notice by hearing and sight and give up 140 m from where the fight began; loot rolls that change on every server start.
 - Mounts: ground, aquatic and flying.
-- Gathering, hunting, fishing and professions.
+- Gathering, hunting, fishing and professions: all 22 professions work at their first tier (Novice), a certifier moves a profession up one tier at a time to Grandmaster, and recipe items teach their recipes.
 - City nodes: node levels and experience, the towns' scenery, people and floor, and the towns' crafting stations.
 - NPC conversations (the talking window).
 - Vendors: currency, buying, selling, repairing and destroying items; talking shopkeepers.
@@ -83,6 +83,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Guilds, first part: creating one (letters with single spaces, no cost, a name no stored guild has, the data's 432,000 s cooldown after leaving), inviting players for 60 s each, accepting and declining, leaving, kicking, disbanding, promoting and demoting within the data's three ranks and 35 permissions, the leader's leaving (the next-highest-ranking member leads), the roster (level, class, rank, last online and online) with its refresh, the guild's name over the nameplate and the green name of a guildmate, guild chat between the ranks that may read and write it, the guild and its members kept by the character service, and a game-master command that puts a character into a guild for a one-client test. Still to come: the perks and guild levels, storage, wars, the board, the calendar, the patron guild hall, and raids and mail.
 - The mobs' target-scoring choices and their checks on the target: a move plays at the actor its tree's selector scores (the players a creature hates, a heal's most hurt ally) from as far away as the selector reaches, and a target-effect check such as the Raptor's Smell of Blood reads the effects its target holds.
 - Raids: a party becomes a raid of 2 to 40 players in up to 10 squads of 8, by the group window's Convert to Raid button or a yes to the 9th invitation's ask; the raid leader moves members between squads and sets each squad's leader; a raid of 8 or fewer turns back into a party.
+- Quest speech bubbles: some of the people your active quest objectives point you to show a speech bubble over their heads, where the game's data gives the objective one (Bronsen's "Over here!" in Welcome to Verra among them).
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -94,7 +95,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Stealth: the full-bag pile on the ground, the client's own Camouflage look pinned on the wire, and creatures that detect a stealthed player by the game's rule.
 
 ### Left
-- Quests: the speech bubbles over NPCs who have an objective for you; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
+- Quests: objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
 - Commissions: the town boards' tasks, their rewards and rerolls, and the mayor's commissions.
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Consumables: buffs that stay through a logout.
@@ -115,6 +116,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Conversations: NPC voice and animation while they talk.
 - Infrastructure: multi-process cell sharding for crowded worlds.
 - Fishing: sport fishing (the lure, the fish that is fought with the line, and the fishing grounds with their fish).
+- Professions: the shops that sell most recipe items (49 of the 2,412 recipes a player has to learn can be bought in game), the node's artisan buildings and the higher-tier stations inside them (most Journeyman recipes need both), and the materials that have no source in the world yet.
 
 ---
 
@@ -127,10 +129,10 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
 6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: food and potions.
 7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.
-8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations. Still to come: sport fishing and the rest of the 22 professions.
+8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations; all 22 professions work at their first tier. Still to come: sport fishing, the shops that sell most recipe items, the node's artisan buildings and their higher-tier stations, and the materials that have no source in the world yet.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes, and the node's service buildings and their upgrades.
-11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events, and the towns' commission boards.
+11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards, map markers and the speech bubbles over NPCs, for the first quests of the starting area. Still to come: more quests, the Destiny window, group quests and events, and the towns' commission boards.
 12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC vendors, crates and storage. Still to come: node currencies and more crates, the marketplace's buy orders, and the node's own storage.
 13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking, stopping and riding their mounts, with their gear, weapons in hand, level, live Health and Mana and corruption, their death and their combat stance (the draw, the fight, the PvP key and the name colour of their flag) kept current; a Cleric's Resurrection revives a dead player in place; a player's heals, buffs, cleanses and Resurrection reach other players, harmful abilities between players follow the PvP rules (the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level and place; a party can become a raid of 2 to 40 players in up to 10 squads of 8. Still to come: suppression areas, guards and pets, guild and node wars, other players' abilities shown to the players who see them, guilds, chat and mail, player trading and the marketplace, guild storage, guild levels and perks, and the guild board and calendar.
 14. **14- Node sieges** — [Planned] Node sieges and territory wars: the siege teams and their invites, the siege weapons, and the war's phases.

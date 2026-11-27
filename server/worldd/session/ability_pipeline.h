@@ -541,11 +541,13 @@ public:
     /// Every instance of the effect a food or drink use holds goes (the Rest's own start takes the Resting over this way, and combat breaks it): true if any went.
     /// `why` is the events' note (null: the Rest's takeover).
     bool end_effects_of(int64_t effect_guid, const char* why = nullptr);
-    /// An eating or drinking use does not end with its apply hit: the character stays seated, with its montage and Resting on, until they walk, use another ability or
-    /// get into a fight.  Then the item's montage jumps to its end, Resting goes kRestEndEffectDelay later (as the Rest's does) and the use ends, and the item loses its montage
+    /// An eating or drinking use does not end with its apply hit: the character stays seated, with its montage and Resting on, until they walk, use another ability, take a
+    /// loss of Health (a hit's, not an effect's tick or a reaction's) or get into a fight.  Then the item's montage jumps to its end, Resting goes kRestEndEffectDelay later (as the Rest's does) and the use ends, and the item loses its montage
     /// when the montage reaches its end (1.044 s after the jump for a meal or a drink, 1.173 s for rations); what the hit gave stays, and
     /// nothing is given for a bar that never filled.  This stands every seated use up (the session says so for a Sprint or a Dodge, combat starts, a move does it on its
-    /// own); the number of uses that stood up.
+    /// own, and so does a damaging hit on the character: receive_hit and take_damage here, another player's through apply_ally_landing in the next step).  A use in its first moment
+    /// (its item and cost step, 65 ms after the press, have not come) has no seat to stand up from: it is cancelled, nothing is paid, the item is kept (no cooldown starts either)
+    /// and the client is told its instance is over.  A press the server refuses does none of this.  The number of uses that stood up or were cancelled.
     size_t stand_up_uses(double now);
     /// The caster's own mount for a heal's target (none set: a mount is no target the pipeline knows) and where the heal's Health goes.
     void set_mount_targets(MountTargetFn target, MountHealFn heal) {
@@ -1174,6 +1176,14 @@ void   step_multi_hit(Cast& cast, double t);
     /// Whether a use is a seated one: an eating or drinking use whose item is out and which has not ended or stood up.
     static bool seated(const Cast& cast) { return cast.item_cast && cast.effects_at_end && !cast.item_due && !cast.end_due && !cast.stood_up; }
     void   stand_up(Cast& cast, double t);   // ... the item's montage jumps to its end now (the server decides it), the use ends kRestEndEffectDelay later, and the montage's end clears the item
+    /// Whether a use is in its first moment: an eating or drinking use whose item and cost step have not come yet, so its item is still in the bag (reserved) and nothing of it has gone out.
+    static bool first_moment(const Cast& cast) { return cast.item_cast && cast.effects_at_end && cast.item_due && cast.cost_due && !cast.paid && !cast.end_due && !cast.stood_up; }
+    /// A use in its first moment is cancelled where a seated one stands up: the reservation of its item goes back (the item never left), its record goes (the hit request that
+    /// arrives later finds no cast), nothing is paid and no cooldown starts (the cost step never comes), and the client is told its instance is over.
+    void   cancel_first_moment(size_t index, double t);
+    /// Every eating or drinking use is interrupted at `t`: the seated ones stand up, the ones in their first moment are cancelled.  Runs no step (stand_up_uses and the step that
+    /// queues the interrupt of another player's hit advance the clock first); returns how many.
+    size_t interrupt_uses(double t);
     void   finish_cast_if_done(size_t index);
     std::string montage_group_of(const abilities::AbilityDef& def) const;
 
@@ -1218,6 +1228,9 @@ void   step_multi_hit(Cast& cast, double t);
     };
     std::vector<TakenHit> taken_;
     static constexpr size_t kMaxTaken = 64;
+    /// A hit another player's ability landed on the character took Health away (apply_ally_landing), at this time: the meal's or the drink's use is interrupted (it stands up, or its first
+    /// moment is cancelled) in this runtime's own next step, as the being-hit reactions are, because that call runs none of this runtime's steps and changes none of its casts.
+    std::optional<double> use_hit_at_;
     /// The party of the caster, for a targeting record's score (IsApplicableTarget(GetTarget(), TARGET_Party)): the actors of the caster's party around the
     /// sphere being scored, himself included; null outside a score (every friendly actor is then a party member).
     const std::set<uint64_t>* party_ids_ = nullptr;
