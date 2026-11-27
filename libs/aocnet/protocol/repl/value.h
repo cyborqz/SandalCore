@@ -815,20 +815,20 @@ struct MailItem {
     bool operator==(const MailItem&) const = default;
 };
 
-/// One currency of an FCurrencyContainer: the currency's record (its guid and record type id) and
-/// the amount, 8 bytes held as a double as the warehouse cost map holds it.
-struct MailCurrencyEntry {
-    int64_t currency = 0;
+/// One entry of FCurrencyContainer: the currency tier's record guid, its record type id and the amount
+/// in the tier's base unit (copper for Money).  The amount is an integer: the recorded marketplace
+/// prices read 1200 and 2000 copper that way.
+struct CurrencyEntry {
+    int64_t tier = 0;
     int64_t type_id = 0;
-    double  value = 0;
-    bool operator==(const MailCurrencyEntry& o) const {
-        return currency == o.currency && type_id == o.type_id && same_bits(value, o.value);
-    }
+    int64_t amount = 0;
+    bool operator==(const CurrencyEntry&) const = default;
 };
 
-/// FCurrencyContainer: the currencies of a mail, each key once (a TMap's count and pairs).
+/// FCurrencyContainer (a mail's currencies, a listing's price, a trade's money): an int32 count and the
+/// entries, each (tier, type id) once; mail_codec.h reads and writes it, market_codec.h has the recorded prices.
 struct CurrencyContainer {
-    std::vector<MailCurrencyEntry> entries;
+    std::vector<CurrencyEntry> entries;
     bool operator==(const CurrencyContainer&) const = default;
 };
 

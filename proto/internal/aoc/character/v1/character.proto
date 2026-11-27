@@ -72,6 +72,12 @@ service CharacterService {
   // claimed before by a request with other bags; InvalidArgument, with nothing changed, for bags that break SaveInventory's rules. A request that repeats an earlier one
   // whole (every named attachment claimed and the stored bags the same as the request's) answers Ok and writes nothing, so a retry after a lost answer is safe.
   rpc ClaimMailItems(ClaimMailItemsRequest) returns (ClaimMailItemsResponse);
+  // Marketplace (migration 0030): writes the seller's whole bags, wallet, processing jobs, known recipes and warehouse exactly as SaveInventory does, AND one
+  // listing, in ONE transaction. The listed units leave the bags and the listing is stored together or not at all. InvalidArgument, with nothing changed, for a
+  // bag or a listing the store's rules refuse (a save of no items included); NotFound for an unknown character.
+  rpc SaveInventoryAndListing(SaveInventoryAndListingRequest) returns (SaveInventoryAndListingResponse);
+  // Marketplace: every listed row of the world with its seller's name, oldest first by issue time. A world with no listing has none.
+  rpc ListMarketListings(ListMarketListingsRequest) returns (ListMarketListingsResponse);
 }
 
 message Position {
@@ -589,3 +595,31 @@ message ClaimMailItemsResponse {
   int32 claimed = 1;  // how many attachments the request marked claimed now
   bool replayed = 2;  // true: the request repeated an earlier one, so nothing was written now
 }
+// Marketplace (migration 0030): one listing: its id, the seller, the market's city node, the listed stack (the item's own data; its container and slot are not
+// used), the unit price in copper, the client's status (0 LISTED) and the issue and expiry times in Unix milliseconds. seller_id and seller_name are filled by
+// ListMarketListings; SaveInventoryAndListing uses the character it is called for as the seller.
+message MarketListing {
+  string id = 1;              // 32 lowercase hex digits, not all zero
+  string seller_id = 2;       // the seller's character id
+  string seller_name = 3;     // the seller's name (read)
+  int64 market_node = 4;      // the city node whose Marketplace holds it
+  Item item = 5;              // the listed stack
+  int64 price_per_unit = 6;   // copper
+  int32 status = 7;           // 0 LISTED
+  int64 issue_date_ms = 8;    // Unix milliseconds
+  int64 expiry_date_ms = 9;   // Unix milliseconds
+}
+
+message SaveInventoryAndListingRequest {
+  string character_id = 1;              // the seller
+  repeated Item items = 2;              // the character's whole inventory after the listing took its units
+  repeated WalletEntry wallet = 3;      // the purse after the fee
+  repeated ProcessingJob processing_jobs = 4;
+  repeated int64 known_recipes = 5;
+  repeated WarehouseItem warehouse_items = 6;
+  MarketListing listing = 7;
+}
+message SaveInventoryAndListingResponse {}
+
+message ListMarketListingsRequest {}
+message ListMarketListingsResponse { repeated MarketListing listings = 1; }

@@ -61,6 +61,7 @@
 #include "bootstrap/ability_replication.h"
 #include "bootstrap/constants.h"
 #include "bootstrap/player_setup.h"
+#include "market/window.h"
 #include "protocol/repl/leveling.h"
 #include "protocol/repl/replicator.h"
 #include "protocol/repl/skill_rpc.h"
@@ -68,6 +69,7 @@
 #include "protocol/repl/warehouse_rpc.h"
 #include "protocol/repl/craft_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
+#include "protocol/repl/market_rpc.h"
 
 #include <array>
 #include <map>
@@ -522,6 +524,15 @@ public:
     /// stock and prices are the client's own tables'), `vendor` the NPC's actor. nullopt before the pawn's second state or when the RPC does
     /// not build.
     std::optional<Send> open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor, const repl::UnavailableList& unavailable = {});
+    /// The PlayerController's ClientOpenMarketplaceUI: the market guid and the node's tax table.  nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> open_marketplace(const repl::GuidValue& marketplace, const repl::NodeTaxDetails& tax);
+    /// The PlayerController's marketplace answers (market_rpc.h): the listing's answer, the storefront headers page and one seller's listings.
+    /// nullopt before the pawn's second state or when a call's parameters do not build.
+    std::optional<Send> market_registration_answer(const repl::MarketListing& listing, uint8_t response);
+    std::optional<Send> market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete);
+    std::optional<Send> market_data(const repl::GuidValue& seller, std::span<const repl::MarketListing> listings);
+    /// The Marketplace Manager this connection opened last (market/window.h): every marketplace request acts only on his market.
+    market::MarketWindow market_window;
     /// Crafting, step 0: ClientOpenCraftingStationUI on the PlayerController (reliable): the client opens the window of the station actor `station` (the recipes are the client's own
     /// tables') with the service tax `tax` and the player's jobs at the station (step 1; none: the list is not sent). nullopt before the pawn's second state or when the RPC does not build.
     std::optional<Send> open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax, const std::vector<repl::CraftItemState>& jobs = {});

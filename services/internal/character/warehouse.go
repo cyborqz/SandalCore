@@ -164,19 +164,14 @@ func replaceWarehouseItems(ctx context.Context, tx pgx.Tx, characterID string, i
 	return res.Close()
 }
 
-// SaveInventoryEverything is SaveInventoryAll plus, when replaceWarehouse, the character's warehouse made exactly warehouse, in the same transaction. The warehouse is checked against the bag's
-// items (no instance on both) before anything is written.
-func (s *Store) SaveInventoryEverything(ctx context.Context, characterID string, items []Item, wallet []WalletEntry, replaceWallet bool, jobs []ProcessingJob, replaceJobs bool, known []int64,
-	replaceKnown bool, warehouse []WarehouseItem, replaceWarehouse bool) error {
-	if !idPattern.MatchString(characterID) {
-		return ErrNotFound
-	}
+// checkInventoryParts makes the checks every save of the whole bags makes before it writes: the wallet, the jobs, the known recipes and the warehouse (against the bag's items, no
+// instance on both), each one only when the save replaces it.
+func checkInventoryParts(items []Item, wallet []WalletEntry, replaceWallet bool, jobs []ProcessingJob, replaceJobs bool, known []int64, replaceKnown bool, warehouse []WarehouseItem,
+	replaceWarehouse bool) error {
 	if replaceWallet {
 		if err := ValidateWallet(wallet); err != nil {
 			return err
 		}
-	} else {
-		wallet = nil
 	}
 	if replaceJobs {
 		if err := ValidateJobs(jobs); err != nil {
@@ -192,8 +187,25 @@ func (s *Store) SaveInventoryEverything(ctx context.Context, characterID string,
 		if err := ValidateWarehouseItems(warehouse, items); err != nil {
 			return err
 		}
-	} else {
+	}
+	return nil
+}
+
+// SaveInventoryEverything is SaveInventoryAll plus, when replaceWarehouse, the character's warehouse made exactly warehouse, in the same transaction. The warehouse is checked against the bag's
+// items (no instance on both) before anything is written.
+func (s *Store) SaveInventoryEverything(ctx context.Context, characterID string, items []Item, wallet []WalletEntry, replaceWallet bool, jobs []ProcessingJob, replaceJobs bool, known []int64,
+	replaceKnown bool, warehouse []WarehouseItem, replaceWarehouse bool) error {
+	if !idPattern.MatchString(characterID) {
+		return ErrNotFound
+	}
+	if err := checkInventoryParts(items, wallet, replaceWallet, jobs, replaceJobs, known, replaceKnown, warehouse, replaceWarehouse); err != nil {
+		return err
+	}
+	if !replaceWallet {
+		wallet = nil
+	}
+	if !replaceWarehouse {
 		warehouse = nil
 	}
-	return s.saveInventory(ctx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown, warehouse, replaceWarehouse)
+	return s.saveInventory(ctx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown, warehouse, replaceWarehouse, nil)
 }

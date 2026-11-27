@@ -139,6 +139,26 @@ public:
         (void)character_id;
         return false;
     }
+    /// Marketplace: the character service's two market calls.  The load reads every listed row with its seller's name; the save writes the bags, the purse and
+    /// the rest with one listing in one transaction, answering after the store has it.  Both block; the load is made when the world gets its sink (and again off the
+    /// network thread when it failed), the save on the world's market worker, which asks for the same save again until the answer is clear (Ok, already saved, or a
+    /// refusal).  A sink that keeps no listings answers an empty load and a save it cannot make Unavailable.
+    virtual svc::MarketListingsResult list_market_listings() { return svc::MarketListingsResult{svc::CallStatus::Ok, std::string(), {}}; }
+    /// Marketplace: the pause before the world asks for a market call again after an answer that was not clear: n times this before try n + 1, as the saver's own retries.
+    virtual std::chrono::milliseconds retry_delay() const { return std::chrono::milliseconds(1000); }
+    virtual svc::MarketSaveResult save_inventory_and_listing_now(const std::string& character_id, std::vector<svc::InventoryItem> items,
+                                                                 std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                                                 std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse,
+                                                                 const svc::MarketListing& listing) {
+        (void)character_id;
+        (void)items;
+        (void)wallet;
+        (void)jobs;
+        (void)known_recipes;
+        (void)warehouse;
+        (void)listing;
+        return svc::MarketSaveResult{svc::CallStatus::Unavailable, std::string(), false};
+    }
     /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
     /// keeps nothing (a test's) answers false.
     virtual bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
@@ -224,6 +244,15 @@ public:
 
     /// A write of the character is queued, or the worker is writing it now (including the pause before a retry): see PositionSink.  A saver that gave up its queue is never busy.
     bool character_busy(const std::string& character_id) const override;
+    /// Marketplace: the two blocking forwards to the character service (see PositionSink); the save also waits for a same-character inventory write in flight and
+    /// drops a queued older bag, as claim_mail_items does.
+    svc::MarketListingsResult list_market_listings() override;
+    svc::MarketSaveResult save_inventory_and_listing_now(const std::string& character_id, std::vector<svc::InventoryItem> items,
+                                                         std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                                         std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse,
+                                                         const svc::MarketListing& listing) override;
+    /// The saver's own pause before a retry (Config::retry_delay): the world's market worker paces its repeated calls the same way.
+    std::chrono::milliseconds retry_delay() const override { return config_.retry_delay; }
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);

@@ -640,6 +640,11 @@ bool PlayerSession::mail_claim_one(Connection& conn, size_t mail_index, int32_t 
         spdlog::log(level_for(mail_refused_logged_), "[mail] {}: item {} of {} is already claimed: ignored", name(), item_index, id);
         return false;
     }
+    if (market_save_in_flight_) {
+        // a listing's save writes the same bags: the later of the two writes would win from an older copy, so the claim waits for the listing
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: a listing's save is writing the bags: the claim of {} is ignored", name(), id);
+        return false;
+    }
     if (attachment.claimed) {
         spdlog::log(level_for(mail_refused_logged_), "[mail] {}: item {} of {} is already claimed: ignored", name(), item_index, id);
         return false;
@@ -750,6 +755,11 @@ bool PlayerSession::mail_claim_all(Connection& conn, const std::vector<std::stri
         return false;
     }
     if (ids.empty()) return false;
+    if (market_save_in_flight_) {
+        // a listing's save writes the same bags: the later of the two writes would win from an older copy, so the claim waits for the listing
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: a listing's save is writing the bags: the claim-all is ignored", name());
+        return false;
+    }
     if (mail_claims_held()) {
         MailWait wait;   // (one claim at a time, and none while a log-in of this character waits: see mail_claim_one)
         wait.kind = MailWaitKind::ClaimAll;

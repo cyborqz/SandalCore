@@ -35,3 +35,4 @@
 #include "session/members/guild.inc"
 #include "session/members/raid.inc"
 #include "session/members/mail.inc"
+#include "session/members/market.inc"

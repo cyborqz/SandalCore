@@ -22,3 +22,6 @@
 #include "guild_saver_tests.inc"
 #include "mail_saver_tests.inc"
 #include "area_session_mail_tests.inc"
+#include "area_session_market_tests.inc"
+#include "area_session_market_sell_tests.inc"
+#include "area_session_market_window_tests.inc"

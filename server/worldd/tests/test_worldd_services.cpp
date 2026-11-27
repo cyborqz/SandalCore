@@ -188,6 +188,21 @@ struct Characters final : characterv1::CharacterService::Service {
     int32_t reply_claimed = 0;
     bool reply_replayed = false;
     int claim_calls = 0;
+    // Marketplace (migration 0030): the answer of SaveInventoryAndListing, and what the call carried
+    grpc::StatusCode market_code = grpc::StatusCode::OK;
+    std::string got_market_character, got_market_listing;
+    size_t got_market_items = 0;
+    int market_calls = 0;
+    grpc::Status SaveInventoryAndListing(grpc::ServerContext* ctx, const characterv1::SaveInventoryAndListingRequest* req,
+                                         characterv1::SaveInventoryAndListingResponse*) override {
+        auth = auth_of(ctx);
+        ++market_calls;
+        got_market_character = req->character_id();
+        got_market_listing = req->listing().id();
+        got_market_items = static_cast<size_t>(req->items_size());
+        if (market_code != grpc::StatusCode::OK) return grpc::Status(market_code, "the listing's answer");
+        return grpc::Status::OK;
+    }
     grpc::Status GetMails(grpc::ServerContext* ctx, const characterv1::GetMailsRequest* req, characterv1::GetMailsResponse* resp) override {
         auth = auth_of(ctx);
         ++mails_calls;
@@ -634,6 +649,55 @@ static void test_mail_claim_mapping(svc::GrpcServices& s, Characters& ch) {
     ch.claim_code = grpc::StatusCode::OK;
 }
 
+/// Marketplace (migration 0030): the listing's save passes the character, the bags and the listing; a listing id the service already holds (an earlier try committed) answers
+/// Ok, marked as already saved, for this call only; every other answer maps as the shared mapping does.
+static void test_market_mapping(svc::GrpcServices& s, Characters& ch) {
+    std::printf("market listing save (migration 0030)\n");
+    svc::MarketListing listing;
+    listing.id = "11112222333344445555666677778888";
+    listing.node = 108646121231993;
+    listing.item.item_record_id = 6064630214426886486;
+    listing.item.instance_guid = "0123456789abcdef0123456789abcdef";
+    listing.item.quantity = 2;
+    listing.item.quality = 3;
+    listing.price_per_unit = 10000;
+    listing.status = 0;
+    listing.issue_date_ms = 1771000000123;
+    listing.expiry_date_ms = 1771259200123;
+    svc::InventoryItem kept;
+    kept.item_record_id = 6064631131688402948;
+    kept.instance_guid = "fedcba9876543210fedcba9876543210";
+    kept.quantity = 1;
+    kept.quality = 1;
+    kept.created_at_ms = 1780000000124;
+    const std::string seller = "bbec5c86eb101fe5f38c87f0fa22e7d0";
+    const std::vector<svc::WalletEntry> purse = {{6064629132706054144ll, 500}};
+    const auto save = [&] { return s.save_inventory_and_listing(seller, {kept}, purse, {}, {}, {}, listing); };
+
+    ch.market_calls = 0;
+    ch.market_code = grpc::StatusCode::OK;
+    svc::MarketSaveResult ok = save();
+    CHECK(ok.status == svc::CallStatus::Ok && !ok.already_saved && ch.market_calls == 1 && ch.got_market_character == seller && ch.got_market_listing == listing.id &&
+              ch.got_market_items == 1,
+          "the save passes the character, the bags and the listing, and answers Ok");
+    ch.market_code = grpc::StatusCode::ALREADY_EXISTS;
+    const svc::MarketSaveResult again = save();
+    CHECK(again.status == svc::CallStatus::Ok && again.already_saved, "AlreadyExists (the service holds this listing already) is Ok, marked as already saved");
+    CHECK(svc::map_grpc_status(grpc::Status(grpc::StatusCode::ALREADY_EXISTS, "")) == svc::CallStatus::Refused,
+          "the shared mapping still reads AlreadyExists as a refusal, for every other call");
+    ch.market_code = grpc::StatusCode::INVALID_ARGUMENT;
+    const svc::MarketSaveResult refused = save();
+    CHECK(refused.status == svc::CallStatus::Refused && !refused.already_saved && refused.reason == "the listing's answer", "InvalidArgument is a refusal, with the service's words");
+    ch.market_code = grpc::StatusCode::NOT_FOUND;
+    CHECK(save().status == svc::CallStatus::NotFound, "NotFound is NotFound");
+    ch.market_code = grpc::StatusCode::UNAVAILABLE;
+    CHECK(save().status == svc::CallStatus::Unavailable, "Unavailable is Unavailable");
+    ch.market_code = grpc::StatusCode::INTERNAL;
+    const svc::MarketSaveResult failed = save();
+    CHECK(failed.status == svc::CallStatus::Failed && !failed.already_saved, "Internal is Failed");
+    ch.market_code = grpc::StatusCode::OK;
+}
+
 /// Mail (migration 0027): the unread count at the login comes with the character load (GetCharacter with the items).
 static void test_unread_mail_count_at_login(svc::GrpcServices& s, Characters& ch) {
     std::printf("mail unread count at login\n");
@@ -770,6 +834,7 @@ int main() {
     test_mail_mapping(s, ch);
     test_mail_claim_mapping(s, ch);
     test_unread_mail_count_at_login(s, ch);
+    test_market_mapping(s, ch);
 
     std::printf("save_position (plan A6)\n");
     ch.auth.clear();

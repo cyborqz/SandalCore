@@ -11,6 +11,7 @@
 #include "session/mail_jobs.inc"
 
 #include "combat/npc_replicator.h"
+#include "market/market.h"
 #include "world/interaction_state.h"
 
 #include <spdlog/spdlog.h>
@@ -317,6 +318,14 @@ void PlayerWorld::init_from_data() {
     content_ = data_->content();
     if (!data_->problem().empty()) content_problem_ = data_->problem();
 }
+
+void PlayerWorld::set_position_sink(PositionSink* sink) {
+    sink_ = sink;
+    market_listings_.set_login_check([this](const std::string& character_id) { return login_pending(character_id); });   // (a listing waits out a log-in of its seller: see submit_listing)
+    market_listings_.attach(sink, content_, world_clock_);
+}
+
+void PlayerWorld::settle_market(std::chrono::milliseconds max_wait) { market_listings_.settle(max_wait, item_catalog(), world_clock_); }
 // built with CoA and C | Y | B
 
 bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) {
@@ -1259,6 +1268,7 @@ void PlayerWorld::tick_props(double now_seconds) {
 
 void PlayerWorld::tick_world(double now_seconds) {
     world_clock_ = now_seconds;
+    market_listings_.poll(item_catalog(), now_seconds);   // the listings the saves of ended sessions made, and the listings a failed first read was asked for again
     if (view_config_.phases) view_config_.phases->begin_tick();   // (the endpoint's tick count: the tick each player's view passes on, view_phases.h)
     tick_props(now_seconds);
     // (review A I2) the window is driven at most every 45 ms, whatever the tick's rate (the old loop ticked the world after every datagram it read; the NPC world gates itself at 15 Hz)
@@ -1409,7 +1419,7 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
                 }
                 return false;
             };
-            if (keeper && keeper->kind == world::ActorKind::Npc && (shops_->shop_of(keeper->npc.instance_guid, keeper->npc.asset_guid) != 0 || opens_by_talk(*keeper))) {
+            if (keeper && keeper->kind == world::ActorKind::Npc && (shops_->shop_of(keeper->npc.instance_guid, keeper->npc.asset_guid) != 0 || opens_by_talk(*keeper) || market::is_manager(keeper->npc))) {
                 registry_.modify(id, world::Change::State, [&](world::WorldActor& w) {
                     world::allow_inputs(w.actor);   // the shopkeeper's four inputs may be activated, as the GM vendors' are
                     for (protocol::repl::Subobject& s : w.actor.subobjects) {

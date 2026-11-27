@@ -163,6 +163,17 @@ struct RecordingSink : PositionSink {
         known_recipes = std::move(known);
         save_inventory(id, std::move(items));
     }
+    svc::MarketSaveResult save_inventory_and_listing_now(const std::string& id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
+                                                         std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known,
+                                                         std::vector<svc::WarehouseItem> warehouse, const svc::MarketListing& listing) override {
+        (void)listing;
+        (void)wallet;
+        (void)jobs;
+        (void)known;
+        (void)warehouse;
+        save_inventory(id, std::move(items));
+        return svc::MarketSaveResult{svc::CallStatus::Ok, {}};
+    }
     void save_progress(const std::string&, svc::Progress p) override { progress.push_back(std::move(p)); }
 };
 
@@ -327,10 +338,10 @@ struct Harness {
     /// each step first waits 1 ms of real time.
     void settle() {
         for (int quiet = 0, i = 0; quiet < 5 && i < 600; ++i) {
-            if (s->mail_pending() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (s->mail_pending() > 0 || s->market_pending() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
             const size_t before = got.size();
             step();
-            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0 && s->mail_pending() == 0) ? quiet + 1 : 0;
+            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0 && s->mail_pending() == 0 && s->market_pending() == 0) ? quiet + 1 : 0;
         }
     }
     void client_request(const BunchWriter& rpc, uint32_t channel) {

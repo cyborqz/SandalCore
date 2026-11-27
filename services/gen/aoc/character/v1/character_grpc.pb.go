@@ -23,20 +23,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CharacterService_CreateCharacter_FullMethodName    = "/aoc.character.v1.CharacterService/CreateCharacter"
-	CharacterService_ListCharacters_FullMethodName     = "/aoc.character.v1.CharacterService/ListCharacters"
-	CharacterService_GetCharacter_FullMethodName       = "/aoc.character.v1.CharacterService/GetCharacter"
-	CharacterService_GetCharacterByName_FullMethodName = "/aoc.character.v1.CharacterService/GetCharacterByName"
-	CharacterService_SaveCharacterState_FullMethodName = "/aoc.character.v1.CharacterService/SaveCharacterState"
-	CharacterService_DeleteCharacter_FullMethodName    = "/aoc.character.v1.CharacterService/DeleteCharacter"
-	CharacterService_SaveInventory_FullMethodName      = "/aoc.character.v1.CharacterService/SaveInventory"
-	CharacterService_SaveProgress_FullMethodName       = "/aoc.character.v1.CharacterService/SaveProgress"
-	CharacterService_SaveGuild_FullMethodName          = "/aoc.character.v1.CharacterService/SaveGuild"
-	CharacterService_SaveGuildCooldown_FullMethodName  = "/aoc.character.v1.CharacterService/SaveGuildCooldown"
-	CharacterService_GetMails_FullMethodName           = "/aoc.character.v1.CharacterService/GetMails"
-	CharacterService_SaveMail_FullMethodName           = "/aoc.character.v1.CharacterService/SaveMail"
-	CharacterService_CreateMail_FullMethodName         = "/aoc.character.v1.CharacterService/CreateMail"
-	CharacterService_ClaimMailItems_FullMethodName     = "/aoc.character.v1.CharacterService/ClaimMailItems"
+	CharacterService_CreateCharacter_FullMethodName         = "/aoc.character.v1.CharacterService/CreateCharacter"
+	CharacterService_ListCharacters_FullMethodName          = "/aoc.character.v1.CharacterService/ListCharacters"
+	CharacterService_GetCharacter_FullMethodName            = "/aoc.character.v1.CharacterService/GetCharacter"
+	CharacterService_GetCharacterByName_FullMethodName      = "/aoc.character.v1.CharacterService/GetCharacterByName"
+	CharacterService_SaveCharacterState_FullMethodName      = "/aoc.character.v1.CharacterService/SaveCharacterState"
+	CharacterService_DeleteCharacter_FullMethodName         = "/aoc.character.v1.CharacterService/DeleteCharacter"
+	CharacterService_SaveInventory_FullMethodName           = "/aoc.character.v1.CharacterService/SaveInventory"
+	CharacterService_SaveProgress_FullMethodName            = "/aoc.character.v1.CharacterService/SaveProgress"
+	CharacterService_SaveGuild_FullMethodName               = "/aoc.character.v1.CharacterService/SaveGuild"
+	CharacterService_SaveGuildCooldown_FullMethodName       = "/aoc.character.v1.CharacterService/SaveGuildCooldown"
+	CharacterService_GetMails_FullMethodName                = "/aoc.character.v1.CharacterService/GetMails"
+	CharacterService_SaveMail_FullMethodName                = "/aoc.character.v1.CharacterService/SaveMail"
+	CharacterService_CreateMail_FullMethodName              = "/aoc.character.v1.CharacterService/CreateMail"
+	CharacterService_ClaimMailItems_FullMethodName          = "/aoc.character.v1.CharacterService/ClaimMailItems"
+	CharacterService_SaveInventoryAndListing_FullMethodName = "/aoc.character.v1.CharacterService/SaveInventoryAndListing"
+	CharacterService_ListMarketListings_FullMethodName      = "/aoc.character.v1.CharacterService/ListMarketListings"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -108,6 +110,12 @@ type CharacterServiceClient interface {
 	// claimed before by a request with other bags; InvalidArgument, with nothing changed, for bags that break SaveInventory's rules. A request that repeats an earlier one
 	// whole (every named attachment claimed and the stored bags the same as the request's) answers Ok and writes nothing, so a retry after a lost answer is safe.
 	ClaimMailItems(ctx context.Context, in *ClaimMailItemsRequest, opts ...grpc.CallOption) (*ClaimMailItemsResponse, error)
+	// Marketplace (migration 0030): writes the seller's whole bags, wallet, processing jobs, known recipes and warehouse exactly as SaveInventory does, AND one
+	// listing, in ONE transaction. The listed units leave the bags and the listing is stored together or not at all. InvalidArgument, with nothing changed, for a
+	// bag or a listing the store's rules refuse (a save of no items included); NotFound for an unknown character.
+	SaveInventoryAndListing(ctx context.Context, in *SaveInventoryAndListingRequest, opts ...grpc.CallOption) (*SaveInventoryAndListingResponse, error)
+	// Marketplace: every listed row of the world with its seller's name, oldest first by issue time. A world with no listing has none.
+	ListMarketListings(ctx context.Context, in *ListMarketListingsRequest, opts ...grpc.CallOption) (*ListMarketListingsResponse, error)
 }
 
 type characterServiceClient struct {
@@ -258,6 +266,26 @@ func (c *characterServiceClient) ClaimMailItems(ctx context.Context, in *ClaimMa
 	return out, nil
 }
 
+func (c *characterServiceClient) SaveInventoryAndListing(ctx context.Context, in *SaveInventoryAndListingRequest, opts ...grpc.CallOption) (*SaveInventoryAndListingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveInventoryAndListingResponse)
+	err := c.cc.Invoke(ctx, CharacterService_SaveInventoryAndListing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) ListMarketListings(ctx context.Context, in *ListMarketListingsRequest, opts ...grpc.CallOption) (*ListMarketListingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMarketListingsResponse)
+	err := c.cc.Invoke(ctx, CharacterService_ListMarketListings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -327,6 +355,12 @@ type CharacterServiceServer interface {
 	// claimed before by a request with other bags; InvalidArgument, with nothing changed, for bags that break SaveInventory's rules. A request that repeats an earlier one
 	// whole (every named attachment claimed and the stored bags the same as the request's) answers Ok and writes nothing, so a retry after a lost answer is safe.
 	ClaimMailItems(context.Context, *ClaimMailItemsRequest) (*ClaimMailItemsResponse, error)
+	// Marketplace (migration 0030): writes the seller's whole bags, wallet, processing jobs, known recipes and warehouse exactly as SaveInventory does, AND one
+	// listing, in ONE transaction. The listed units leave the bags and the listing is stored together or not at all. InvalidArgument, with nothing changed, for a
+	// bag or a listing the store's rules refuse (a save of no items included); NotFound for an unknown character.
+	SaveInventoryAndListing(context.Context, *SaveInventoryAndListingRequest) (*SaveInventoryAndListingResponse, error)
+	// Marketplace: every listed row of the world with its seller's name, oldest first by issue time. A world with no listing has none.
+	ListMarketListings(context.Context, *ListMarketListingsRequest) (*ListMarketListingsResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -378,6 +412,12 @@ func (UnimplementedCharacterServiceServer) CreateMail(context.Context, *CreateMa
 }
 func (UnimplementedCharacterServiceServer) ClaimMailItems(context.Context, *ClaimMailItemsRequest) (*ClaimMailItemsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClaimMailItems not implemented")
+}
+func (UnimplementedCharacterServiceServer) SaveInventoryAndListing(context.Context, *SaveInventoryAndListingRequest) (*SaveInventoryAndListingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveInventoryAndListing not implemented")
+}
+func (UnimplementedCharacterServiceServer) ListMarketListings(context.Context, *ListMarketListingsRequest) (*ListMarketListingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMarketListings not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -652,6 +692,42 @@ func _CharacterService_ClaimMailItems_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_SaveInventoryAndListing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveInventoryAndListingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).SaveInventoryAndListing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_SaveInventoryAndListing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).SaveInventoryAndListing(ctx, req.(*SaveInventoryAndListingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_ListMarketListings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMarketListingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).ListMarketListings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_ListMarketListings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).ListMarketListings(ctx, req.(*ListMarketListingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -714,6 +790,14 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClaimMailItems",
 			Handler:    _CharacterService_ClaimMailItems_Handler,
+		},
+		{
+			MethodName: "SaveInventoryAndListing",
+			Handler:    _CharacterService_SaveInventoryAndListing_Handler,
+		},
+		{
+			MethodName: "ListMarketListings",
+			Handler:    _CharacterService_ListMarketListings_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

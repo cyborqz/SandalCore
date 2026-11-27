@@ -26,6 +26,7 @@
 #include "session/gm_travel.h"
 #include "protocol/repl/rpc_fields.h"
 #include "items/acquired.h"
+#include "market/market.h"
 #include "vendor/node_tax.h"
 #include "vendor/sell_rules.h"
 #include "quest/quest_wire.h"
@@ -127,6 +128,8 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (npc_world_ && npc_world_->aftermath()) {
         if (const combat::Corpse* corpse = npc_world_->aftermath()->corpse_by_interactable(req->interactable.ObjectId)) return open_loot(conn, *corpse, *a, now);
     }
+    // the Marketplace Manager: his window opens at the market of the node he stands in
+    if (a->kind == world::ActorKind::Npc && market::is_manager(a->npc)) return open_marketplace(conn, *a);
     // quests: an NPC with a conversation opens the talking window
     if (a->kind == world::ActorKind::Npc && (a->npc.dialogue_root != 0 || npc_offers_quests(*a)) && open_dialogue(conn, *a, now)) return;
     const vendor::GmVendors* gm = world_ ? world_->gm_vendors() : nullptr;
@@ -177,3 +180,6 @@ void PlayerSession::register_interact_rpcs(RpcTable& t) {
 }
 
 }}  // namespace aoc::worldd
+
+#include "market/market.inc"
+#include "market/market_requests.inc"

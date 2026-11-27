@@ -655,6 +655,16 @@ DELETE FROM schema_migrations WHERE version = 27;
 COMMIT;
 ```
 
+**Rolling back migration 0030.** Migration 0030 (Marketplace listings) adds ONE table, `character_market_listings` (the listings a player registers at a Marketplace Manager: the market node, the seller, the listed stack, the unit price, the status and the dates); it writes nowhere else, backfills nothing and touches no existing table or column. worldd reads every listed row when it starts and inserts one listing with the seller's bags, wallet, jobs, recipes and warehouse in one transaction. The rollback drops the table with whatever it holds: every stored listing is forgotten and its item is not given back to the seller's bags (the bag rows of a listing's transaction are separate and stay as they were written). Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0030 (market listings)
+BEGIN;
+DROP TABLE character_market_listings;
+DELETE FROM schema_migrations WHERE version = 30;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or

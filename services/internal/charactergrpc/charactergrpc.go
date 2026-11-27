@@ -131,6 +131,15 @@ type MailStore interface {
 
 var _ MailStore = (*character.Store)(nil)
 
+// MarketStore is the part of character.Store that keeps the Marketplace listings (migration 0030). A store without it keeps none: the two calls are refused.
+type MarketStore interface {
+	SaveInventoryAndListing(ctx context.Context, id string, items []character.Item, wallet []character.WalletEntry, jobs []character.ProcessingJob,
+		known []int64, warehouse []character.WarehouseItem, listing character.MarketListing) error
+	MarketListings(ctx context.Context) ([]character.MarketListing, error)
+}
+
+var _ MarketStore = (*character.Store)(nil)
+
 // NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
 // character). A store without it cannot answer GetCharacterByName.
 type NameStore interface {
@@ -623,6 +632,53 @@ func (s *Server) ClaimMailItems(ctx context.Context, r *characterv1.ClaimMailIte
 	return &characterv1.ClaimMailItemsResponse{Claimed: int32(res.Claimed), Replayed: res.Replayed}, nil
 }
 
+// SaveInventoryAndListing writes the seller's bags, wallet, jobs, recipes and warehouse AND one Market listing in one transaction (migration 0030). NotFound for
+// an unknown character; InvalidArgument, with nothing changed, for a bag or a listing the rules refuse; AlreadyExists, with nothing changed, for a listing id the seller
+// already has (an earlier call stored it: worldd asks again after an answer it could not read, and takes AlreadyExists as saved).
+func (s *Server) SaveInventoryAndListing(ctx context.Context, r *characterv1.SaveInventoryAndListingRequest) (*characterv1.SaveInventoryAndListingResponse, error) {
+	ms, ok := s.store.(MarketStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no market listings")
+	}
+	if r.GetListing() == nil {
+		return nil, status.Error(codes.InvalidArgument, "no listing is given")
+	}
+	items := make([]character.Item, 0, len(r.GetItems()))
+	for i, it := range r.GetItems() {
+		item, err := fromProtoItem(it)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "item %d: %s", i, err)
+		}
+		items = append(items, item)
+	}
+	wallet := make([]character.WalletEntry, 0, len(r.GetWallet()))
+	for _, e := range r.GetWallet() {
+		wallet = append(wallet, character.WalletEntry{CurrencyGuid: e.GetCurrencyGuid(), Amount: e.GetAmount()})
+	}
+	stored := make([]character.WarehouseItem, 0, len(r.GetWarehouseItems()))
+	for _, w := range r.GetWarehouseItems() {
+		stored = append(stored, fromProtoWarehouse(w))
+	}
+	if err := ms.SaveInventoryAndListing(ctx, r.GetCharacterId(), items, wallet, fromProtoJobs(r.GetProcessingJobs()), r.GetKnownRecipes(), stored,
+		fromProtoMarketListing(r.GetListing())); err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.SaveInventoryAndListingResponse{}, nil
+}
+
+// ListMarketListings returns every listed listing of the world with its seller's name, oldest first (migration 0030).
+func (s *Server) ListMarketListings(ctx context.Context, _ *characterv1.ListMarketListingsRequest) (*characterv1.ListMarketListingsResponse, error) {
+	ms, ok := s.store.(MarketStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no market listings")
+	}
+	listings, err := ms.MarketListings(ctx)
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.ListMarketListingsResponse{Listings: toProtoMarketListings(listings)}, nil
+}
+
 // addTalents puts the character's bought ranks and its action bar (plan D1, stage 2) into a reply.
 func (s *Server) addTalents(ctx context.Context, id string, out *characterv1.Character) error {
 	ranks, err := s.store.SkillRanks(ctx, id)
@@ -819,7 +875,7 @@ func toStatus(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, character.ErrCharacterLimit):
 		return status.Error(codes.ResourceExhausted, err.Error())
-	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken), errors.Is(err, character.ErrGuildNameTaken):
+	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken), errors.Is(err, character.ErrGuildNameTaken), errors.Is(err, character.ErrListingSaved):
 		return status.Error(codes.AlreadyExists, err.Error())
 	case errors.Is(err, character.ErrGuildVersion), errors.Is(err, character.ErrMailStale):
 		return status.Error(codes.FailedPrecondition, err.Error())
@@ -1011,6 +1067,33 @@ func fromProtoWarehouse(p *characterv1.WarehouseItem) character.WarehouseItem {
 			CreatedAt: time.UnixMilli(p.GetCreatedAtMs()), PersistedHealth: p.PersistedHealth, PersistedMana: p.PersistedMana, LockExpiration: p.GetLockExpiration(),
 		},
 	}
+}
+
+// Market (migration 0030): a listing as the two calls send and take it.
+func toProtoMarketListings(listings []character.MarketListing) []*characterv1.MarketListing {
+	if len(listings) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.MarketListing, 0, len(listings))
+	for _, l := range listings {
+		out = append(out, toProtoMarketListing(l))
+	}
+	return out
+}
+
+func toProtoMarketListing(l character.MarketListing) *characterv1.MarketListing {
+	p := &characterv1.MarketListing{Id: l.ID, SellerId: l.SellerID, SellerName: l.SellerName, MarketNode: l.Node, PricePerUnit: l.PricePerUnit,
+		Status: l.Status, IssueDateMs: l.IssuedAtMs, ExpiryDateMs: l.ExpiresAtMs}
+	if items := toProtoItems([]character.Item{l.Item}); len(items) == 1 {
+		p.Item = items[0]
+	}
+	return p
+}
+
+func fromProtoMarketListing(l *characterv1.MarketListing) character.MarketListing {
+	item, _ := fromProtoItem(l.GetItem())
+	return character.MarketListing{ID: l.GetId(), SellerID: l.GetSellerId(), SellerName: l.GetSellerName(), Node: l.GetMarketNode(), Item: item,
+		PricePerUnit: l.GetPricePerUnit(), Status: l.GetStatus(), IssuedAtMs: l.GetIssueDateMs(), ExpiresAtMs: l.GetExpiryDateMs()}
 }
 
 // unixMilli is t in Unix milliseconds, and 0 for the zero time.

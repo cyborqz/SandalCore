@@ -1075,9 +1075,10 @@ int main(int argc, char** argv) {
         guarded_tick(Clock::now());
     }
     // Players still on the endpoint have their last good position handed to the saver, then the saver gets 5 s. Worst case
-    // from the signal to the exit: 0.5 s telling the clients, 5 s here, then the save in flight when the saver is
-    // destroyed (2 s deadline): 7.5 s. The network thread is never in the saver's way: it only queues.
+    // from the signal to the exit: 0.5 s telling the clients, up to 3 s for the listing saves the sessions left in flight, 5 s here, then the save in flight when the saver is
+    // destroyed (2 s deadline): 10.5 s. The network thread is never in the saver's way: it only queues.
     endpoint.finish_players("worldd is stopping");
+    players.settle_market(std::chrono::seconds(3));   // a listing's save a session left in flight, and the bags that session ends with, before the saver's flush
     if (!saver.flush(std::chrono::seconds(5))) {
         spdlog::warn("stopping: {} position(s) were not saved in 5 s", saver.queued());
     }

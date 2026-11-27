@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 #include <string>
 #include <system_error>
@@ -91,6 +92,8 @@ constexpr const char* kVariationQualitySql = "SELECT e.text FROM item_variation 
 // item_tag, set_bonus and equip_slot
 constexpr const char* kStatProgramSql = "SELECT version, mode, stats, classes, crc32, data FROM stat_program WHERE id = 1";
 constexpr const char* kItemGearSql = "SELECT stat_block_guid, quality_curve_guid FROM item WHERE guid = ?1";
+// Item rarities, step 1: the record's Level, which the item minimum of a listing fee multiplies (ItemRecordBase.Level, the item table since contentc 3)
+constexpr const char* kItemLevelSql = "SELECT level FROM item WHERE guid = ?1";
 constexpr const char* kQualityCurveSql = "SELECT ord, x, y FROM quality_curve WHERE guid = ?1 ORDER BY ord";
 constexpr const char* kStatBlockSql =
     "SELECT stat_guid, common_min, common_max, uncommon_min, uncommon_max, rare_min, rare_max, heroic_min, heroic_max, epic_min, epic_max, "
@@ -210,9 +213,18 @@ void read_quality_curve(sqlite3* db, int64_t curve, items::ItemRarityFacts& out)
     out.has_curve = true;
 }
 
-/// Item rarities, step 0: what the rarity rule needs of an item record: its quality curve, RarityMin and RarityMax, and its MaxDurability row.  Nothing here fails the record: an item the
-/// tables cannot answer for reads the common rules (no bound, no durability stat).
+/// Item rarities, step 0: what the rarity rule needs of an item record: its quality curve, RarityMin and RarityMax, and its MaxDurability row; and the record's Level, which the item
+/// minimum of a Marketplace listing fee multiplies.  Nothing here fails the record: an item the tables cannot answer for reads the common rules (no bound, no durability stat, Level 1).
 void read_item_rarity(sqlite3* db, int64_t guid, ItemRecord& rec) {
+    {
+        Stmt q(db, kItemLevelSql);
+        if (q.ok()) {
+            sqlite3_bind_int64(q.get(), 1, guid);
+            if (sqlite3_step(q.get()) == SQLITE_ROW && column_is_int(q.get(), 0)) {
+                rec.level = static_cast<int32_t>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 0), 0, std::numeric_limits<int32_t>::max()));
+            }
+        }
+    }
     int64_t block = 0, curve = 0;
     {
         Stmt q(db, kItemGearSql);

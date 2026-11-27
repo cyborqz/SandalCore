@@ -3893,6 +3893,325 @@ func (x *ClaimMailItemsResponse) GetReplayed() bool {
 	return false
 }
 
+// Marketplace (migration 0030): one listing: its id, the seller, the market's city node, the listed stack (the item's own data; its container and slot are not
+// used), the unit price in copper, the client's status (0 LISTED) and the issue and expiry times in Unix milliseconds. seller_id and seller_name are filled by
+// ListMarketListings; SaveInventoryAndListing uses the character it is called for as the seller.
+type MarketListing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                            // 32 lowercase hex digits, not all zero
+	SellerId      string                 `protobuf:"bytes,2,opt,name=seller_id,json=sellerId,proto3" json:"seller_id,omitempty"`                // the seller's character id
+	SellerName    string                 `protobuf:"bytes,3,opt,name=seller_name,json=sellerName,proto3" json:"seller_name,omitempty"`          // the seller's name (read)
+	MarketNode    int64                  `protobuf:"varint,4,opt,name=market_node,json=marketNode,proto3" json:"market_node,omitempty"`         // the city node whose Marketplace holds it
+	Item          *Item                  `protobuf:"bytes,5,opt,name=item,proto3" json:"item,omitempty"`                                        // the listed stack
+	PricePerUnit  int64                  `protobuf:"varint,6,opt,name=price_per_unit,json=pricePerUnit,proto3" json:"price_per_unit,omitempty"` // copper
+	Status        int32                  `protobuf:"varint,7,opt,name=status,proto3" json:"status,omitempty"`                                   // 0 LISTED
+	IssueDateMs   int64                  `protobuf:"varint,8,opt,name=issue_date_ms,json=issueDateMs,proto3" json:"issue_date_ms,omitempty"`    // Unix milliseconds
+	ExpiryDateMs  int64                  `protobuf:"varint,9,opt,name=expiry_date_ms,json=expiryDateMs,proto3" json:"expiry_date_ms,omitempty"` // Unix milliseconds
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarketListing) Reset() {
+	*x = MarketListing{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarketListing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarketListing) ProtoMessage() {}
+
+func (x *MarketListing) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarketListing.ProtoReflect.Descriptor instead.
+func (*MarketListing) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *MarketListing) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *MarketListing) GetSellerId() string {
+	if x != nil {
+		return x.SellerId
+	}
+	return ""
+}
+
+func (x *MarketListing) GetSellerName() string {
+	if x != nil {
+		return x.SellerName
+	}
+	return ""
+}
+
+func (x *MarketListing) GetMarketNode() int64 {
+	if x != nil {
+		return x.MarketNode
+	}
+	return 0
+}
+
+func (x *MarketListing) GetItem() *Item {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *MarketListing) GetPricePerUnit() int64 {
+	if x != nil {
+		return x.PricePerUnit
+	}
+	return 0
+}
+
+func (x *MarketListing) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *MarketListing) GetIssueDateMs() int64 {
+	if x != nil {
+		return x.IssueDateMs
+	}
+	return 0
+}
+
+func (x *MarketListing) GetExpiryDateMs() int64 {
+	if x != nil {
+		return x.ExpiryDateMs
+	}
+	return 0
+}
+
+type SaveInventoryAndListingRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId    string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"` // the seller
+	Items          []*Item                `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`                                // the character's whole inventory after the listing took its units
+	Wallet         []*WalletEntry         `protobuf:"bytes,3,rep,name=wallet,proto3" json:"wallet,omitempty"`                              // the purse after the fee
+	ProcessingJobs []*ProcessingJob       `protobuf:"bytes,4,rep,name=processing_jobs,json=processingJobs,proto3" json:"processing_jobs,omitempty"`
+	KnownRecipes   []int64                `protobuf:"varint,5,rep,packed,name=known_recipes,json=knownRecipes,proto3" json:"known_recipes,omitempty"`
+	WarehouseItems []*WarehouseItem       `protobuf:"bytes,6,rep,name=warehouse_items,json=warehouseItems,proto3" json:"warehouse_items,omitempty"`
+	Listing        *MarketListing         `protobuf:"bytes,7,opt,name=listing,proto3" json:"listing,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SaveInventoryAndListingRequest) Reset() {
+	*x = SaveInventoryAndListingRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveInventoryAndListingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveInventoryAndListingRequest) ProtoMessage() {}
+
+func (x *SaveInventoryAndListingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveInventoryAndListingRequest.ProtoReflect.Descriptor instead.
+func (*SaveInventoryAndListingRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *SaveInventoryAndListingRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *SaveInventoryAndListingRequest) GetItems() []*Item {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *SaveInventoryAndListingRequest) GetWallet() []*WalletEntry {
+	if x != nil {
+		return x.Wallet
+	}
+	return nil
+}
+
+func (x *SaveInventoryAndListingRequest) GetProcessingJobs() []*ProcessingJob {
+	if x != nil {
+		return x.ProcessingJobs
+	}
+	return nil
+}
+
+func (x *SaveInventoryAndListingRequest) GetKnownRecipes() []int64 {
+	if x != nil {
+		return x.KnownRecipes
+	}
+	return nil
+}
+
+func (x *SaveInventoryAndListingRequest) GetWarehouseItems() []*WarehouseItem {
+	if x != nil {
+		return x.WarehouseItems
+	}
+	return nil
+}
+
+func (x *SaveInventoryAndListingRequest) GetListing() *MarketListing {
+	if x != nil {
+		return x.Listing
+	}
+	return nil
+}
+
+type SaveInventoryAndListingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveInventoryAndListingResponse) Reset() {
+	*x = SaveInventoryAndListingResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveInventoryAndListingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveInventoryAndListingResponse) ProtoMessage() {}
+
+func (x *SaveInventoryAndListingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveInventoryAndListingResponse.ProtoReflect.Descriptor instead.
+func (*SaveInventoryAndListingResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{51}
+}
+
+type ListMarketListingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMarketListingsRequest) Reset() {
+	*x = ListMarketListingsRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMarketListingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMarketListingsRequest) ProtoMessage() {}
+
+func (x *ListMarketListingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMarketListingsRequest.ProtoReflect.Descriptor instead.
+func (*ListMarketListingsRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{52}
+}
+
+type ListMarketListingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Listings      []*MarketListing       `protobuf:"bytes,1,rep,name=listings,proto3" json:"listings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMarketListingsResponse) Reset() {
+	*x = ListMarketListingsResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMarketListingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMarketListingsResponse) ProtoMessage() {}
+
+func (x *ListMarketListingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMarketListingsResponse.ProtoReflect.Descriptor instead.
+func (*ListMarketListingsResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *ListMarketListingsResponse) GetListings() []*MarketListing {
+	if x != nil {
+		return x.Listings
+	}
+	return nil
+}
+
 var File_aoc_character_v1_character_proto protoreflect.FileDescriptor
 
 const file_aoc_character_v1_character_proto_rawDesc = "" +
@@ -4246,7 +4565,31 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\tinventory\x18\x03 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\tinventory\"N\n" +
 	"\x16ClaimMailItemsResponse\x12\x18\n" +
 	"\aclaimed\x18\x01 \x01(\x05R\aclaimed\x12\x1a\n" +
-	"\breplayed\x18\x02 \x01(\bR\breplayed*\xde\x01\n" +
+	"\breplayed\x18\x02 \x01(\bR\breplayed\"\xb2\x02\n" +
+	"\rMarketListing\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
+	"\tseller_id\x18\x02 \x01(\tR\bsellerId\x12\x1f\n" +
+	"\vseller_name\x18\x03 \x01(\tR\n" +
+	"sellerName\x12\x1f\n" +
+	"\vmarket_node\x18\x04 \x01(\x03R\n" +
+	"marketNode\x12*\n" +
+	"\x04item\x18\x05 \x01(\v2\x16.aoc.character.v1.ItemR\x04item\x12$\n" +
+	"\x0eprice_per_unit\x18\x06 \x01(\x03R\fpricePerUnit\x12\x16\n" +
+	"\x06status\x18\a \x01(\x05R\x06status\x12\"\n" +
+	"\rissue_date_ms\x18\b \x01(\x03R\vissueDateMs\x12$\n" +
+	"\x0eexpiry_date_ms\x18\t \x01(\x03R\fexpiryDateMs\"\x9c\x03\n" +
+	"\x1eSaveInventoryAndListingRequest\x12!\n" +
+	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x12,\n" +
+	"\x05items\x18\x02 \x03(\v2\x16.aoc.character.v1.ItemR\x05items\x125\n" +
+	"\x06wallet\x18\x03 \x03(\v2\x1d.aoc.character.v1.WalletEntryR\x06wallet\x12H\n" +
+	"\x0fprocessing_jobs\x18\x04 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\x12#\n" +
+	"\rknown_recipes\x18\x05 \x03(\x03R\fknownRecipes\x12H\n" +
+	"\x0fwarehouse_items\x18\x06 \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\x129\n" +
+	"\alisting\x18\a \x01(\v2\x1f.aoc.character.v1.MarketListingR\alisting\"!\n" +
+	"\x1fSaveInventoryAndListingResponse\"\x1b\n" +
+	"\x19ListMarketListingsRequest\"Y\n" +
+	"\x1aListMarketListingsResponse\x12;\n" +
+	"\blistings\x18\x01 \x03(\v2\x1f.aoc.character.v1.MarketListingR\blistings*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +
 	"\x1aITEM_CONTAINER_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ITEM_CONTAINER_BACKPACK\x10\x01\x12\x1c\n" +
@@ -4254,8 +4597,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x14ITEM_CONTAINER_QUEST\x10\x03\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE0\x10\x04\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE1\x10\x05\x12\x1c\n" +
-	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\xf1\n" +
-	"\n" +
+	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\xe2\f\n" +
 	"\x10CharacterService\x12f\n" +
 	"\x0fCreateCharacter\x12(.aoc.character.v1.CreateCharacterRequest\x1a).aoc.character.v1.CreateCharacterResponse\x12c\n" +
 	"\x0eListCharacters\x12'.aoc.character.v1.ListCharactersRequest\x1a(.aoc.character.v1.ListCharactersResponse\x12]\n" +
@@ -4271,7 +4613,9 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\bSaveMail\x12!.aoc.character.v1.SaveMailRequest\x1a\".aoc.character.v1.SaveMailResponse\x12W\n" +
 	"\n" +
 	"CreateMail\x12#.aoc.character.v1.CreateMailRequest\x1a$.aoc.character.v1.CreateMailResponse\x12c\n" +
-	"\x0eClaimMailItems\x12'.aoc.character.v1.ClaimMailItemsRequest\x1a(.aoc.character.v1.ClaimMailItemsResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
+	"\x0eClaimMailItems\x12'.aoc.character.v1.ClaimMailItemsRequest\x1a(.aoc.character.v1.ClaimMailItemsResponse\x12~\n" +
+	"\x17SaveInventoryAndListing\x120.aoc.character.v1.SaveInventoryAndListingRequest\x1a1.aoc.character.v1.SaveInventoryAndListingResponse\x12o\n" +
+	"\x12ListMarketListings\x12+.aoc.character.v1.ListMarketListingsRequest\x1a,.aoc.character.v1.ListMarketListingsResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
 
 var (
 	file_aoc_character_v1_character_proto_rawDescOnce sync.Once
@@ -4286,58 +4630,63 @@ func file_aoc_character_v1_character_proto_rawDescGZIP() []byte {
 }
 
 var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_aoc_character_v1_character_proto_goTypes = []any{
-	(ItemContainer)(0),                 // 0: aoc.character.v1.ItemContainer
-	(*Position)(nil),                   // 1: aoc.character.v1.Position
-	(*Character)(nil),                  // 2: aoc.character.v1.Character
-	(*PvpState)(nil),                   // 3: aoc.character.v1.PvpState
-	(*Friend)(nil),                     // 4: aoc.character.v1.Friend
-	(*FriendRequest)(nil),              // 5: aoc.character.v1.FriendRequest
-	(*GuildRank)(nil),                  // 6: aoc.character.v1.GuildRank
-	(*GuildMember)(nil),                // 7: aoc.character.v1.GuildMember
-	(*Guild)(nil),                      // 8: aoc.character.v1.Guild
-	(*WarehouseItem)(nil),              // 9: aoc.character.v1.WarehouseItem
-	(*ProcessingJob)(nil),              // 10: aoc.character.v1.ProcessingJob
-	(*JobResource)(nil),                // 11: aoc.character.v1.JobResource
-	(*JobRarity)(nil),                  // 12: aoc.character.v1.JobRarity
-	(*WalletEntry)(nil),                // 13: aoc.character.v1.WalletEntry
-	(*ProfessionState)(nil),            // 14: aoc.character.v1.ProfessionState
-	(*TreeRanks)(nil),                  // 15: aoc.character.v1.TreeRanks
-	(*ActionbarSlot)(nil),              // 16: aoc.character.v1.ActionbarSlot
-	(*Experience)(nil),                 // 17: aoc.character.v1.Experience
-	(*Item)(nil),                       // 18: aoc.character.v1.Item
-	(*CreateCharacterRequest)(nil),     // 19: aoc.character.v1.CreateCharacterRequest
-	(*CreateCharacterResponse)(nil),    // 20: aoc.character.v1.CreateCharacterResponse
-	(*ListCharactersRequest)(nil),      // 21: aoc.character.v1.ListCharactersRequest
-	(*ListCharactersResponse)(nil),     // 22: aoc.character.v1.ListCharactersResponse
-	(*GetCharacterRequest)(nil),        // 23: aoc.character.v1.GetCharacterRequest
-	(*GetCharacterResponse)(nil),       // 24: aoc.character.v1.GetCharacterResponse
-	(*GetCharacterByNameRequest)(nil),  // 25: aoc.character.v1.GetCharacterByNameRequest
-	(*GetCharacterByNameResponse)(nil), // 26: aoc.character.v1.GetCharacterByNameResponse
-	(*SaveCharacterStateRequest)(nil),  // 27: aoc.character.v1.SaveCharacterStateRequest
-	(*SaveCharacterStateResponse)(nil), // 28: aoc.character.v1.SaveCharacterStateResponse
-	(*DeleteCharacterRequest)(nil),     // 29: aoc.character.v1.DeleteCharacterRequest
-	(*DeleteCharacterResponse)(nil),    // 30: aoc.character.v1.DeleteCharacterResponse
-	(*SaveInventoryRequest)(nil),       // 31: aoc.character.v1.SaveInventoryRequest
-	(*SaveInventoryResponse)(nil),      // 32: aoc.character.v1.SaveInventoryResponse
-	(*SaveProgressRequest)(nil),        // 33: aoc.character.v1.SaveProgressRequest
-	(*SaveProgressResponse)(nil),       // 34: aoc.character.v1.SaveProgressResponse
-	(*SaveGuildRequest)(nil),           // 35: aoc.character.v1.SaveGuildRequest
-	(*SaveGuildResponse)(nil),          // 36: aoc.character.v1.SaveGuildResponse
-	(*SaveGuildCooldownRequest)(nil),   // 37: aoc.character.v1.SaveGuildCooldownRequest
-	(*SaveGuildCooldownResponse)(nil),  // 38: aoc.character.v1.SaveGuildCooldownResponse
-	(*MailItem)(nil),                   // 39: aoc.character.v1.MailItem
-	(*Mail)(nil),                       // 40: aoc.character.v1.Mail
-	(*GetMailsRequest)(nil),            // 41: aoc.character.v1.GetMailsRequest
-	(*GetMailsResponse)(nil),           // 42: aoc.character.v1.GetMailsResponse
-	(*SaveMailRequest)(nil),            // 43: aoc.character.v1.SaveMailRequest
-	(*SaveMailResponse)(nil),           // 44: aoc.character.v1.SaveMailResponse
-	(*CreateMailRequest)(nil),          // 45: aoc.character.v1.CreateMailRequest
-	(*CreateMailResponse)(nil),         // 46: aoc.character.v1.CreateMailResponse
-	(*MailClaim)(nil),                  // 47: aoc.character.v1.MailClaim
-	(*ClaimMailItemsRequest)(nil),      // 48: aoc.character.v1.ClaimMailItemsRequest
-	(*ClaimMailItemsResponse)(nil),     // 49: aoc.character.v1.ClaimMailItemsResponse
+	(ItemContainer)(0),                      // 0: aoc.character.v1.ItemContainer
+	(*Position)(nil),                        // 1: aoc.character.v1.Position
+	(*Character)(nil),                       // 2: aoc.character.v1.Character
+	(*PvpState)(nil),                        // 3: aoc.character.v1.PvpState
+	(*Friend)(nil),                          // 4: aoc.character.v1.Friend
+	(*FriendRequest)(nil),                   // 5: aoc.character.v1.FriendRequest
+	(*GuildRank)(nil),                       // 6: aoc.character.v1.GuildRank
+	(*GuildMember)(nil),                     // 7: aoc.character.v1.GuildMember
+	(*Guild)(nil),                           // 8: aoc.character.v1.Guild
+	(*WarehouseItem)(nil),                   // 9: aoc.character.v1.WarehouseItem
+	(*ProcessingJob)(nil),                   // 10: aoc.character.v1.ProcessingJob
+	(*JobResource)(nil),                     // 11: aoc.character.v1.JobResource
+	(*JobRarity)(nil),                       // 12: aoc.character.v1.JobRarity
+	(*WalletEntry)(nil),                     // 13: aoc.character.v1.WalletEntry
+	(*ProfessionState)(nil),                 // 14: aoc.character.v1.ProfessionState
+	(*TreeRanks)(nil),                       // 15: aoc.character.v1.TreeRanks
+	(*ActionbarSlot)(nil),                   // 16: aoc.character.v1.ActionbarSlot
+	(*Experience)(nil),                      // 17: aoc.character.v1.Experience
+	(*Item)(nil),                            // 18: aoc.character.v1.Item
+	(*CreateCharacterRequest)(nil),          // 19: aoc.character.v1.CreateCharacterRequest
+	(*CreateCharacterResponse)(nil),         // 20: aoc.character.v1.CreateCharacterResponse
+	(*ListCharactersRequest)(nil),           // 21: aoc.character.v1.ListCharactersRequest
+	(*ListCharactersResponse)(nil),          // 22: aoc.character.v1.ListCharactersResponse
+	(*GetCharacterRequest)(nil),             // 23: aoc.character.v1.GetCharacterRequest
+	(*GetCharacterResponse)(nil),            // 24: aoc.character.v1.GetCharacterResponse
+	(*GetCharacterByNameRequest)(nil),       // 25: aoc.character.v1.GetCharacterByNameRequest
+	(*GetCharacterByNameResponse)(nil),      // 26: aoc.character.v1.GetCharacterByNameResponse
+	(*SaveCharacterStateRequest)(nil),       // 27: aoc.character.v1.SaveCharacterStateRequest
+	(*SaveCharacterStateResponse)(nil),      // 28: aoc.character.v1.SaveCharacterStateResponse
+	(*DeleteCharacterRequest)(nil),          // 29: aoc.character.v1.DeleteCharacterRequest
+	(*DeleteCharacterResponse)(nil),         // 30: aoc.character.v1.DeleteCharacterResponse
+	(*SaveInventoryRequest)(nil),            // 31: aoc.character.v1.SaveInventoryRequest
+	(*SaveInventoryResponse)(nil),           // 32: aoc.character.v1.SaveInventoryResponse
+	(*SaveProgressRequest)(nil),             // 33: aoc.character.v1.SaveProgressRequest
+	(*SaveProgressResponse)(nil),            // 34: aoc.character.v1.SaveProgressResponse
+	(*SaveGuildRequest)(nil),                // 35: aoc.character.v1.SaveGuildRequest
+	(*SaveGuildResponse)(nil),               // 36: aoc.character.v1.SaveGuildResponse
+	(*SaveGuildCooldownRequest)(nil),        // 37: aoc.character.v1.SaveGuildCooldownRequest
+	(*SaveGuildCooldownResponse)(nil),       // 38: aoc.character.v1.SaveGuildCooldownResponse
+	(*MailItem)(nil),                        // 39: aoc.character.v1.MailItem
+	(*Mail)(nil),                            // 40: aoc.character.v1.Mail
+	(*GetMailsRequest)(nil),                 // 41: aoc.character.v1.GetMailsRequest
+	(*GetMailsResponse)(nil),                // 42: aoc.character.v1.GetMailsResponse
+	(*SaveMailRequest)(nil),                 // 43: aoc.character.v1.SaveMailRequest
+	(*SaveMailResponse)(nil),                // 44: aoc.character.v1.SaveMailResponse
+	(*CreateMailRequest)(nil),               // 45: aoc.character.v1.CreateMailRequest
+	(*CreateMailResponse)(nil),              // 46: aoc.character.v1.CreateMailResponse
+	(*MailClaim)(nil),                       // 47: aoc.character.v1.MailClaim
+	(*ClaimMailItemsRequest)(nil),           // 48: aoc.character.v1.ClaimMailItemsRequest
+	(*ClaimMailItemsResponse)(nil),          // 49: aoc.character.v1.ClaimMailItemsResponse
+	(*MarketListing)(nil),                   // 50: aoc.character.v1.MarketListing
+	(*SaveInventoryAndListingRequest)(nil),  // 51: aoc.character.v1.SaveInventoryAndListingRequest
+	(*SaveInventoryAndListingResponse)(nil), // 52: aoc.character.v1.SaveInventoryAndListingResponse
+	(*ListMarketListingsRequest)(nil),       // 53: aoc.character.v1.ListMarketListingsRequest
+	(*ListMarketListingsResponse)(nil),      // 54: aoc.character.v1.ListMarketListingsResponse
 }
 var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	1,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
@@ -4384,39 +4733,50 @@ var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	40, // 41: aoc.character.v1.CreateMailResponse.mail:type_name -> aoc.character.v1.Mail
 	47, // 42: aoc.character.v1.ClaimMailItemsRequest.claims:type_name -> aoc.character.v1.MailClaim
 	31, // 43: aoc.character.v1.ClaimMailItemsRequest.inventory:type_name -> aoc.character.v1.SaveInventoryRequest
-	19, // 44: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
-	21, // 45: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
-	23, // 46: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
-	25, // 47: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
-	27, // 48: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
-	29, // 49: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
-	31, // 50: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
-	33, // 51: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
-	35, // 52: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
-	37, // 53: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
-	41, // 54: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
-	43, // 55: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
-	45, // 56: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
-	48, // 57: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
-	20, // 58: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
-	22, // 59: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
-	24, // 60: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
-	26, // 61: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
-	28, // 62: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
-	30, // 63: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
-	32, // 64: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
-	34, // 65: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
-	36, // 66: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
-	38, // 67: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
-	42, // 68: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
-	44, // 69: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
-	46, // 70: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
-	49, // 71: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
-	58, // [58:72] is the sub-list for method output_type
-	44, // [44:58] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	18, // 44: aoc.character.v1.MarketListing.item:type_name -> aoc.character.v1.Item
+	18, // 45: aoc.character.v1.SaveInventoryAndListingRequest.items:type_name -> aoc.character.v1.Item
+	13, // 46: aoc.character.v1.SaveInventoryAndListingRequest.wallet:type_name -> aoc.character.v1.WalletEntry
+	10, // 47: aoc.character.v1.SaveInventoryAndListingRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
+	9,  // 48: aoc.character.v1.SaveInventoryAndListingRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
+	50, // 49: aoc.character.v1.SaveInventoryAndListingRequest.listing:type_name -> aoc.character.v1.MarketListing
+	50, // 50: aoc.character.v1.ListMarketListingsResponse.listings:type_name -> aoc.character.v1.MarketListing
+	19, // 51: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
+	21, // 52: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
+	23, // 53: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
+	25, // 54: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
+	27, // 55: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
+	29, // 56: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
+	31, // 57: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
+	33, // 58: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
+	35, // 59: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
+	37, // 60: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
+	41, // 61: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
+	43, // 62: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
+	45, // 63: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
+	48, // 64: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
+	51, // 65: aoc.character.v1.CharacterService.SaveInventoryAndListing:input_type -> aoc.character.v1.SaveInventoryAndListingRequest
+	53, // 66: aoc.character.v1.CharacterService.ListMarketListings:input_type -> aoc.character.v1.ListMarketListingsRequest
+	20, // 67: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
+	22, // 68: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
+	24, // 69: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
+	26, // 70: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
+	28, // 71: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
+	30, // 72: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
+	32, // 73: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
+	34, // 74: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
+	36, // 75: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
+	38, // 76: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
+	42, // 77: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
+	44, // 78: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
+	46, // 79: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
+	49, // 80: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
+	52, // 81: aoc.character.v1.CharacterService.SaveInventoryAndListing:output_type -> aoc.character.v1.SaveInventoryAndListingResponse
+	54, // 82: aoc.character.v1.CharacterService.ListMarketListings:output_type -> aoc.character.v1.ListMarketListingsResponse
+	67, // [67:83] is the sub-list for method output_type
+	51, // [51:67] is the sub-list for method input_type
+	51, // [51:51] is the sub-list for extension type_name
+	51, // [51:51] is the sub-list for extension extendee
+	0,  // [0:51] is the sub-list for field type_name
 }
 
 func init() { file_aoc_character_v1_character_proto_init() }
@@ -4433,7 +4793,7 @@ func file_aoc_character_v1_character_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_character_v1_character_proto_rawDesc), len(file_aoc_character_v1_character_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   49,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

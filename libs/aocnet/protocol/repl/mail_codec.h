@@ -49,8 +49,9 @@
 //  claimed flag (32, a UBool).
 //
 //  FCurrencyContainer, in wire order: an int32 count and, per entry, the currency's record guid (64),
-//  its record type id (64) and the amount (64: 8 bytes, held as a double as the warehouse cost map holds
-//  it).  A TMap holds each key once, so the writer refuses a repeated (currency, type id).
+//  its record type id (64) and the amount (64: an integer in the currency's base unit, as the recorded
+//  marketplace prices read; market_codec.h).  A TMap holds each key once, so the writer refuses a repeated
+//  (currency, type id).  The marketplace's prices use the same container and these functions.
 //
 //  kMaxMailItems and kMaxMailCurrencies are our bounds, not the game's.  A count is also checked against
 //  the bits left, so a hostile count buys no memory.

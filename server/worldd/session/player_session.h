@@ -494,6 +494,7 @@ public:
     /// Plan B2: the items as the session plays them, whether they changed this session and since the last hand-over to the sink, the requests
     /// applied and refused (ServerItemUsed and ServerRequestStorageEvent), and the inventories handed to the sink.
     const items::Inventory& inventory() const { return inventory_; }
+    double sync_now(Clock::time_point now);
     /// Plan B3: the character's stats as the session plays them (null for a session built without them).
     const stats::CharacterStats* character_stats() const { return stats_ ? &*stats_ : nullptr; }
     /// Gear changes that changed stats, the stat items they changed, and the ones the pawn would not take.
@@ -1209,6 +1210,8 @@ private:
     void update_resource_container(Connection& conn, const items::BagChange& change);
     /// A refused request: the reason is logged, the inventory is as it was, and the client's storages are sent again (budget permitting).
     void refuse_item_request(Connection& conn, const char* what, const std::string& why, Clock::time_point now);
+    /// The client is told what is where in the bags, as at the join (under the resync budget).
+    void resync_storage(Connection& conn, Clock::time_point now);
     /// Hands the whole inventory to the sink (saved on a worker thread); `why` is for the log.
     void hand_over_inventory(const char* why, bool periodic);
     void on_client_load(Connection& conn, Clock::time_point now);
@@ -1249,9 +1252,8 @@ private:
     double artisan_stat(int64_t stat) const;
     /// The station actor whose key is `key` (nullptr when the world has none).
     const world::WorldActor* station_by_key(const std::string& key) const;
-    /// The wall clock in Unix milliseconds, and the client's synchronized clock now (the one ClientSetTime sets, in seconds).
+    /// The wall clock in Unix milliseconds, and the client's synchronized clock now (see sync_now).
     static int64_t wall_ms();
-    double         sync_now(Clock::time_point now);
     /// OwnerInfo.ActiveProcessingStations from the jobs that are not over; true when the list changed (the caller sends the property).
     bool sync_active_stations(int64_t now_ms);
     void on_vendor_purchase(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
@@ -1413,6 +1415,7 @@ private:
     /// The vendor NPC the window is open on, when it is still held, a GM vendor, and within range of the last good position; else nullptr (the
     /// window is forgotten and `why` says what was wrong).
     const world::WorldActor* open_vendor(std::string& why);
+    void open_marketplace(Connection& conn, const world::WorldActor& manager), on_market_registration(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now), on_market_headers(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now), on_market_data(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Vendors, step 0: the shop (a VendorDef guid) an NPC's use opens in a town; 0 when it opens none or the shop is not switched on.
     int64_t town_shop_of(const world::WorldActor& npc) const;
     /// ... and the purchase from the shop that is open (priced from vendor_price and the node tax, paid from the wallet, goods through Inventory::grant).

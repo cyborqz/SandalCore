@@ -10,6 +10,7 @@
 #include "respawn/make_shrines.h"
 #include "spawns/generic_npc.h"
 
+#include "market/market.h"
 #include "spawns/npc_looks.h"
 #include "world/interaction_state.h"
 
@@ -88,7 +89,17 @@ std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minte
         }
     }
     if (params) *params = p;
-    auto w = instantiate(*s.open, mint, p, error);
+    std::optional<OpenTemplate> manager;
+    const OpenTemplate* open = s.open;
+    if (open && s.instance && market::is_manager_instance(s.instance->guid, s.instance->interact_response)) {
+        manager = market::manager_open(*open, s.instance->interact_component, s.instance->interact_response);
+        if (!manager) {
+            error = "the Marketplace Manager's open has no interactable component";
+            return std::nullopt;
+        }
+        open = &*manager;
+    }
+    auto w = instantiate(*open, mint, p, error);
     if (!w) return std::nullopt;
     // the mailbox's class reads the plain actor's properties and the four guid words, not the state-machine actor's own properties the quest object's branch writes
     if (s.open && is_mailbox_path(s.open->archetype_path)) keep_mailbox_actor_properties(w->actor.obj);

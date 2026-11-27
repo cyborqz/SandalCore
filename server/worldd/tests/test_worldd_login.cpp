@@ -228,6 +228,29 @@ int main() {
         CHECK(std::chrono::steady_clock::now() - began >= std::chrono::milliseconds(90), "after waiting for the bound");
     }
     {
+        // ONE bound for everything that holds a log-in: the world's answer joins a listing's save, a mail claim and a queued write (PlayerWorld::character_writes_pending), so the wait
+        // is counted from the first look that held it, however often what holds it changes, and the default is the 20 s the client's 120 s allows for
+        CHECK(LoginService::Barrier{}.bound == std::chrono::milliseconds(20000), "the default bound is 20 s");
+        FakeGateway gw;
+        FakeCharacters ch;
+        LoginService svc(gw, ch);
+        LoginService::Barrier barrier;
+        const auto start = std::chrono::steady_clock::now();
+        std::atomic<int> asked{0};
+        barrier.writes_pending = [&](const std::string&) {
+            ++asked;
+            return true;   // (a save, then a claim, then a write the saver holds: there is always one)
+        };
+        barrier.bound = std::chrono::milliseconds(300);
+        barrier.poll = std::chrono::milliseconds(2);
+        svc.set_barrier(barrier);
+        const LoginResult r = svc.login(request(), 7);
+        const auto took = std::chrono::steady_clock::now() - start;
+        CHECK(!r.accepted && r.error == login_text::kServiceUnavailable && ch.calls == 0, "refused at the bound with nothing loaded");
+        CHECK(took >= std::chrono::milliseconds(270) && took < std::chrono::milliseconds(560), "after one bound, not two");
+        CHECK(asked > 10, "the world was asked again at each poll until then");
+    }
+    {
         // a character with nothing unanswered is not held at all; a log-in that is refused before the character is read never asks the barrier
         FakeGateway gw;
         FakeCharacters ch;

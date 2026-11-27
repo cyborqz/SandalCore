@@ -153,6 +153,7 @@ bool PlayerSession::allocate_channels(const Connection& conn) {
 PlayerSession::~PlayerSession() {
     finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
     close_mail("the session is destroyed");   // (a mail job's answer is dropped: it never writes into a session that is gone)
+    market_end("the session is destroyed");   // (a listing's save in flight goes to the world, with the bags: see finish())
     drop_held_chat_lines();   // ... and the tells it held while loading are dropped, not delivered
     leave_friends("the session is destroyed");
     forget_party();
@@ -659,6 +660,8 @@ void PlayerSession::finish(const char* why) {
     if (!mail_settle_on_finish() && inventory_changed_) hand_over_inventory(why, /*periodic=*/false);
     // and the progress (plan D1): handed over at once when it changed, and once more here for the same reason
     if (progress_changed_) hand_over_progress(why);
+    // a listing's save still in flight held the bag save above: the world finishes it and writes the bags this session ends with
+    market_end(why);
 }
 
 void PlayerSession::hand_over_progress(const char* why) {
@@ -718,6 +721,7 @@ void PlayerSession::hand_over_progress(const char* why) {
 }
 
 void PlayerSession::hand_over_inventory(const char* why, bool periodic) {
+    if (sink_ && market_hold_bag_save(why)) return;   // (a listing's save in flight writes these bags: the save waits for its answer and inventory_dirty_ stays set)
     if (mail_defers_hand_over(why, periodic)) return;   // (a claim in flight stores these bags: the save waits for its answer; otherwise this clears inventory_dirty_)
     if (!sink_) return;
     std::vector<svc::InventoryItem> items = inventory_.items();

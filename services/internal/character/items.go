@@ -231,13 +231,14 @@ func (s *Store) Inventory(ctx context.Context, characterID string) ([]Item, erro
 // (not in part 1 of the complete character), so an empty save is a bug in the caller, and it would erase the character's
 // kit.
 func (s *Store) SaveInventory(ctx context.Context, characterID string, items []Item) error {
-	return s.saveInventory(ctx, characterID, items, nil, nil, false, nil, false, nil, false)
+	return s.saveInventory(ctx, characterID, items, nil, nil, false, nil, false, nil, false, nil)
 }
 
 // saveInventory is SaveInventory and, when wallet is not nil, the wallet's entries stored in the same transaction (SaveInventoryAndWallet) and, when replaceJobs, the character's
-// processing jobs made exactly jobs (SaveInventoryAll) and, when replaceWarehouse, the character's warehouse made exactly warehouse (SaveInventoryEverything).
+// processing jobs made exactly jobs (SaveInventoryAll) and, when replaceWarehouse, the character's warehouse made exactly warehouse (SaveInventoryEverything). When listing
+// is not nil, the listing is inserted in the same transaction after the bags (SaveInventoryAndListing).
 func (s *Store) saveInventory(ctx context.Context, characterID string, items []Item, wallet []WalletEntry, jobs []ProcessingJob, replaceJobs bool, known []int64, replaceKnown bool,
-	warehouse []WarehouseItem, replaceWarehouse bool) error {
+	warehouse []WarehouseItem, replaceWarehouse bool, listing *MarketListing) error {
 	if !idPattern.MatchString(characterID) {
 		return ErrNotFound
 	}
@@ -258,8 +259,23 @@ func (s *Store) saveInventory(ctx context.Context, characterID string, items []I
 	if err := lockCharacter(ctx, tx, characterID); err != nil {
 		return err
 	}
+	if listing != nil {
+		// a listing the seller already has was stored by an earlier call: write nothing (the bags that follow it are the session's own saves), and say so
+		saved, err := listingSaved(ctx, tx, characterID, listing.ID)
+		if err != nil {
+			return err
+		}
+		if saved {
+			return ErrListingSaved
+		}
+	}
 	if err := writeInventory(ctx, tx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown, warehouse, replaceWarehouse); err != nil {
 		return err
+	}
+	if listing != nil {
+		if err := insertMarketListing(ctx, tx, characterID, *listing); err != nil {
+			return itemsError(err)
+		}
 	}
 	return tx.Commit(ctx)
 }

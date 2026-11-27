@@ -47,6 +47,7 @@
 #include "items/currency.h"
 #include "items/inventory.h"
 #include "items/rarity.h"
+#include "market/market_store.h"
 #include "nav/area_nav.h"
 #include "npc/area_npcs.h"
 #include "protocol/server_guid_allocator.h"
@@ -189,8 +190,10 @@ public:
     void                  set_movement(const MovementConfig& config) { movement_ = config; }
     const MovementConfig& movement() const { return movement_; }
     /// Where the sessions hand positions to be saved; null (the default) saves nothing. Must outlive the sessions.
-    void          set_position_sink(PositionSink* sink) { sink_ = sink; }
+    void          set_position_sink(PositionSink* sink);
     PositionSink* position_sink() const { return sink_; }
+    /// When the world stops, after the sessions ended: waits up to `max_wait` for the listing saves those sessions left in flight, and writes their bags.
+    void          settle_market(std::chrono::milliseconds max_wait);
 
     /// Social, step 7: submits a friend call's character lookup (by name or by id) to the world's lookup worker, which asks the sink off the network thread;
     /// the ticket it returns is how the result comes back.  The session takes it on a later tick with take_friend_lookup.
@@ -211,8 +214,9 @@ public:
     bool orphan_mail_claim(OrphanClaim claim) const;
     /// The session applied the answer of a claim: it is closed.
     void close_mail_claim(uint64_t ticket) const;
-    /// Whether a write of the character's bags can still happen from here: a mail claim of it that is not closed, or a save queued or running in the sink.  The log-in waits for
-    /// this to be false before it reads the character (login/login_service.h), and it is safe to ask from the log-in's thread.
+    /// Whether a write of the character's bags can still happen from here: a Marketplace listing's save without its answer (or the bags of an ended session that left one), a mail
+    /// claim of it that is not closed, or a save queued or running in the sink.  The log-in waits for this to be false before it reads the character (login/login_service.h): one
+    /// wait with one bound for all three, and it is safe to ask from the log-in's thread.
     bool character_writes_pending(const std::string& character_id) const;
     /// A log-in whose ticket was redeemed for the character marks it: the log-in's thread sets the mark right after the redeem (login/login_service.h), and the Endpoint ends it when the
     /// log-in's result is applied, refused, or its session is gone.  While it stands the character's new mail claims wait (the log-in's wait for the claims must not be overtaken by a
@@ -374,6 +378,8 @@ public:
     /// influence where the creature died.  The pointer must outlive this object.
     void set_city_nodes(world::CityNodes* nodes) { city_nodes_ = nodes; }
     world::CityNodes* city_nodes() const { return city_nodes_; }
+    /// The market's listings (market/listings.h): one per registered stack, read from the character service when the world gets its sink and cached in memory.
+    market::MarketStore* market_listings() const { return &market_listings_; }
     /// Nodes 1, stage 2: what the client is told about the nodes (world/node_wire.h; built from content.db and the registry), set by main with the registry; null in a world
     /// with no nodes (a GameStateMode::Tier3 join then lists none).  The pointer must outlive this object.
     void set_node_wire(const world::NodeWire* wire) { node_wire_ = wire; }
@@ -698,6 +704,7 @@ private:
     quest::QuestWorker*                  quest_worker_ = nullptr;
     std::optional<vendor::TownShops>     shops_;
     std::optional<warehouse::Book>       warehouses_;   // storage clerks, step 0
+    mutable market::ServiceMarketStore   market_listings_;   // the marketplace's listings, read from the character service and cached in memory
     std::optional<content::CraftStationData> stations_;   // crafting, step 0: the station definitions and which asset is whose station
     std::optional<content::CraftRecipeData>  recipes_;    // crafting, step 1: the recipes
     std::map<std::pair<int64_t, int64_t>, uint64_t> placed_stations_;   // (node, plot) -> the actor of a station a game master placed

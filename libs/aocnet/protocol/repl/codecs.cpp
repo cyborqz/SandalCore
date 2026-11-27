@@ -18,6 +18,7 @@
 #include "protocol/repl/craft_codec.h"
 #include "protocol/repl/quest_codec.h"
 #include "protocol/repl/warehouse_codec.h"
+#include "protocol/repl/market_codec.h"
 #include "protocol/repl/item_codec.h"
 #include "protocol/repl/mail_codec.h"
 
@@ -1323,6 +1324,7 @@ std::optional<Value> zero_struct(std::string_view struct_name) {
         case S::CraftState:   return Value(CraftItemState{});           // no recipe, no resources
         case S::RewardInstance: return Value(RewardInstance{});         // no items, no experience
         case S::HashedVariable: return Value(HashedVariable{});         // no variables
+        case S::Currency:     return Value(CurrencyContainer{});           // no price
         default:              break;
     }
     return std::nullopt;

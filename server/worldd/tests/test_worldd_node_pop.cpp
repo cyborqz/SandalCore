@@ -532,6 +532,129 @@ static void test_anchors() {
 }
 // ~ CoA & C Y B ~
 
+// ---- the Marketplace Manager ----------------------------------------------------------------------------------------------------------------
+
+/// Every block of the actor's open, read back with its class schema to its last bit.
+static bool open_reads_to_the_last_bit(const repl::Actor& actor) {
+    repl::ActorShadow shadow;
+    std::vector<repl::ContentBlock> blocks;
+    if (!repl::collect_open_blocks(actor, shadow, blocks)) return false;
+    repl::ExportAcks acks;
+    const auto emission = repl::assemble_blocks(actor, blocks, acks);
+    if (!emission) return false;
+    const auto got = repl::read_content_blocks(emission->payload.data(), emission->payload.bit_pos(), 0);
+    if (!got || got->size() != actor.subobjects.size() + 1) return false;
+    for (const repl::BlockView& b : *got) {
+        const repl::ObjectState* obj = b.header.is_actor ? &actor.obj : nullptr;
+        if (!obj) {
+            for (const repl::Subobject& s : actor.subobjects) {
+                if (s.guid.ObjectId == b.header.object.ObjectId) obj = &s.obj;
+            }
+        }
+        if (!obj || !obj->schema) return false;
+        const size_t end = b.payload_pos + b.payload_bits;
+        size_t pos = b.payload_pos;
+        if (b.header.has_rep_layout && !repl::read_rep_block(*obj->schema, emission->payload.data(), end, pos, obj->opts)) return false;
+        if (pos < end && !repl::read_fast_array_fields(*obj->schema, emission->payload.data(), end, pos, obj->opts)) return false;
+        if (pos != end) return false;
+    }
+    return true;
+}
+
+/// The Manager stands where the data places him in the two towns this world has a marketplace building in at their level, and his open carries the
+/// marketplace's interaction (only his class's properties).
+static void test_marketplace_manager() {
+    std::printf("the Marketplace Manager: his places, his class and his interaction\n");
+    struct Place {
+        const char* town;
+        int64_t     node;
+        int         level;
+        double      x, y, z, yaw;
+    };
+    const Place places[] = {
+        {"Halcyon", kHalcyon, 3, -887060.5554419861, 317982.63534638146, 11709.153391131515, 51.82600010886574},
+        {"Joeva", kJoeva, 4, -1085295.4530073544, 504716.84261175006, 12625.474786463223, 27.786036470908},
+    };
+    constexpr int64_t kManagerInstance = 6064632772964253696ll;       // Node_Vendor_Gear_marketplace
+    constexpr int64_t kManagerComponent = 6064633962143220653ll;      // ICD_ID_MarketplaceVendor
+    constexpr int64_t kManagerInteraction = 6064632772967071745ll;    // ID_MarketplaceVendor
+    uint64_t next = 8192;
+    const spawns::Minter minter = [&next] {
+        FIntrepidNetworkGUID g;
+        g.ObjectId = next;
+        next += 2;
+        g.ServerId = 60;
+        g.Randomizer = 0x6ee87ee4u;
+        return g;
+    };
+    for (const Place& p : places) {
+        spawns::NodePopStats st;
+        const world::CityNodeInfo* info = g_env.nodes->by_guid(p.node);
+        CHECK(info != nullptr, ("the data has " + std::string(p.town)).c_str());
+        if (!info) continue;
+        const auto list = select_real(*info, p.level, st);
+        const spawns::NodeSpawn* found = nullptr;
+        for (const spawns::NodeSpawn& n : list) {
+            if (n.spawn.instance && n.spawn.instance->guid == kManagerInstance) {
+                found = &n;
+                break;
+            }
+        }
+        char msg[320];
+        std::snprintf(msg, sizeof(msg), "%s at level %d places the Marketplace Manager", p.town, p.level);
+        CHECK(found != nullptr, msg);
+        if (!found) return;
+        std::snprintf(msg, sizeof(msg), "%s: the Manager is the gear vendor Blueprint (%s)", p.town, spawns::archetype_leaf(found->spawn.asset->archetype_path).c_str());
+        CHECK(spawns::archetype_leaf(found->spawn.asset->archetype_path) == "General_Gear_Base_Vendor", msg);
+        const double dx = found->spawn.x - p.x, dy = found->spawn.y - p.y, dz = found->spawn.z - p.z, dyaw = found->spawn.yaw - p.yaw;
+        std::snprintf(msg, sizeof(msg), "%s: he stands at the data's place (%.1f, %.1f %.1f, off %.1f cm; yaw %.3f, off %.3f)", p.town, p.x, p.y, p.z, std::sqrt(dx * dx + dy * dy),
+                      p.yaw, dyaw);
+        CHECK(std::fabs(dx) < 1.0 && std::fabs(dy) < 1.0 && std::fabs(dz) < 1.0 && std::fabs(dyaw) < 0.01, msg);
+
+        std::string error;
+        spawns::InstanceParams params;
+        spawns::DataSpawn spawn = found->spawn;
+        spawn.looks = g_env.looks.get();   // the world's TemplateSource has the people's look and name tables; a selection alone does not
+        auto made = spawns::make_data_actor(spawn, minter, 60, 0.0, &params, error);
+        std::snprintf(msg, sizeof(msg), "%s: his actor is made", p.town);
+        CHECK(made.has_value(), made ? msg : (std::string(error) + " (" + msg + ")").c_str());
+        if (!made) continue;
+        std::snprintf(msg, sizeof(msg), "%s: he is the Marketplace Manager (%s)", p.town, made->npc.name.c_str());
+        CHECK(made->npc.name == "Marketplace Manager", msg);
+        std::snprintf(msg, sizeof(msg), "%s: his open is the NPC class (%s)", p.town, made->actor.obj.schema ? made->actor.obj.schema->name : "?");
+        CHECK(made->actor.obj.schema && std::string(made->actor.obj.schema->name) == "ANPCCharacter", msg);
+        std::snprintf(msg, sizeof(msg), "%s: his interaction is ID_MarketplaceVendor (%lld)", p.town, static_cast<long long>(made->npc.interact_def));
+        CHECK(made->npc.interact_def == kManagerInteraction, msg);
+
+        const repl::Subobject* interact = nullptr;
+        for (const repl::Subobject& s : made->actor.subobjects) {
+            if (s.obj.schema && std::string(s.obj.schema->name) == "UInteractableComponent") interact = &s;
+        }
+        std::snprintf(msg, sizeof(msg), "%s: his actor carries an interactable component", p.town);
+        CHECK(interact != nullptr, msg);
+        int64_t component = 0, interaction = 0;
+        if (interact) {
+            const repl::Value* c = interact->obj.state.get(*interact->obj.schema, "ComponentDefId.Guid");
+            if (c) {
+                if (const int64_t* i = c->get_if<int64_t>()) component = *i;
+            }
+            const repl::Value* data = interact->obj.state.get(*interact->obj.schema, "InteractionInputData");
+            const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+            if (arr && !arr->elements.empty()) {
+                const auto it = arr->elements[0].values.find(6);
+                if (it != arr->elements[0].values.end()) {
+                    if (const int64_t* i = it->second.get_if<int64_t>()) interaction = *i;
+                }
+            }
+        }
+        std::snprintf(msg, sizeof(msg), "%s: the wire's component and input are the marketplace's (%lld, %lld)", p.town, static_cast<long long>(component),
+                      static_cast<long long>(interaction));
+        CHECK(component == kManagerComponent && interaction == kManagerInteraction, msg);
+        std::snprintf(msg, sizeof(msg), "%s: every block of his open reads to its last bit with its class", p.town);
+        CHECK(open_reads_to_the_last_bit(made->actor), msg);
+    }
+}
+
 // ---- the golden -----------------------------------------------------------------------------------------------------------------------------
 
 static void test_golden() {
@@ -2143,6 +2266,7 @@ int main() {
     test_workshops();
     test_walkers();
     test_anchors();
+    test_marketplace_manager();
     test_golden();
     test_manager();
     test_replacement();

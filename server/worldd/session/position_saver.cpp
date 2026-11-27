@@ -377,6 +377,33 @@ bool CharacterSaver::character_busy(const std::string& character_id) const {
     return (in_flight_ && in_flight_character_ == character_id) || entries_.count(character_id) != 0;
 }
 
+svc::MarketListingsResult CharacterSaver::list_market_listings() {
+    try {
+        return api_.list_market_listings();
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] reading the market listings threw {}", e.what());
+        return {};
+    }
+}
+
+svc::MarketSaveResult CharacterSaver::save_inventory_and_listing_now(const std::string& character_id, std::vector<svc::InventoryItem> items,
+                                                                     std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                                                     std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse,
+                                                                     const svc::MarketListing& listing) {
+    if (!claim_the_inventory_write(character_id)) return svc::MarketSaveResult{svc::CallStatus::Unavailable, "the saver is stopping"};
+    try {
+        const svc::MarketSaveResult result = api_.save_inventory_and_listing(character_id, items, wallet, jobs, known_recipes, warehouse, listing);
+        if (result.status == svc::CallStatus::Ok) {
+            std::lock_guard<std::mutex> lock(mu_);
+            ++inventories_saved_;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] the market listing save of {} threw {}", character_id, e.what());
+        return svc::MarketSaveResult{svc::CallStatus::Unavailable, "the call threw"};
+    }
+}
+
 bool CharacterSaver::flush(std::chrono::milliseconds max_wait) {
     std::unique_lock<std::mutex> lock(mu_);
     return idle_cv_.wait_for(lock, max_wait, [this] { return (order_.empty() && !in_flight_) || abandon_; }) && order_.empty() && !in_flight_;

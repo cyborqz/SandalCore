@@ -122,6 +122,62 @@ void set_mail(characterv1::Mail* m, const Mail& mail) {
     for (const MailItem& it : mail.items) set_mail_item(m->add_items(), it);
 }
 
+/// Marketplace (migration 0030): one item as the bags send it.
+void set_item(characterv1::Item* p, const InventoryItem& it) {
+    switch (it.container) {
+    case ItemContainer::Backpack: p->set_container(characterv1::ITEM_CONTAINER_BACKPACK); break;
+    case ItemContainer::Equipment: p->set_container(characterv1::ITEM_CONTAINER_EQUIPMENT); break;
+    case ItemContainer::Quest: p->set_container(characterv1::ITEM_CONTAINER_QUEST); break;
+    case ItemContainer::Resource0: p->set_container(characterv1::ITEM_CONTAINER_RESOURCE0); break;
+    case ItemContainer::Resource1: p->set_container(characterv1::ITEM_CONTAINER_RESOURCE1); break;
+    case ItemContainer::Resource2: p->set_container(characterv1::ITEM_CONTAINER_RESOURCE2); break;
+    }
+    p->set_slot(it.slot);
+    p->set_item_record_id(it.item_record_id);
+    p->set_instance_guid(it.instance_guid);
+    p->set_quantity(it.quantity);
+    p->set_quality(it.quality);
+    p->set_durability(it.durability);
+    p->set_created_at_ms(it.created_at_ms);
+    if (it.persisted_health) p->set_persisted_health(*it.persisted_health);
+    if (it.persisted_mana) p->set_persisted_mana(*it.persisted_mana);
+    p->set_lock_expiration(it.lock_expiration);
+}
+
+/// Marketplace: one listing as the save and the read carry it.
+MarketListing market_listing_of(const characterv1::MarketListing& l) {
+    MarketListing out;
+    out.id = l.id();
+    out.seller_id = l.seller_id();
+    out.seller_name = l.seller_name();
+    out.node = l.market_node();
+    const characterv1::Item& item = l.item();
+    out.item.item_record_id = item.item_record_id();
+    out.item.instance_guid = item.instance_guid();
+    out.item.quantity = item.quantity();
+    out.item.quality = item.quality();
+    out.item.durability = item.durability();
+    out.item.created_at_ms = item.created_at_ms();
+    if (item.has_persisted_health()) out.item.persisted_health = item.persisted_health();
+    if (item.has_persisted_mana()) out.item.persisted_mana = item.persisted_mana();
+    out.item.lock_expiration = item.lock_expiration();
+    out.price_per_unit = l.price_per_unit();
+    out.status = l.status();
+    out.issue_date_ms = l.issue_date_ms();
+    out.expiry_date_ms = l.expiry_date_ms();
+    return out;
+}
+
+void set_market_listing(characterv1::MarketListing* p, const MarketListing& l) {
+    p->set_id(l.id);
+    p->set_market_node(l.node);
+    set_item(p->mutable_item(), l.item);
+    p->set_price_per_unit(l.price_per_unit);
+    p->set_status(l.status);
+    p->set_issue_date_ms(l.issue_date_ms);
+    p->set_expiry_date_ms(l.expiry_date_ms);
+}
+
 }  // namespace
 
 CallStatus map_grpc_status(const grpc::Status& s) {
@@ -546,6 +602,93 @@ MailResult GrpcServices::create_mail(const std::string& character_id, const NewM
         return r;
     }
     if (resp.has_mail()) r.mail = mail_of(resp.mail());
+    return r;
+}
+
+MarketSaveResult GrpcServices::save_inventory_and_listing(const std::string& character_id, const std::vector<InventoryItem>& items,
+                                                          const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                                          const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse,
+                                                          const MarketListing& listing) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::SaveInventoryAndListingRequest req;
+    req.set_character_id(character_id);
+    for (const InventoryItem& it : items) set_item(req.add_items(), it);
+    for (const WalletEntry& e : wallet) {
+        auto* w = req.add_wallet();
+        w->set_currency_guid(e.currency_guid);
+        w->set_amount(e.amount);
+    }
+    for (const ProcessingJob& job : jobs) {
+        auto* j = req.add_processing_jobs();
+        j->set_job_guid(job.job_guid);
+        j->set_station_key(job.station_key);
+        j->set_recipe_guid(job.recipe_guid);
+        j->set_sub_recipe_guid(job.sub_recipe_guid);
+        j->set_quantity(job.quantity);
+        j->set_queued_at_ms(job.queued_at_ms);
+        j->set_started_at_ms(job.started_at_ms);
+        j->set_duration_ms(job.duration_ms);
+        j->set_client_txn(job.client_txn);
+        j->set_rating_xp(job.rating_xp);
+        j->set_rating_quantity(job.rating_quantity);
+        j->set_rating_rarity(job.rating_rarity);
+        for (const JobResource& res : job.resources) {
+            auto* r = j->add_resources();
+            r->set_record_id(res.record_id);
+            for (const JobRarity& ra : res.rarities) {
+                auto* rr = r->add_rarities();
+                rr->set_rarity(ra.rarity);
+                rr->set_count(ra.count);
+                rr->set_from_warehouse(ra.from_warehouse);
+            }
+        }
+    }
+    for (const int64_t recipe : known_recipes) req.add_known_recipes(recipe);
+    for (const WarehouseItem& w : warehouse) {
+        auto* p = req.add_warehouse_items();
+        p->set_area(w.area);
+        p->set_node_guid(w.node_guid);
+        p->set_container_guid(w.container_guid);
+        p->set_slot(w.item.slot);
+        p->set_item_record_id(w.item.item_record_id);
+        p->set_instance_guid(w.item.instance_guid);
+        p->set_quantity(w.item.quantity);
+        p->set_quality(w.item.quality);
+        p->set_durability(w.item.durability);
+        p->set_created_at_ms(w.item.created_at_ms);
+        if (w.item.persisted_health) p->set_persisted_health(*w.item.persisted_health);
+        if (w.item.persisted_mana) p->set_persisted_mana(*w.item.persisted_mana);
+        p->set_lock_expiration(w.item.lock_expiration);
+    }
+    set_market_listing(req.mutable_listing(), listing);
+    characterv1::SaveInventoryAndListingResponse resp;
+    MarketSaveResult r;
+    const grpc::Status s = stubs_->character->SaveInventoryAndListing(&ctx, req, &resp);
+    r.status = map_grpc_status(s);
+    if (s.error_code() == grpc::StatusCode::ALREADY_EXISTS) {
+        // this call's own reading of AlreadyExists (the shared mapping keeps it a refusal): the service holds the listing already, so an earlier try of the same save
+        // committed and this one wrote nothing
+        r.status = CallStatus::Ok;
+        r.already_saved = true;
+    }
+    if (r.status != CallStatus::Ok) r.reason = s.error_message();
+    return r;
+}
+
+MarketListingsResult GrpcServices::list_market_listings() {
+    grpc::ClientContext ctx;
+    prepare(ctx);
+    characterv1::ListMarketListingsRequest req;
+    characterv1::ListMarketListingsResponse resp;
+    MarketListingsResult r;
+    const grpc::Status s = stubs_->character->ListMarketListings(&ctx, req, &resp);
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    for (const auto& l : resp.listings()) r.listings.push_back(market_listing_of(l));
     return r;
 }
 

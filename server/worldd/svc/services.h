@@ -376,6 +376,35 @@ struct MailClaimResult {
     bool        claimed_before = false;   // Refused because an attachment was claimed already (the service's AlreadyExists)
 };
 
+/// Marketplace (migration 0030): one listing (aoc.character.v1.MarketListing): its id, the seller (the character and the name the store reads), the market's
+/// node, the listed stack's own item data (its container and slot are not used), the unit price in copper, the status (0 LISTED) and the issue and expiry times in
+/// Unix milliseconds.
+struct MarketListing {
+    std::string   id;            // 32 lowercase hex digits
+    std::string   seller_id;     // the seller's character id
+    std::string   seller_name;
+    int64_t       node = 0;
+    InventoryItem item;
+    int64_t       price_per_unit = 0;
+    int32_t       status = 0;
+    int64_t       issue_date_ms = 0;
+    int64_t       expiry_date_ms = 0;
+    bool operator==(const MarketListing&) const = default;
+};
+
+struct MarketListingsResult {
+    CallStatus status = CallStatus::Failed;
+    std::string reason;   // the service's message when status is not Ok; empty for Ok
+    std::vector<MarketListing> listings;
+};
+
+struct MarketSaveResult {
+    CallStatus status = CallStatus::Failed;
+    std::string reason;   // the service's message when status is not Ok; empty for Ok
+    /// Ok because the service already held this listing for the seller (an earlier try committed): nothing was written this time.
+    bool already_saved = false;
+};
+
 /// Mail: the mails the window counts as unread: live (no delete bit) and without the read bit.
 inline int32_t unread_count(const std::vector<Mail>& mails) {
     int32_t n = 0;
@@ -634,6 +663,26 @@ public:
         (void)warehouse;
         return {};
     }
+    /// Marketplace: SaveInventoryAndListing writes the seller's whole bags, wallet, processing jobs, known recipes and warehouse exactly as save_inventory with
+    /// them does, AND one listing, in ONE transaction. Ok; Refused: a bag or a listing the store's rules refuse; NotFound: no such character; Unsupported: the
+    /// service keeps no listings; Ok with already_saved: the seller already has this listing id (nothing was written this time).  Blocks; the caller may make it from the
+    /// network thread.
+    virtual MarketSaveResult save_inventory_and_listing(const std::string& character_id, const std::vector<InventoryItem>& items,
+                                                        const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                                        const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse,
+                                                        const MarketListing& listing) {
+        (void)character_id;
+        (void)items;
+        (void)wallet;
+        (void)jobs;
+        (void)known_recipes;
+        (void)warehouse;
+        (void)listing;
+        return {};
+    }
+    /// Marketplace: every listed row of the world with its seller's name, oldest first (the character service's order). Blocks; the caller may make it from the
+    /// network thread.
+    virtual MarketListingsResult list_market_listings() { return {}; }
 };
 
 /// Quests, slice 1: the quest service (aoc.quest.v1.QuestService).  A world server that cannot reach it plays without quests.

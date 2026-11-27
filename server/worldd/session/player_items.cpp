@@ -363,6 +363,10 @@ void PlayerSession::update_resource_container(Connection& conn, const items::Bag
 void PlayerSession::refuse_item_request(Connection& conn, const char* what, const std::string& why, Clock::time_point now) {
     ++items_refused_;
     spdlog::log(level_for(item_refused_logged_), "[session] {}: {} refused, nothing changed: {}", name(), what, why);
+    resync_storage(conn, now);
+}
+
+void PlayerSession::resync_storage(Connection& conn, Clock::time_point now) {
     // the client is told what is where, as at the join; a client that is refused over and over gets that a few times, then silence
     if (!resync_budget_.take(now) || !room_for(5)) return;
     std::vector<bootstrap::StorageKind> kinds = {bootstrap::StorageKind::Backpack, bootstrap::StorageKind::Equipment};

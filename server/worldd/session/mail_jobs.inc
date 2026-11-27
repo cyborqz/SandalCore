@@ -291,6 +291,10 @@ void PlayerWorld::close_mail_claim(uint64_t ticket) const {
 }
 
 bool PlayerWorld::character_writes_pending(const std::string& character_id) const {
+    // The order is the point.  A listing's save without its answer, or the bags of an ended session whose listing was refused, are counted by the market until their bags are queued
+    // in the sink (market/market_store.h releases the count after the queueing), so a character the market no longer counts has that write already visible to the sink's own check
+    // below, and a write the saver still holds is never missed between the two.
+    if (market_listings_.saving(character_id)) return true;
     const MailJobs* jobs = mail_jobs(false);
     if (jobs && jobs->claim_open(character_id)) return true;
     return sink_ && sink_->character_busy(character_id);

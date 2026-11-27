@@ -75,10 +75,10 @@ static bool mail_put_item(BunchWriter& out, const MailItem& item) {
 
 static void mail_put_currency(BunchWriter& out, const CurrencyContainer& c) {
     out.write_int32(static_cast<int32_t>(c.entries.size()));
-    for (const MailCurrencyEntry& e : c.entries) {
-        out.write_uint64(static_cast<uint64_t>(e.currency));
+    for (const CurrencyEntry& e : c.entries) {
+        out.write_uint64(static_cast<uint64_t>(e.tier));
         out.write_uint64(static_cast<uint64_t>(e.type_id));
-        out.write_uint64(std::bit_cast<uint64_t>(e.value));
+        out.write_uint64(static_cast<uint64_t>(e.amount));
     }
 }
 
@@ -147,7 +147,7 @@ static MailPersistenceData mail_sample_persistence() {
     d.message.localized_message = LocalizedMessage{};
     d.message.system = false;
     d.items = {MailItem{mail_plain_item(0x1111222233334444ull, 3, guid(0xa1a1a1a1u, 0xa2a2a2a2u, 0xa3a3a3a3u, 0xa4a4a4a4u)), false}};
-    d.currency.entries = {MailCurrencyEntry{0x1111222233334444ll, 0x5555666677778888ll, std::bit_cast<double>(0x4059000000000000ull)}};
+    d.currency.entries = {CurrencyEntry{0x1111222233334444ll, 0x5555666677778888ll, 0x4059000000000000ll}};
     d.currency_claimed = true;
     d.status = 6;
     return d;
@@ -344,7 +344,7 @@ static void test_mail_currency() {
           "an empty container is its count alone: 32 bits");
 
     CurrencyContainer c;
-    c.entries.push_back(MailCurrencyEntry{0x1111222233334444ll, 0x5555666677778888ll, std::bit_cast<double>(0x4059000000000000ull)});
+    c.entries.push_back(CurrencyEntry{0x1111222233334444ll, 0x5555666677778888ll, 0x4059000000000000ll});
     BunchWriter want;
     mail_put_currency(want, c);
     CHECK(want.bit_pos() == 224, "one entry is 224 bits: the count, two int64 and 8 bytes");
@@ -355,8 +355,8 @@ static void test_mail_currency() {
     const CurrencyContainer* back = got ? got->get_if<CurrencyContainer>() : nullptr;
     CHECK(back != nullptr, "the value is a CurrencyContainer");
     CHECK(back && *back == c, "the currency, its type id and its 8-byte amount come back");
-    CHECK(back && back->entries.size() == 1 && back->entries[0].currency == c.entries[0].currency &&
-              back->entries[0].type_id == c.entries[0].type_id && same_bits(back->entries[0].value, c.entries[0].value),
+    CHECK(back && back->entries.size() == 1 && back->entries[0].tier == c.entries[0].tier &&
+              back->entries[0].type_id == c.entries[0].type_id && back->entries[0].amount == c.entries[0].amount,
           "the amount's 8 bytes are the exact bits");
     BunchWriter out;
     const bool wrote = write_struct("FCurrencyContainer", Value(c), out);
@@ -382,13 +382,13 @@ static void test_mail_currency() {
           "the item, the entry's currency, type id and amount and the claimed flag come back");
 
     CurrencyContainer dup = c;
-    dup.entries.push_back(MailCurrencyEntry{c.entries[0].currency, c.entries[0].type_id, 1.0});
+    dup.entries.push_back(CurrencyEntry{c.entries[0].tier, c.entries[0].type_id, 1});
     BunchWriter bad;
     CHECK(!struct_accepts("FCurrencyContainer", Value(dup)) && !write_struct("FCurrencyContainer", Value(dup), bad) &&
               bad.bit_pos() == 0,
           "a repeated (currency, type id) key is not written");
     CurrencyContainer over;
-    for (int i = 0; i < 257; ++i) over.entries.push_back(MailCurrencyEntry{i + 1, 1000 + i, 0.0});
+    for (int i = 0; i < 257; ++i) over.entries.push_back(CurrencyEntry{i + 1, 1000 + i, 0});
     CHECK(!struct_accepts("FCurrencyContainer", Value(over)) && !write_struct("FCurrencyContainer", Value(over), bad),
           "257 currency entries are not written");
 }
@@ -667,7 +667,7 @@ static void test_mail_bounds() {
     d.items.assign(1024, MailItem{});
     d.currency.entries.clear();
     for (size_t i = 0; i < 256; ++i) {
-        d.currency.entries.push_back(MailCurrencyEntry{static_cast<int64_t>(i + 1), static_cast<int64_t>(1000 + i), 0.0});
+        d.currency.entries.push_back(CurrencyEntry{static_cast<int64_t>(i + 1), static_cast<int64_t>(1000 + i), 0});
     }
     BunchWriter out;
     const bool wrote = write_struct("FMailPersistenceData", Value(d), out);
@@ -688,7 +688,7 @@ static void test_mail_bounds() {
     MailPersistenceData over_items = d;
     over_items.items.push_back(MailItem{});
     MailPersistenceData over_currency = d;
-    over_currency.currency.entries.push_back(MailCurrencyEntry{257, 2000, 0.0});
+    over_currency.currency.entries.push_back(CurrencyEntry{257, 2000, 0});
     BunchWriter refused;
     CHECK(!struct_accepts("FMailPersistenceData", Value(over_items)) && !write_struct("FMailPersistenceData", Value(over_items), refused) &&
               refused.bit_pos() == 0,
@@ -802,7 +802,7 @@ static void test_trade_currency() {
     std::printf("the trade calls' money\n");
     const schema::ClassSchema& pc = schema_named("AoCPlayerControllerBP_C");
     CurrencyContainer money;
-    money.entries.push_back(MailCurrencyEntry{0x1111222233334444ll, 0x5555666677778888ll, std::bit_cast<double>(0x4059000000000000ull)});
+    money.entries.push_back(CurrencyEntry{0x1111222233334444ll, 0x5555666677778888ll, 0x4059000000000000ll});
     {
         // ServerUpdateTradeItems: TradeGuid, TradeItems (its Money is the FCurrencyContainer at the named place)
         const schema::RpcSchema* rpc = pc.rpc("ServerUpdateTradeItems");

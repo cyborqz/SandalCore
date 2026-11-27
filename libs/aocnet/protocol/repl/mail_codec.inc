@@ -114,7 +114,7 @@ bool write_mail_item(emit::BunchWriter& out, const MailItem& i) {
 
 bool currency_container_fits(const CurrencyContainer& c) {
     if (c.entries.size() > kMaxMailCurrencies) return false;
-    return unique_keys(c.entries, [](const MailCurrencyEntry& e) { return std::make_tuple(e.currency, e.type_id); });
+    return unique_keys(c.entries, [](const CurrencyEntry& e) { return std::make_tuple(e.tier, e.type_id); });
 }
 
 std::optional<CurrencyContainer> read_currency_container(wire::PacketReader& r) {
@@ -122,10 +122,10 @@ std::optional<CurrencyContainer> read_currency_container(wire::PacketReader& r) 
     if (!n || *n > kMaxMailCurrencies) return std::nullopt;
     CurrencyContainer c;
     for (uint32_t i = 0; i < *n; ++i) {
-        MailCurrencyEntry e;
-        e.currency = static_cast<int64_t>(r.read_uint64());
+        CurrencyEntry e;
+        e.tier = static_cast<int64_t>(r.read_uint64());
         e.type_id = static_cast<int64_t>(r.read_uint64());
-        e.value = std::bit_cast<double>(r.read_uint64());
+        e.amount = static_cast<int64_t>(r.read_uint64());
         if (overran(r)) return std::nullopt;
         c.entries.push_back(e);
     }
@@ -136,10 +136,10 @@ std::optional<CurrencyContainer> read_currency_container(wire::PacketReader& r) 
 bool write_currency_container(emit::BunchWriter& out, const CurrencyContainer& c) {
     if (!currency_container_fits(c)) return false;
     if (!write_count(out, c.entries.size())) return false;
-    for (const MailCurrencyEntry& e : c.entries) {
-        out.write_uint64(static_cast<uint64_t>(e.currency));
+    for (const CurrencyEntry& e : c.entries) {
+        out.write_uint64(static_cast<uint64_t>(e.tier));
         out.write_uint64(static_cast<uint64_t>(e.type_id));
-        out.write_uint64(std::bit_cast<uint64_t>(e.value));
+        out.write_uint64(static_cast<uint64_t>(e.amount));
     }
     return true;
 }

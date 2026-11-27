@@ -206,6 +206,7 @@ struct AbilityRules {
 struct ItemRecord : items::ItemRarityFacts {
     int64_t              guid = 0;              // the item's record Guid (an item instance's ItemRecordId)
     std::string          name;                  // "Gear_Armor_Light_Starter_Chest"
+    int32_t              level = 1;             // the record's Level (ItemRecordBase.Level), the item minimum of a Marketplace listing fee's multiplier
     /// The record's bCanEquip: NOT what the client wears. The three starter armor pieces of every class's kit have it 0 and are
     /// worn, and 374 gear records have a slot and 0 (services/internal/content schema.go); only equip_slots decides what is worn.
     bool                 can_equip = false;
