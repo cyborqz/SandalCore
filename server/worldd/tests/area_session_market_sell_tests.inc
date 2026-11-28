@@ -48,6 +48,8 @@
 #include <thread>
 #include <vector>
 
+#include "area_session_market_db.inc"
+
 namespace market_sell_test {
 
 /// One gold a unit (100 copper a silver, 100 silver a gold).
@@ -389,7 +391,9 @@ static void test_marketplace_sell_refused_without_the_fee() {
 
 static void test_marketplace_delist_refunds_nothing() {
     std::printf("the Marketplace: a removal refunds nothing\n");
-    MarketHarness h;
+    MarketDb db;
+    db.store_character(with_start_purse(cyb_record()));
+    MarketHarness h(with_start_purse(cyb_record()), &db);
     h.play();
     h.run(milliseconds(1500));
     h.open_market(h.manager);
@@ -413,9 +417,11 @@ static void test_marketplace_delist_refunds_nothing() {
     const size_t removal_from = h.got.size();
     h.client_request(removal_request(market, listing), h.pc_ch);
     const auto removal_calls = pc_calls_since(h, removal_from);
-    CHECK(count_calls(removal_calls, "ClientMarketplaceItemRemovalResponse") == 0, "the draft answers no removal");
+    const repl::RpcCall* removed = call_named(removal_calls, "ClientMarketplaceItemRemovalResponse");
+    CHECK(removed && enum_of(*removed, "Response").value_or(9) == 0, "the removal is answered 0");
     CHECK(count_calls(removal_calls, "ClientShowCurrencyCallout") == 0, "a removal sends no money popup");
     CHECK(h.s->wallet().copper() == before - fee, "a removal refunds nothing");
+    CHECK(h.s->inventory().count_of(fi::kPotion) == 5, "the units are back in the bags");
     CHECK(!h.s->failed(), "the removal keeps the session");
 }
 

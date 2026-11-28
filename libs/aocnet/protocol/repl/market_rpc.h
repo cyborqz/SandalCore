@@ -13,6 +13,10 @@
 //          the storefront page: the market and the version of the headers the client holds
 //      ServerRequestMarketplaceData(MarketplaceActorGuid, PlayerGuid)
 //          one seller's listings (the Sell tab sends its own guid); the storefront page is the Headers call's
+//      ServerRequestMarketplaceItemPurchase(MarketplaceActorGuid, MarketplaceItemGuid, Quantity)
+//          the Buy panel's confirmed purchase: the market, the listing and the units
+//      ServerRequestMarketplaceItemRemoval(MarketplaceActorGuid, MarketplaceItemGuid)
+//          the Sell panel's Cancel Listing: the market and the listing
 //    server, on the PlayerController
 //      ClientMarketplaceItemRegistrationResponse(Item: FMarketplaceItemData, Response)
 //          the listing as it was made (Response 0) or a refusal (no Item)
@@ -20,6 +24,10 @@
 //          one storefront per seller at the market, bComplete on the last page; the version and the rarity the client knows
 //      ClientReceiveMarketplaceData(PlayerGuid, MarketplaceItemData: FMarketplaceItemData[])
 //          that seller's listings at the market
+//      ClientMarketplaceItemPurchaseResponse(MarketplaceItemGuid, Quantity, Response)
+//          the answer to a purchase: the listing and the units asked for, as the request named them, and the response (0 success)
+//      ClientMarketplaceItemRemovalResponse(MarketplaceItemGuid, Response)
+//          the answer to a removal
 //
 //  FMarketplaceItemData and FMarketplaceHeader are flattened schema structs, not NetSerialize: each field is a command and
 //  an array element holds its fields by local handle (rpc_fields.h).  The price is FCurrencyContainer (market_codec.h).
@@ -82,6 +90,19 @@ struct MarketRegistration {
     CurrencyContainer price;
 };
 
+/// ServerRequestMarketplaceItemPurchase's parameters: the market, the listing and the units asked for.
+struct MarketPurchase {
+    GuidValue market;
+    GuidValue listing;
+    int32_t   quantity = 0;
+};
+
+/// ServerRequestMarketplaceItemRemoval's parameters: the market and the listing.
+struct MarketRemoval {
+    GuidValue market;
+    GuidValue listing;
+};
+
 /// ServerRequestMarketplaceHeaders' parameters: the market and the version of the headers the client already holds.
 struct MarketHeadersRequest {
     GuidValue market;
@@ -93,6 +114,18 @@ std::optional<MarketRegistration> parse_market_registration(const RpcCall& call)
 
 /// ServerRequestMarketplaceHeaders from a decoded call; nullopt for another RPC, an undecoded call or no market.
 std::optional<MarketHeadersRequest> parse_market_headers(const RpcCall& call);
+
+/// ServerRequestMarketplaceItemPurchase from a decoded call; nullopt for another RPC, an undecoded call or a missing guid or quantity.
+std::optional<MarketPurchase> parse_market_purchase(const RpcCall& call);
+
+/// ServerRequestMarketplaceItemRemoval from a decoded call; nullopt for another RPC, an undecoded call or a missing guid.
+std::optional<MarketRemoval> parse_market_removal(const RpcCall& call);
+
+/// The purchase answer's parameters: the listing, the units asked for (the answer carries what the request named, a refusal included) and Response.
+std::optional<RpcParams> market_purchase_params(const schema::RpcSchema& rpc, const GuidValue& listing, int32_t quantity, uint8_t response);
+
+/// The removal answer's parameters: the listing and Response.
+std::optional<RpcParams> market_removal_params(const schema::RpcSchema& rpc, const GuidValue& listing, uint8_t response);
 
 /// The registration answer's parameters: the listing and Response (0: made; otherwise no Item is sent).
 std::optional<RpcParams> market_registration_params(const schema::RpcSchema& rpc, const MarketListing& listing, uint8_t response);
@@ -204,6 +237,42 @@ inline std::optional<MarketHeadersRequest> parse_market_headers(const RpcCall& c
     r.market = *market;
     r.version = rpcf::uint_or(rpcf::value_of(*call.rpc, call.params, "HeaderVersion"), 0).value_or(0);
     return r;
+}
+
+inline std::optional<MarketPurchase> parse_market_purchase(const RpcCall& call) {
+    if (!call.decoded || !call.rpc || std::string(call.rpc->name) != "ServerRequestMarketplaceItemPurchase") return std::nullopt;
+    const auto market = market_rpc_detail::read_guid(*call.rpc, call.params, "MarketplaceActorGuid");
+    const auto listing = market_rpc_detail::read_guid(*call.rpc, call.params, "MarketplaceItemGuid");
+    const auto quantity = rpcf::int_or(rpcf::value_of(*call.rpc, call.params, "Quantity"), 0);
+    if (!market || !listing || !quantity) return std::nullopt;
+    MarketPurchase r;
+    r.market = *market;
+    r.listing = *listing;
+    r.quantity = static_cast<int32_t>(*quantity);
+    return r;
+}
+
+inline std::optional<MarketRemoval> parse_market_removal(const RpcCall& call) {
+    if (!call.decoded || !call.rpc || std::string(call.rpc->name) != "ServerRequestMarketplaceItemRemoval") return std::nullopt;
+    const auto market = market_rpc_detail::read_guid(*call.rpc, call.params, "MarketplaceActorGuid");
+    const auto listing = market_rpc_detail::read_guid(*call.rpc, call.params, "MarketplaceItemGuid");
+    if (!market || !listing) return std::nullopt;
+    return MarketRemoval{*market, *listing};
+}
+
+inline std::optional<RpcParams> market_purchase_params(const schema::RpcSchema& rpc, const GuidValue& listing, int32_t quantity, uint8_t response) {
+    RpcParams params;
+    if (!market_rpc_detail::put_guid(rpc, params, "MarketplaceItemGuid", listing) || !set_rpc_param(rpc, params, "Quantity", Value::i64(quantity)) ||
+        !set_rpc_param(rpc, params, "Response", Value::u64(response))) {
+        return std::nullopt;
+    }
+    return params;
+}
+
+inline std::optional<RpcParams> market_removal_params(const schema::RpcSchema& rpc, const GuidValue& listing, uint8_t response) {
+    RpcParams params;
+    if (!market_rpc_detail::put_guid(rpc, params, "MarketplaceItemGuid", listing) || !set_rpc_param(rpc, params, "Response", Value::u64(response))) return std::nullopt;
+    return params;
 }
 
 inline std::optional<RpcParams> market_registration_params(const schema::RpcSchema& rpc, const MarketListing& l, uint8_t response) {

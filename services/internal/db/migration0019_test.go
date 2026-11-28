@@ -74,7 +74,7 @@ func jobSnapshot(t *testing.T, pool *pgxpool.Pool) []string {
 func schemaWithoutRatings(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
 	var out []string
-	const later = `'character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items', 'character_market_listings'`   // #23 (MrJambix)
+	const later = `'character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases'`   // #23 (MrJambix)
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name NOT IN (` + later + `) AND NOT (table_name = 'character_processing_jobs' AND column_name IN ('rating_xp', 'rating_quantity', 'rating_rarity')) ORDER BY 1`,

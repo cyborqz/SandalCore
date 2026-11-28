@@ -995,6 +995,15 @@ void PlayerSession::on_phase_in_ready(Connection& conn, Clock::time_point now) {
     }, conn, /*must_build=*/true);
     send_welcome(conn);   // the first chat line, behind the phase-in (session/player_chat.cpp)
     open_guild(conn);     // social, step 9: the pawn's guild component, in a chain of its own once the character is in the world (the join's chains are the retail login's)
+    // mail: a character who logs in with unread mail (a sale that landed while he was away) is told the count once, in one update of the SocialComponent behind the phase-in.  The client's map
+    // header shows its mail badge from that count (it reads it when it is built and again when it changes); the join's own chains stay as they are, and a character with none is sent nothing.
+    // The step reads the session's count when it is built, so a count that changed meanwhile is the one sent.
+    if (mail_unread_ > 0 && room_for(1)) {
+        queue("NumUnreadMail", [this](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+            if (!pb.set_num_unread_mail(mail_unread_)) return std::nullopt;
+            return pb.friends_update();
+        }, conn, /*must_build=*/false);
+    }
     // E1 stage 3 fix: the client's synchronized clock is set again once its loading frames are over (1 s and 5 s after the phase-in), then every
     // 120 s (retail's cadence). The client adds each frame's whole DeltaTime to the clock after a set, so the join's ClientSetTime, processed in
     // the first frame after the 3 s LoadMap, left the clock 3 s ahead: every cooldown ended 3 s early on the client (a play test of 2026-10-06).

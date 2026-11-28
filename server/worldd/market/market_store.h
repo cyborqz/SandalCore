@@ -4,22 +4,27 @@
 // ============================================================================
 //  market/market_store.h
 //
-//  ServiceMarketStore: the world's listings over the character service's two market calls.  The storefronts, a seller's
+//  ServiceMarketStore: the world's listings over the character service's market calls.  The storefronts, a seller's
 //  listings, the cap and a lookup read the memory indexes of market/listings.h, which this store fills with every listed row
-//  when the world gets its sink and with each listing when its save answers Ok.  The saves run on one worker thread
-//  (MarketJobs): a listing and the seller's bags and purse are written in one call, off the network thread, and the session
-//  takes the answer on a later tick.
+//  when the world gets its sink and with each step when its save answers.  The steps run on one worker thread (MarketJobs): a
+//  listing, a purchase or a removal and the character's bags and purse are written in one call, off the network thread, and the session
+//  takes the answer on a later tick.  An expiry is the world's own step: the same worker, the same retries, no session.
 //
-//  The worker settles every save: an answer that is not clear (the character service was unavailable, or failed) may mean the
-//  listing was written, so the same save is asked for again, with a growing pause, until the answer is clear.  The character
-//  service answers a listing it already holds as saved.  A world that stops with a save still undecided says so.
+//  The worker settles every step: an answer that is not clear (the character service was unavailable, or failed) may mean the
+//  step was written, so the same step is asked for again (the same request, with its own id), with a growing pause, until the answer is clear.  The
+//  character service answers a listing or a purchase it already holds as saved.  A world that stops with a step still undecided says so.
 //
-//  A world whose listings could not be read refuses registrations and shows no storefront; the worker reads them again until
+//  A listing has one step in flight at a time (a purchase, a removal or an expiry); a character has one step of a session in flight at a time.
+//
+//  A world whose listings could not be read refuses steps and shows no storefront; the worker reads them again until
 //  it succeeds, and the network thread takes the rows from the worker (poll), never reading them while the worker fills them.
 //
-//  A session that ends while its saves are in flight hands them to the store with the bags it ends with.  The world's tick
-//  (poll) takes their answers: Ok joins the listing to the cache, a refusal gives back what the listing took (give_back.h), and
-//  then the bags are written through the ordinary saver, after the listing.
+//  A session that ends while its steps are in flight hands them to the store with the bags it ends with.  The world's tick
+//  (poll) takes their answers: a stored one joins the cache, a refused one gives back what the step took (give_back.h) or, for a purchase
+//  or a removal, takes the bags the session left for that case, and then the bags are written through the ordinary saver, after the step.
+//
+//  The expiry sweep (poll, every minute and once when the listings are read): the listings whose time has come are expired one call
+//  each on the worker, never on the tick; a seller who is online is told of the new mail (set_mail_note).
 // ============================================================================
 #pragma once
 
@@ -35,6 +40,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -52,10 +58,14 @@
 
 namespace aoc::worldd::market {
 
+/// How many listings one sweep expires, and how often the sweep looks (the listings past their time wait for the next one).
+inline constexpr size_t kSweepBatch = 20;
+inline constexpr std::chrono::seconds kSweepEvery{60};
+
 /// One worker thread for a world's market calls: the character service's call may take seconds, and the network thread only submits it and takes the answer on a later tick.
 /// The calls go in the order they were submitted.  A call the service does not answer clearly is not tried again in a loop: it goes to the back of the queue with a pause that
-/// grows to a cap, so one stuck call never keeps the calls of other characters waiting.  A seller has at most one save in flight at a time (the session refuses a second
-/// listing, and the world refuses one while an ended session's save is unfinished), so a seller's saves still go in the order they were made.
+/// grows to a cap, so one stuck call never keeps the calls of other characters waiting.  A character has at most one step in flight at a time (the session refuses a second one,
+/// and the world refuses one while an ended session's step is unfinished), so a character's steps still go in the order they were made.
 class MarketJobs {
 public:
     MarketJobs() : thread_([this] { run(); }) {}
@@ -65,9 +75,9 @@ public:
             stop_ = true;
             ++changed_;
             for (const Job& job : jobs_) {
-                if (job.load) continue;
-                if (job.attempt == 0) log_undecided(job.save, "it was never sent, so the stack stays in the seller's saved bags");
-                else log_undecided(job.save, "the character service may or may not hold it");
+                if (job.kind == Kind::Load) continue;
+                if (job.attempt == 0) log_undecided(job, "it was never sent, so nothing is changed");
+                else log_undecided(job, "the character service may or may not hold it");
             }
             jobs_.clear();
         }
@@ -79,16 +89,30 @@ public:
 
     /// Queues a listing's save.  Its answer is a clear one: the worker asks again until it has one.
     uint64_t submit(ListingSave save, PositionSink* sink) {
-        std::lock_guard<std::mutex> lock(mu_);
-        const uint64_t ticket = next_++;
-        if (stop_) {
-            done_[ticket] = ListingSaveAnswer{svc::CallStatus::Refused, "the market worker is stopping"};
-            return ticket;
-        }
-        jobs_.push_back(Job{ticket, false, std::move(save), sink});
-        ++changed_;
-        cv_.notify_one();
-        return ticket;
+        Job job;
+        job.kind = Kind::Register;
+        job.save = std::move(save);
+        return enqueue(std::move(job), sink);
+    }
+    /// Queues a purchase, a removal or an expiry the same way.
+    uint64_t submit_buy(svc::BuyRequest request, PositionSink* sink) {
+        Job job;
+        job.kind = Kind::Buy;
+        job.buy = std::move(request);
+        return enqueue(std::move(job), sink);
+    }
+    uint64_t submit_remove(svc::RemoveRequest request, PositionSink* sink) {
+        Job job;
+        job.kind = Kind::Remove;
+        job.remove = std::move(request);
+        return enqueue(std::move(job), sink);
+    }
+    uint64_t submit_expire(std::string listing_id, std::string item_name, PositionSink* sink) {
+        Job job;
+        job.kind = Kind::Expire;
+        job.expire_id = std::move(listing_id);
+        job.expire_name = std::move(item_name);
+        return enqueue(std::move(job), sink);
     }
 
     /// Queues a read of every listed row, which the worker asks for again until it answers Ok.
@@ -96,7 +120,11 @@ public:
         std::lock_guard<std::mutex> lock(mu_);
         const uint64_t ticket = next_++;
         if (!stop_) {
-            jobs_.push_back(Job{ticket, true, ListingSave{}, sink});
+            Job job;
+            job.ticket = ticket;
+            job.kind = Kind::Load;
+            job.sink = sink;
+            jobs_.push_back(std::move(job));
             ++changed_;
             cv_.notify_one();
         }
@@ -132,22 +160,60 @@ public:
 private:
     using Clock = std::chrono::steady_clock;
 
+    enum class Kind : uint8_t { Register, Buy, Remove, Expire, Load };
+
     struct Job {
-        uint64_t       ticket = 0;
-        bool           load = false;   // a read of the listings; otherwise a listing's save
-        ListingSave    save;
-        PositionSink*  sink = nullptr;
-        int            attempt = 0;    // the tries that were not answered clearly
+        uint64_t          ticket = 0;
+        Kind              kind = Kind::Register;
+        ListingSave       save;          // Register
+        svc::BuyRequest   buy;           // Buy
+        svc::RemoveRequest remove;       // Remove
+        std::string       expire_id;     // Expire
+        std::string       expire_name;
+        PositionSink*     sink = nullptr;
+        int               attempt = 0;    // the tries that were not answered clearly
         Clock::time_point not_before{};   // the next try waits for this
     };
 
     /// The pause before try n + 1 is n times the sink's retry delay, up to this many.
     static constexpr int kLongestPause = 5;
 
-    static void log_undecided(const ListingSave& save, const char* why) {
-        spdlog::error("[market] stopping with listing {} undecided: seller {} ({}), stack {} x{} of item {}, fee {} copper; {}", items::guid_hex(save.listing.guid),
-                      items::guid_hex(save.listing.seller), save.listing.seller_name, save.listing.item.instance_guid, save.listing.item.quantity,
-                      save.listing.item.item_record_id, save.fee, why);
+    uint64_t enqueue(Job job, PositionSink* sink) {
+        std::lock_guard<std::mutex> lock(mu_);
+        const uint64_t ticket = next_++;
+        if (stop_) {
+            done_[ticket] = ListingSaveAnswer{svc::CallStatus::Refused, "the market worker is stopping", svc::MarketOutcome::Unspecified, 0, {}};
+            return ticket;
+        }
+        job.ticket = ticket;
+        job.sink = sink;
+        jobs_.push_back(std::move(job));
+        ++changed_;
+        cv_.notify_one();
+        return ticket;
+    }
+
+    static void log_undecided(const Job& job, const char* why) {
+        switch (job.kind) {
+        case Kind::Register:
+            spdlog::error("[market] stopping with listing {} undecided: seller {} ({}), stack {} x{} of item {}, fee {} copper; {}", items::guid_hex(job.save.listing.guid),
+                          items::guid_hex(job.save.listing.seller), job.save.listing.seller_name, job.save.listing.item.instance_guid, job.save.listing.item.quantity,
+                          job.save.listing.item.item_record_id, job.save.fee, why);
+            break;
+        case Kind::Buy:
+            spdlog::error("[market] stopping with purchase {} undecided: buyer {} bought {} unit(s) of listing {} at {} copper each, tax {} copper; {}", job.buy.purchase_id,
+                          job.buy.character_id, job.buy.quantity, job.buy.listing_id, job.buy.price_per_unit, job.buy.tax, why);
+            break;
+        case Kind::Remove:
+            spdlog::error("[market] stopping with the removal of listing {} undecided: seller {} takes back {} unit(s); {}", job.remove.listing_id, job.remove.character_id,
+                          job.remove.expected_quantity, why);
+            break;
+        case Kind::Expire:
+            spdlog::error("[market] stopping with the expiry of listing {} undecided; {}", job.expire_id, why);
+            break;
+        case Kind::Load:
+            break;
+        }
     }
 
     /// Runs the first call whose time has come, one try at a time; a call that was not answered clearly goes to the back of the queue, to be tried again after its pause.
@@ -174,11 +240,11 @@ private:
             Job job = std::move(*due);
             jobs_.erase(due);
             lock.unlock();
-            const bool again = job.load ? load_once(job) : save_once_and_settle(job);
+            const bool again = job.kind == Kind::Load ? load_once(job) : step_once_and_settle(job);
             lock.lock();
             if (!again) continue;
             if (stop_) {   // the world stopped while the call was undecided
-                if (!job.load) log_undecided(job.save, "the character service may or may not hold it");
+                if (job.kind != Kind::Load) log_undecided(job, "the character service may or may not hold it");
                 return;
             }
             ++job.attempt;
@@ -194,7 +260,7 @@ private:
     }
 
     /// One try of a listing's save: the same listing, the same bags and the same purse every time.
-    static ListingSaveAnswer save_once(const Job& job) {
+    static ListingSaveAnswer register_once(const Job& job) {
         ListingSaveAnswer answer;
         if (!job.sink) {
             answer.status = svc::CallStatus::Refused;   // nothing can have been written
@@ -215,19 +281,84 @@ private:
                                                                                      job.save.warehouse, listing);
         answer.status = saved.status;
         answer.reason = saved.reason;
+        if (saved.status == svc::CallStatus::Ok) answer.outcome = saved.already_saved ? svc::MarketOutcome::Replayed : svc::MarketOutcome::Done;
         return answer;
     }
 
-    /// One try of a listing's save.  True when the answer was not clear: the outcome stays unknown, nothing is given back, and the save is asked for again.
-    bool save_once_and_settle(Job& job) {
-        ListingSaveAnswer answer = save_once(job);
+    static ListingSaveAnswer buy_once(const Job& job) {
+        ListingSaveAnswer answer;
+        if (!job.sink) {
+            answer.status = svc::CallStatus::Refused;
+            answer.reason = "the world has no character service";
+            return answer;
+        }
+        const svc::BuyResult result = job.sink->buy_listing_now(job.buy);
+        answer.status = result.status;
+        answer.reason = result.reason;
+        answer.outcome = result.outcome;
+        answer.available = result.available;
+        answer.seller_id = result.seller_id;
+        return answer;
+    }
+
+    static ListingSaveAnswer remove_once(const Job& job) {
+        ListingSaveAnswer answer;
+        if (!job.sink) {
+            answer.status = svc::CallStatus::Refused;
+            answer.reason = "the world has no character service";
+            return answer;
+        }
+        const svc::RemoveResult result = job.sink->remove_listing_now(job.remove);
+        answer.status = result.status;
+        answer.reason = result.reason;
+        answer.outcome = result.outcome;
+        answer.available = result.available;
+        return answer;
+    }
+
+    static ListingSaveAnswer expire_once(const Job& job) {
+        ListingSaveAnswer answer;
+        if (!job.sink) {
+            answer.status = svc::CallStatus::Refused;
+            answer.reason = "the world has no character service";
+            return answer;
+        }
+        const svc::ExpireResult result = job.sink->expire_listing_now(job.expire_id, job.expire_name);
+        answer.status = result.status;
+        answer.reason = result.reason;
+        answer.outcome = result.outcome;
+        answer.seller_id = result.seller_id;
+        return answer;
+    }
+
+    static const char* kind_name(Kind kind) {
+        switch (kind) {
+        case Kind::Register: return "listing save";
+        case Kind::Buy: return "purchase";
+        case Kind::Remove: return "removal";
+        case Kind::Expire: return "expiry";
+        case Kind::Load: return "read";
+        }
+        return "step";
+    }
+
+    /// One try of a step.  True when the answer was not clear: the outcome stays unknown, nothing is given back, and the same step is asked for again.
+    bool step_once_and_settle(Job& job) {
+        ListingSaveAnswer answer;
+        switch (job.kind) {
+        case Kind::Register: answer = register_once(job); break;
+        case Kind::Buy: answer = buy_once(job); break;
+        case Kind::Remove: answer = remove_once(job); break;
+        case Kind::Expire: answer = expire_once(job); break;
+        case Kind::Load: return false;
+        }
         if (is_clear(answer.status)) {
             std::lock_guard<std::mutex> lock(mu_);
             if (forgotten_.erase(job.ticket) == 0) done_[job.ticket] = std::move(answer);
             return false;
         }
         if (job.attempt == 0 || (job.attempt + 1) % 12 == 0) {   // (a service that stays down is said so once a minute or so, not at every try)
-            spdlog::warn("[market] the save of listing {} was not answered clearly ({}: {}): it is asked for again (try {} was this one)", items::guid_hex(job.save.listing.guid),
+            spdlog::warn("[market] the {} (ticket {}) was not answered clearly ({}: {}): it is asked for again (try {} was this one)", kind_name(job.kind), job.ticket,
                          svc::call_status_name(answer.status), answer.reason, job.attempt + 1);
         }
         return true;
@@ -267,15 +398,15 @@ private:
     std::thread                             thread_;   // last: it starts once every other member is built
 };
 
-/// The world's listings over the character service.  The memory indexes are the cache the window reads; every save is submitted to the worker, and a listing joins the cache
-/// when the answer to its save is taken, and only when it is Ok.
+/// The world's listings over the character service.  The memory indexes are the cache the window reads; every step is submitted to the worker, and its effect on the cache is
+/// made when the answer to it is taken: a listing joins when its save is stored, loses units (or goes) when a purchase or a removal is stored, and goes when an expiry is.
 class ServiceMarketStore final : public MarketStore {
 public:
     ServiceMarketStore() = default;
     ~ServiceMarketStore() override = default;
 
     /// The world's sink, the content database the item names come from, and the world's time now (seconds since the server started).  Reads every listed row when the world
-    /// gets its sink; a failed read leaves the store not loaded, so no registration is made and no storefront answers until the worker's later read succeeds (poll takes its
+    /// gets its sink; a failed read leaves the store not loaded, so no step is made and no storefront answers until the worker's later read succeeds (poll takes its
     /// rows).  A later call with the same sink does not read again.
     void attach(PositionSink* sink, const content::ContentDb* content, double world_now) {
         if (!sink) return;
@@ -305,10 +436,21 @@ public:
     const Listing* find(const ::aoc::protocol::repl::GuidValue& guid) const override { return cache_.find(guid); }
     size_t size() const override { return cache_.size(); }
 
-    /// Says whether a log-in of a character has marked it and is waiting to be applied (PlayerWorld::login_pending).  A listing of such a character is not saved: the log-in
+    /// The rate of the sales tax of `node`: the rate its row stored when the listings were read, or the game's default.  Each node's rate is read once, with the listings.
+    float node_rate(int64_t node) const override {
+        const auto it = rates_.find(node);
+        return it == rates_.end() ? kDefaultTaxRate : it->second;
+    }
+    bool listing_busy(const ::aoc::protocol::repl::GuidValue& guid) const override { return busy_listings_.count(key_of(guid)) != 0; }
+
+    /// Says whether a log-in of a character has marked it and is waiting to be applied (PlayerWorld::login_pending).  A step of such a character is not saved: the log-in
     /// waits for the saves the world holds (PlayerWorld::character_writes_pending) and then reads the bags, so a save that began after that look would be written under the bags
     /// the log-in read.  Set once by the world; asked on the network thread.
     void set_login_check(std::function<bool(const std::string& character_id)> pending) { login_pending_ = std::move(pending); }
+
+    /// Says what to do when a character's mail changed because of a sale or an expiry (the world tells that character's session, if it is online).  Called on the thread that takes
+    /// the answer (a session's tick, or the world's poll).
+    void set_mail_note(std::function<void(const std::string& character_id)> note) { mail_note_ = std::move(note); }
 
     /// Queues one listing's save on the worker; its ticket names the answer.  0: the store cannot save it (no sink, the listings not read, or a log-in of the seller waits).
     /// The save is counted BEFORE the log-in mark is looked at, and the log-in marks BEFORE it looks at the count, so one of them always sees the other: the log-in finds this save
@@ -323,9 +465,27 @@ public:
             return 0;
         }
         const uint64_t ticket = jobs().submit(std::move(save), sink_);
-        submitted_[ticket] = listing;
+        submitted_[ticket] = Submitted{Op::Register, listing, listing.item.quantity, seller};
         return ticket;
     }
+    /// Queues a purchase or a removal the same way (the character is the buyer or the seller), and marks the listing busy until the answer is taken.
+    uint64_t submit_buy(svc::BuyRequest request, const Listing& listing) override {
+        const std::string character = request.character_id;
+        const int32_t quantity = request.quantity;
+        return submit_step(Op::Buy, character, listing, quantity, [&] { return jobs().submit_buy(std::move(request), sink_); });
+    }
+    uint64_t submit_remove(svc::RemoveRequest request, const Listing& listing) override {
+        const std::string character = request.character_id;
+        const int32_t quantity = request.expected_quantity;
+        return submit_step(Op::Remove, character, listing, quantity, [&] { return jobs().submit_remove(std::move(request), sink_); });
+    }
+    /// An expiry the world asks for at once (a purchase or a removal named a listing past its time): queued unless a step of the listing is in flight.
+    void sweep_now(const ::aoc::protocol::repl::GuidValue& guid) override {
+        if (!sink_ || !loaded_) return;
+        const Listing* l = cache_.find(guid);
+        if (l) submit_expiry(*l);
+    }
+
     bool take_listing(uint64_t ticket, ListingSaveAnswer& out) override {
         std::string character;
         if (!take_one(ticket, out, &character)) return false;
@@ -335,7 +495,8 @@ public:
     void forget_listing(uint64_t ticket) override {
         const auto it = submitted_.find(ticket);
         if (it != submitted_.end()) {
-            release(items::guid_hex(it->second.seller), 1);
+            release(it->second.character, 1);
+            busy_listings_.erase(key_of(it->second.listing.guid));
             submitted_.erase(it);
         }
         if (jobs_) jobs_->forget(ticket);
@@ -354,7 +515,7 @@ public:
     bool busy(const ::aoc::protocol::repl::GuidValue& seller) const override {
         return std::any_of(orphans_.begin(), orphans_.end(), [&](const Orphan& o) { return o.seller == seller; });
     }
-    /// A character's saves that have no answer taken, and the bags of a session that ended with some not queued yet: counted when a save is submitted and released when its
+    /// A character's steps that have no answer taken, and the bags of a session that ended with some not queued yet: counted when a step is submitted and released when its
     /// answer is taken (a session's own) or when the bags are queued in the sink (an ended session's: poll releases after write_bags, so the sink's own busy check sees the write from
     /// then on).  The log-in thread reads this (PlayerWorld::character_writes_pending, first of its three checks), so the counts have their own lock.
     bool saving(const std::string& character_id) const override {
@@ -363,9 +524,9 @@ public:
         return it != open_saves_.end() && it->second > 0;
     }
 
-    /// The world's own step (PlayerWorld::tick_world, at the world's time `world_now`): takes the rows a failed first read was asked for again, and the answers of the saves
-    /// whose session ended.  With every answer of an ended session taken, its bags are written through the sink: after the listings, with the units and the fee given back for
-    /// a refused one.
+    /// The world's own step (PlayerWorld::tick_world, at the world's time `world_now`): takes the rows a failed first read was asked for again, the answers of the steps
+    /// whose session ended, the answers of the expiries, and makes the expiry sweep.  With every answer of an ended session taken, its bags are written through the sink: after the
+    /// steps, with what a refused step took given back.
     void poll(const items::ItemCatalog* catalog, double world_now) {
         take_loaded(world_now);
         for (size_t i = 0; i < orphans_.size();) {
@@ -373,10 +534,17 @@ public:
             while (!orphan.listings.empty()) {
                 ListingSaveAnswer answer;
                 if (!take_one(orphan.listings.front().ticket, answer)) break;
-                if (answer.status != svc::CallStatus::Ok) {
-                    spdlog::info("[market] {}: a listing's save was refused after its session ended ({}: {}): the units and the fee go back into the bags", orphan.listings.front().listing.seller_name,
-                                 svc::call_status_name(answer.status), answer.reason);
-                    orphan.refused.push_back(orphan.listings.front());
+                if (!answer.stored()) {
+                    const PendingListing& step = orphan.listings.front();
+                    if (step.kind == StepKind::Register) {
+                        spdlog::info("[market] {}: a listing's save was refused after its session ended ({}: {}): the units and the fee go back into the bags", step.listing.seller_name,
+                                     svc::call_status_name(answer.status), answer.reason);
+                        orphan.refused.push_back(step);
+                    } else {
+                        spdlog::info("[market] {}: a {} was refused after its session ended ({}: {}): the bags go back to what they were", step.listing.seller_name,
+                                     step.kind == StepKind::Buy ? "purchase" : "removal", svc::call_status_name(answer.status), answer.reason);
+                        orphan.without = step.without;
+                    }
                 }
                 orphan.listings.erase(orphan.listings.begin());
             }
@@ -388,9 +556,11 @@ public:
             release(orphan.character_id, orphan.held);
             orphans_.erase(orphans_.begin() + static_cast<std::ptrdiff_t>(i));
         }
+        take_expiries();
+        sweep(world_now);
     }
 
-    /// When the world stops: polls until every ended session's saves are finished and its bags written, or `max_wait` has passed.
+    /// When the world stops: polls until every ended session's steps are finished and its bags written, or `max_wait` has passed.
     void settle(std::chrono::milliseconds max_wait, const items::ItemCatalog* catalog, double world_now) {
         const auto end = std::chrono::steady_clock::now() + max_wait;
         for (;;) {
@@ -400,13 +570,32 @@ public:
         }
     }
 
+    /// A test's hook: the sweep looks at the next poll instead of in a minute.
+    void sweep_at_next_poll() { next_sweep_ = std::chrono::steady_clock::time_point{}; }
+    /// The expiries in flight (a test waits for 0).
+    size_t expiring() const { return expiring_.size(); }
+
 private:
-    /// The saves of a session that ended, and the bags it ended with.
+    enum class Op : uint8_t { Register, Buy, Remove, Expire };
+    using ListingKey = std::array<uint32_t, 4>;
+
+    static ListingKey key_of(const ::aoc::protocol::repl::GuidValue& g) { return {g.a, g.b, g.c, g.d}; }
+
+    /// A step the worker has and the cache has not applied yet: what it is, the listing as it was when the step was made, the units it moves and the character whose bags it writes.
+    struct Submitted {
+        Op          op = Op::Register;
+        Listing     listing;
+        int32_t     quantity = 0;
+        std::string character;   // the character counted in open_saves_ (empty: none)
+    };
+
+    /// The steps of a session that ended, and the bags it ended with.
     struct Orphan {
         std::string                      character_id;
         ::aoc::protocol::repl::GuidValue seller;
         std::vector<PendingListing>      listings;   // not answered yet, oldest first
-        std::vector<PendingListing>      refused;    // answered with a refusal: to give back
+        std::vector<PendingListing>      refused;    // listing saves answered with a refusal: to give back
+        std::optional<BagSnapshot>       without;    // a purchase or a removal was refused: the bags the character ends with instead
         BagSnapshot                      bags;
         size_t                           held = 0;   // the saves this ended session still has counted in open_saves_
     };
@@ -416,16 +605,111 @@ private:
         return *jobs_;
     }
 
-    /// Takes a save's answer; an Ok answer joins the listing to the cache at once.  `character` gets the seller's id (empty for an unknown ticket).
+    /// The part the steps of a purchase and of a removal have in common: the listing is not busy, the character has no log-in waiting, then the call is queued by `queue`.
+    template <class Queue>
+    uint64_t submit_step(Op op, const std::string& character, const Listing& listing, int32_t quantity, Queue queue) {
+        if (!sink_ || !loaded_) return 0;
+        if (busy_listings_.count(key_of(listing.guid)) != 0) return 0;
+        hold(character, 1);
+        if (login_pending_ && login_pending_(character)) {
+            release(character, 1);
+            return 0;
+        }
+        const uint64_t ticket = queue();
+        busy_listings_.insert(key_of(listing.guid));
+        submitted_[ticket] = Submitted{op, listing, quantity, character};
+        return ticket;
+    }
+
+    /// Queues the expiry of one listing on the worker unless a step of it is in flight.
+    void submit_expiry(const Listing& listing) {
+        if (busy_listings_.count(key_of(listing.guid)) != 0) return;
+        const uint64_t ticket = jobs().submit_expire(items::guid_hex(listing.guid), listing.item_name, sink_);
+        busy_listings_.insert(key_of(listing.guid));
+        expiring_[ticket] = Submitted{Op::Expire, listing, listing.item.quantity, std::string()};
+    }
+
+    /// What the cache does with the answer to a step.
+    void apply(const Submitted& step, const ListingSaveAnswer& answer) {
+        const ::aoc::protocol::repl::GuidValue& guid = step.listing.guid;
+        const auto now_in_cache = [&]() { return cache_.find(guid); };
+        const auto note = [&]() {
+            if (!mail_note_) return;
+            const std::string seller = answer.seller_id.empty() ? items::guid_hex(step.listing.seller) : answer.seller_id;
+            mail_note_(seller);
+        };
+        if (step.op == Op::Register) {
+            if (answer.stored()) cache_.add(step.listing);
+            return;
+        }
+        if (answer.stored()) {
+            if (step.op == Op::Buy) {
+                const Listing* l = now_in_cache();
+                if (l) {
+                    if (step.quantity >= l->item.quantity) cache_.remove(guid);
+                    else cache_.set_quantity(guid, l->item.quantity - step.quantity);
+                }
+                note();
+            } else if (step.op == Op::Remove) {
+                cache_.remove(guid);
+            } else {
+                cache_.remove(guid);
+                note();
+            }
+            return;
+        }
+        if (answer.status != svc::CallStatus::Ok) return;   // a refusal of the request itself says nothing of the listing
+        switch (answer.outcome) {
+        case svc::MarketOutcome::ListingGone: cache_.remove(guid); break;   // the database does not list it any more: sold out, removed, or expired and mailed
+        case svc::MarketOutcome::Quantity:
+            if (answer.available > 0) cache_.set_quantity(guid, answer.available);
+            else cache_.remove(guid);
+            break;
+        default: break;
+        }
+    }
+
+    /// Takes a step's answer and applies it to the cache.  `character` gets the id the step counts under (empty for an unknown ticket).
     bool take_one(uint64_t ticket, ListingSaveAnswer& out, std::string* character = nullptr) {
         if (!jobs_ || !jobs_->take(ticket, out)) return false;
         const auto it = submitted_.find(ticket);
         if (it != submitted_.end()) {
-            if (character) *character = items::guid_hex(it->second.seller);
-            if (out.status == svc::CallStatus::Ok) cache_.add(it->second);
+            if (character) *character = it->second.character;
+            apply(it->second, out);
+            busy_listings_.erase(key_of(it->second.listing.guid));
             submitted_.erase(it);
         }
         return true;
+    }
+
+    /// The answers of the expiries the sweep asked for.
+    void take_expiries() {
+        if (!jobs_) return;
+        for (auto it = expiring_.begin(); it != expiring_.end();) {
+            ListingSaveAnswer answer;
+            if (!jobs_->take(it->first, answer)) {
+                ++it;
+                continue;
+            }
+            apply(it->second, answer);
+            if (answer.stored()) {
+                spdlog::info("[market] the listing {} of {} ({} x{}) ended: the seller is mailed the stack", items::guid_hex(it->second.listing.guid), it->second.listing.seller_name,
+                             it->second.listing.item_name, it->second.listing.item.quantity);
+            } else if (answer.status == svc::CallStatus::Ok && answer.outcome == svc::MarketOutcome::NotExpired) {
+                spdlog::debug("[market] the listing {} is not due on the database's clock yet: the next sweep tries again", items::guid_hex(it->second.listing.guid));
+            }
+            busy_listings_.erase(key_of(it->second.listing.guid));
+            it = expiring_.erase(it);
+        }
+    }
+
+    /// The expiry sweep: once the listings are read, then every kSweepEvery, the listings past their time (on the synchronized clock) are expired, a batch at a time.
+    void sweep(double world_now) {
+        if (!loaded_ || !sink_) return;
+        const auto steady = std::chrono::steady_clock::now();
+        if (steady < next_sweep_) return;
+        next_sweep_ = steady + kSweepEvery;
+        for (const Listing& l : cache_.expired(bootstrap::effect_clock(world_now), kSweepBatch)) submit_expiry(l);
     }
 
     void hold(const std::string& character, size_t n) {
@@ -449,9 +733,13 @@ private:
         fill(result, world_now);
     }
 
-    /// Writes the bags of an ended session through the sink, once the answers of its saves are in; a refused save's units and fee are put back first.
+    /// Writes the bags of an ended session through the sink, once the answers of its steps are in; a refused listing's units and fee are put back first, and a refused purchase or
+    /// removal leaves the bags the session set aside for that case.
     void write_bags(Orphan& orphan, const items::ItemCatalog* catalog) {
         BagSnapshot& bags = orphan.bags;
+        if (orphan.without) {
+            bags = *orphan.without;
+        }
         if (!orphan.refused.empty()) {
             const NoItemCatalog none;
             const items::ItemCatalog& known = catalog ? *catalog : static_cast<const items::ItemCatalog&>(none);
@@ -481,6 +769,14 @@ private:
     void fill(const svc::MarketListingsResult& result, double world_now) {
         const int64_t unix_now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         cache_.clear();
+        rates_.clear();
+        for (const svc::NodeMarketTax& tax : result.node_taxes) {
+            if (tax.node == 0 || !valid_tax_rate(tax.rate)) {
+                spdlog::warn("[market] a stored sales tax of node {} has the rate {}: the game's default {} is charged there", tax.node, tax.rate, kDefaultTaxRate);
+                continue;
+            }
+            rates_[tax.node] = tax.rate;
+        }
         for (const svc::MarketListing& row : result.listings) {
             const std::optional<::aoc::protocol::repl::GuidValue> seller = items::guid_of(row.seller_id);
             const std::optional<::aoc::protocol::repl::GuidValue> guid = items::guid_of(row.id);
@@ -504,7 +800,8 @@ private:
             cache_.add(listing);
         }
         loaded_ = true;
-        spdlog::info("[market] {} saved listing(s) read", cache_.size());
+        next_sweep_ = std::chrono::steady_clock::time_point{};   // the listings that ended while the world was down are expired at the first poll
+        spdlog::info("[market] {} saved listing(s) read, {} node rate(s)", cache_.size(), rates_.size());
     }
 
     static std::string item_name(int64_t record_id, const content::ContentDb* content) {
@@ -519,11 +816,16 @@ private:
     const content::ContentDb*      content_ = nullptr;
     bool                           loaded_ = false;
     MemoryMarketStore              cache_;
-    std::map<uint64_t, Listing>    submitted_;    // the listing of each save the worker has not answered, or the session has not taken
-    std::vector<Orphan>            orphans_;      // the saves of sessions that ended, oldest first
+    std::map<int64_t, float>       rates_;        // the stored rate of each node that has one
+    std::map<uint64_t, Submitted>  submitted_;    // each step the worker has not answered, or the session has not taken
+    std::map<uint64_t, Submitted>  expiring_;     // the expiries the worker has not answered, or the sweep has not taken
+    std::set<ListingKey>           busy_listings_; // the listings a purchase, a removal or an expiry is in flight for
+    std::vector<Orphan>            orphans_;      // the steps of sessions that ended, oldest first
     mutable std::mutex             gate_mu_;      // guards open_saves_, which the log-in thread reads
-    std::map<std::string, int>     open_saves_;   // by character id: the saves with no answer taken, and the saves of ended sessions whose bags are not queued
+    std::map<std::string, int>     open_saves_;   // by character id: the steps with no answer taken, and the steps of ended sessions whose bags are not queued
     std::function<bool(const std::string&)> login_pending_;   // a log-in of the character waits to be applied (see set_login_check)
+    std::function<void(const std::string&)> mail_note_;       // a character's mail changed (see set_mail_note)
+    std::chrono::steady_clock::time_point next_sweep_{};
     uint64_t                       load_ticket_ = 0;
     std::unique_ptr<MarketJobs>    jobs_;
 };

@@ -25,3 +25,7 @@
 #include "area_session_market_tests.inc"
 #include "area_session_market_sell_tests.inc"
 #include "area_session_market_window_tests.inc"
+#include "area_session_market_sales_tests.inc"
+#include "area_session_market_cart_tests.inc"
+#include "area_session_market_materials_tests.inc"
+#include "area_session_market_unread_tests.inc"

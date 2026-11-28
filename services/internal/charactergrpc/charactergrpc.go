@@ -140,6 +140,24 @@ type MarketStore interface {
 
 var _ MarketStore = (*character.Store)(nil)
 
+// MailMoneyStore is the part of character.Store that takes a mail's money into the purse with the claim (migration 0031). A store without it refuses a claim of money.
+type MailMoneyStore interface {
+	ClaimMail(ctx context.Context, id string, claims []character.MailClaim, moneyMails []character.MoneyClaim, bags character.ClaimBags) (character.ClaimResult, error)
+}
+
+var _ MailMoneyStore = (*character.Store)(nil)
+
+// MarketSalesStore is the part of character.Store that stores the Marketplace's purchases, removals and expiries and keeps the nodes' sales tax (migration 0031). A store
+// without it refuses the three calls and sends no node's rate.
+type MarketSalesStore interface {
+	BuyListing(ctx context.Context, r character.BuyRequest) (character.BuyResult, error)
+	RemoveListing(ctx context.Context, r character.RemoveRequest) (character.RemoveResult, error)
+	ExpireListing(ctx context.Context, listingID, itemName string) (character.ExpireResult, error)
+	NodeMarketTaxes(ctx context.Context) ([]character.NodeMarketTax, error)
+}
+
+var _ MarketSalesStore = (*character.Store)(nil)
+
 // NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
 // character). A store without it cannot answer GetCharacterByName.
 type NameStore interface {
@@ -581,7 +599,9 @@ func (s *Server) CreateMail(ctx context.Context, r *characterv1.CreateMailReques
 
 // ClaimMailItems claims attachments into the bags in one transaction (see character.Store.ClaimMailItems): the bags and the claimed marks are written together or not at
 // all. NotFound for an unknown character, mail or attachment (another character's mail looks the same); AlreadyExists for an attachment claimed before by a request with other
-// bags; InvalidArgument, with nothing changed, for names or bags the rules refuse. A request that repeats an earlier one whole answers Ok with replayed set.
+// bags, and for a mail whose money is another amount than the one the request credited (money_expected_copper: a sale was added to the mail meanwhile); InvalidArgument, with
+// nothing changed, for names or bags the rules refuse, and for money mail ids that do not each have an expected amount. A request that repeats an earlier one whole answers Ok
+// with replayed set.
 func (s *Server) ClaimMailItems(ctx context.Context, r *characterv1.ClaimMailItemsRequest) (*characterv1.ClaimMailItemsResponse, error) {
 	ms, ok := s.store.(MailStore)
 	if !ok {
@@ -595,11 +615,40 @@ func (s *Server) ClaimMailItems(ctx context.Context, r *characterv1.ClaimMailIte
 	for _, c := range r.GetClaims() {
 		claims = append(claims, character.MailClaim{MailID: c.GetMailId(), InstanceGUID: c.GetInstanceGuid()})
 	}
+	bags, err := claimBagsOf(inv)
+	if err != nil {
+		return nil, err
+	}
+	if len(r.GetMoneyExpectedCopper()) != len(r.GetMoneyMailIds()) {
+		return nil, status.Errorf(codes.InvalidArgument, "%d money mail ids but %d expected amounts: each money names the copper it credits", len(r.GetMoneyMailIds()), len(r.GetMoneyExpectedCopper()))
+	}
+	var res character.ClaimResult
+	if len(r.GetMoneyMailIds()) > 0 {
+		mm, ok := s.store.(MailMoneyStore)
+		if !ok {
+			return nil, status.Error(codes.Unimplemented, "this character store keeps no mail money")
+		}
+		money := make([]character.MoneyClaim, 0, len(r.GetMoneyMailIds()))
+		for i, id := range r.GetMoneyMailIds() {
+			money = append(money, character.MoneyClaim{MailID: id, Copper: r.GetMoneyExpectedCopper()[i]})
+		}
+		res, err = mm.ClaimMail(ctx, r.GetCharacterId(), claims, money, bags)
+	} else {
+		res, err = ms.ClaimMailItems(ctx, r.GetCharacterId(), claims, bags)
+	}
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.ClaimMailItemsResponse{Claimed: int32(res.Claimed), Replayed: res.Replayed}, nil
+}
+
+// claimBagsOf reads the bags a claim or a Marketplace step carries (the items, and the purse, jobs, recipes and warehouse when their replace flags say so).
+func claimBagsOf(inv *characterv1.SaveInventoryRequest) (character.ClaimBags, error) {
 	bags := character.ClaimBags{Items: make([]character.Item, 0, len(inv.GetItems()))}
 	for i, it := range inv.GetItems() {
 		item, err := fromProtoItem(it)
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "item %d: %s", i, err)
+			return character.ClaimBags{}, status.Errorf(codes.InvalidArgument, "item %d: %s", i, err)
 		}
 		bags.Items = append(bags.Items, item)
 	}
@@ -625,11 +674,7 @@ func (s *Server) ClaimMailItems(ctx context.Context, r *characterv1.ClaimMailIte
 			bags.Warehouse = append(bags.Warehouse, fromProtoWarehouse(w))
 		}
 	}
-	res, err := ms.ClaimMailItems(ctx, r.GetCharacterId(), claims, bags)
-	if err != nil {
-		return nil, toStatus(ctx, err)
-	}
-	return &characterv1.ClaimMailItemsResponse{Claimed: int32(res.Claimed), Replayed: res.Replayed}, nil
+	return bags, nil
 }
 
 // SaveInventoryAndListing writes the seller's bags, wallet, jobs, recipes and warehouse AND one Market listing in one transaction (migration 0030). NotFound for
@@ -666,7 +711,7 @@ func (s *Server) SaveInventoryAndListing(ctx context.Context, r *characterv1.Sav
 	return &characterv1.SaveInventoryAndListingResponse{}, nil
 }
 
-// ListMarketListings returns every listed listing of the world with its seller's name, oldest first (migration 0030).
+// ListMarketListings returns every listed listing of the world with its seller's name, oldest first (migration 0030), and the rate of every node that has one (0031).
 func (s *Server) ListMarketListings(ctx context.Context, _ *characterv1.ListMarketListingsRequest) (*characterv1.ListMarketListingsResponse, error) {
 	ms, ok := s.store.(MarketStore)
 	if !ok {
@@ -676,7 +721,105 @@ func (s *Server) ListMarketListings(ctx context.Context, _ *characterv1.ListMark
 	if err != nil {
 		return nil, toStatus(ctx, err)
 	}
-	return &characterv1.ListMarketListingsResponse{Listings: toProtoMarketListings(listings)}, nil
+	resp := &characterv1.ListMarketListingsResponse{Listings: toProtoMarketListings(listings)}
+	if sales, ok := s.store.(MarketSalesStore); ok {
+		taxes, err := sales.NodeMarketTaxes(ctx)
+		if err != nil {
+			return nil, toStatus(ctx, err)
+		}
+		for _, t := range taxes {
+			resp.NodeTaxes = append(resp.NodeTaxes, &characterv1.NodeMarketTax{Node: t.Node, Rate: t.Rate, CollectedCopper: t.CollectedCopper})
+		}
+	}
+	return resp, nil
+}
+
+// marketOutcomeOf is the wire's outcome of a step's.
+func marketOutcomeOf(o character.MarketOutcome) characterv1.MarketOutcome {
+	switch o {
+	case character.OutcomeDone:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_DONE
+	case character.OutcomeReplayed:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_REPLAYED
+	case character.OutcomeListingGone:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_LISTING_GONE
+	case character.OutcomeListingExpired:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_LISTING_EXPIRED
+	case character.OutcomeQuantity:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_QUANTITY
+	case character.OutcomePriceChanged:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_PRICE_CHANGED
+	case character.OutcomeRateChanged:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_RATE_CHANGED
+	case character.OutcomeOwnListing:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_OWN_LISTING
+	case character.OutcomeNotExpired:
+		return characterv1.MarketOutcome_MARKET_OUTCOME_NOT_EXPIRED
+	}
+	return characterv1.MarketOutcome_MARKET_OUTCOME_UNSPECIFIED
+}
+
+// BuyListing stores one purchase in one transaction (migration 0031; see character.Store.BuyListing). NotFound for an unknown character; InvalidArgument, with nothing
+// changed, for a request or bags the rules refuse; Ok with the outcome of a listing that cannot be bought (nothing was written) or of a purchase stored before (REPLAYED).
+func (s *Server) BuyListing(ctx context.Context, r *characterv1.BuyListingRequest) (*characterv1.BuyListingResponse, error) {
+	ms, ok := s.store.(MarketSalesStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no market sales")
+	}
+	if r.GetInventory() == nil {
+		return nil, status.Error(codes.InvalidArgument, "no bags are given")
+	}
+	bags, err := claimBagsOf(r.GetInventory())
+	if err != nil {
+		return nil, err
+	}
+	res, err := ms.BuyListing(ctx, character.BuyRequest{PurchaseID: r.GetPurchaseId(), BuyerID: r.GetCharacterId(), ListingID: r.GetListingId(), Quantity: r.GetQuantity(),
+		PricePerUnit: r.GetPricePerUnit(), TaxRate: r.GetTaxRate(), Tax: r.GetTax(), ItemName: r.GetItemName(), Bags: bags})
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	out := &characterv1.BuyListingResponse{Outcome: marketOutcomeOf(res.Outcome), Available: res.Available, SellerId: res.SellerID}
+	if res.Outcome == character.OutcomeDone {
+		out.SellerMail = toProtoMail(res.SellerMail)
+	}
+	return out, nil
+}
+
+// RemoveListing stores a seller's removal of a listing in one transaction (migration 0031; see character.Store.RemoveListing).
+func (s *Server) RemoveListing(ctx context.Context, r *characterv1.RemoveListingRequest) (*characterv1.RemoveListingResponse, error) {
+	ms, ok := s.store.(MarketSalesStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no market sales")
+	}
+	if r.GetInventory() == nil {
+		return nil, status.Error(codes.InvalidArgument, "no bags are given")
+	}
+	bags, err := claimBagsOf(r.GetInventory())
+	if err != nil {
+		return nil, err
+	}
+	res, err := ms.RemoveListing(ctx, character.RemoveRequest{SellerID: r.GetCharacterId(), ListingID: r.GetListingId(), ExpectedQuantity: r.GetExpectedQuantity(), Bags: bags})
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.RemoveListingResponse{Outcome: marketOutcomeOf(res.Outcome), Available: res.Available}, nil
+}
+
+// ExpireListing ends a listing whose time has come and mails its stack to the seller, in one transaction (migration 0031; see character.Store.ExpireListing).
+func (s *Server) ExpireListing(ctx context.Context, r *characterv1.ExpireListingRequest) (*characterv1.ExpireListingResponse, error) {
+	ms, ok := s.store.(MarketSalesStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no market sales")
+	}
+	res, err := ms.ExpireListing(ctx, r.GetListingId(), r.GetItemName())
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	out := &characterv1.ExpireListingResponse{Outcome: marketOutcomeOf(res.Outcome), SellerId: res.SellerID}
+	if res.Outcome == character.OutcomeDone {
+		out.SellerMail = toProtoMail(res.SellerMail)
+	}
+	return out, nil
 }
 
 // addTalents puts the character's bought ranks and its action bar (plan D1, stage 2) into a reply.
@@ -962,7 +1105,7 @@ func toProtoMails(mails []character.Mail) []*characterv1.Mail {
 
 func toProtoMail(m character.Mail) *characterv1.Mail {
 	return &characterv1.Mail{Id: m.ID, Sender: m.Sender, Subject: m.Subject, Body: m.Body, Status: m.Status, IssuedAtMs: m.IssuedAtMs,
-		ExpiresAtMs: m.ExpiresAtMs, Items: toProtoMailItems(m.Items)}
+		ExpiresAtMs: m.ExpiresAtMs, Items: toProtoMailItems(m.Items), MoneyCopper: m.MoneyCopper, MoneyClaimed: m.MoneyClaimed}
 }
 
 func fromProtoMail(m *characterv1.Mail) character.Mail {

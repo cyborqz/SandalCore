@@ -12,6 +12,7 @@
 #include "market/give_back.h"
 #include "market/listings.h"
 #include "market/market.h"
+#include "market/undo.h"
 
 #include "bootstrap/bootstrap.h"
 #include "content/content_db.h"
@@ -46,7 +47,10 @@ constexpr uint8_t kItemNotFound = 5;        // the seller does not hold the stac
 constexpr uint8_t kItemUntradable = 6;      // a quest item is not listed
 constexpr uint8_t kItemInUse = 7;           // a worn item is not listed
 constexpr uint8_t kInvalidQuantity = 8;     // zero units, or more than the stack holds
-constexpr uint8_t kCurrencyNotFound = 13;   // the price names no money, or the purse does not hold the listing fee
+constexpr uint8_t kCurrencyNotFound = 13;   // the price names no money, or the purse does not hold the listing fee, or the price and the tax of a purchase
+constexpr uint8_t kMarketOk = 0;            // a step that is stored
+constexpr uint8_t kInvalidPlayer = 9;       // a purchase of the buyer's own listing
+constexpr uint8_t kInventoryFull = 12;      // the bags have no room for the units a purchase or a removal brings
 
 /// The node of the Manager whose window the player opened, when `guid` names that market and the player, at (x, y, z), is within retail's 1000 units of him.  nullopt for
 /// no window, another market or a player who walked away; `why` then says which.
@@ -292,13 +296,32 @@ void PlayerSession::market_refund(const PendingMarket& job) {
 }
 
 void PlayerSession::market_end(const char* why) {
+    // the steps of a cart that never started hold nothing and have changed nothing: they are dropped, and no answer is owed to a client that is gone
+    if (!market_queue_.empty()) {
+        spdlog::info("[market] {}: the session ends with {} queued step(s) that never started ({}): dropped, nothing paid", name(), market_queue_.size(), why);
+        market_queue_.clear();
+    }
     if (market_pending_.empty()) return;
     // the saves still in flight, and the bags the session ends with (the held bag save was never written), go to the world: it takes each answer, makes the listing or gives
     // back what it took, and writes the bags after them
     market::HandOver over;
     over.character_id = character_id_;
     over.seller = character_guid(pb_.setup());
-    for (const PendingMarket& job : market_pending_) over.listings.push_back(job);
+    for (PendingMarket& job : market_pending_) {
+        if (job.kind != market::StepKind::Register) {
+            // a purchase or a removal that is refused after this session ended leaves the bags as they would be without it: what it placed taken out, the price and the tax back
+            items::Inventory without = inventory_;
+            market::undo_added(without, job.added.events);
+            items::Wallet purse(wallet_.entries());
+            if (job.paid > 0) purse.give(job.paid);
+            job.without.items = without.items();
+            job.without.wallet = purse.entries();
+            job.without.jobs = jobs_;
+            job.without.recipes = taught_;
+            job.without.warehouse = wh_storage_.rows();
+        }
+        over.listings.push_back(job);
+    }
     over.bags.items = inventory_.items();
     over.bags.wallet = wallet_.entries();
     over.bags.jobs = jobs_;
@@ -326,7 +349,11 @@ void PlayerSession::market_send_listed(Connection& conn, const PendingMarket& jo
 
 void PlayerSession::market_landed(Connection& conn, Clock::time_point now, PendingMarket job, const market::ListingSaveAnswer& answer) {
     market_stacks_in_flight_.erase(job.stack_guid);
-    if (answer.status == svc::CallStatus::Ok) {
+    if (job.kind == market::StepKind::Buy) {
+        market_purchase_landed(conn, std::move(job), answer);
+    } else if (job.kind == market::StepKind::Remove) {
+        market_removal_landed(conn, std::move(job), answer);
+    } else if (answer.stored()) {
         // (the store joined the listing to the world's cache when it gave this answer)
         market_send_listed(conn, job, now);
         spdlog::log(level_for(market_logged_, 20), "[market] {}: listed {} x{} of item {} at {} copper each for a {} copper fee (listing {}/{}/{}/{} at node {})", name(),
@@ -342,6 +369,7 @@ void PlayerSession::market_landed(Connection& conn, Clock::time_point now, Pendi
         spdlog::log(level_for(market_refused_logged_), "[market] {}: the listing was refused ({}: {}): the stack and the fee stay the seller's", name(),
                     svc::call_status_name(answer.status), answer.reason);
     }
+    market_run_queue(conn, now);   // the next line of a cart starts from the bags and purse this step left, before a held bag save is let go
     market_save_in_flight_ = !market_pending_.empty();
     if (!market_save_in_flight_ && market_bag_held_) {
         market_bag_held_ = false;
@@ -435,6 +463,8 @@ void PlayerSession::register_market_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerRequestMarketplaceItemRegistration", [](PlayerSession& s, const RpcContext& c) { s.on_market_registration(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerRequestMarketplaceHeaders", [](PlayerSession& s, const RpcContext& c) { s.on_market_headers(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerRequestMarketplaceData", [](PlayerSession& s, const RpcContext& c) { s.on_market_data(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerRequestMarketplaceItemPurchase", [](PlayerSession& s, const RpcContext& c) { s.on_market_purchase(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerRequestMarketplaceItemRemoval", [](PlayerSession& s, const RpcContext& c) { s.on_market_removal(c.conn, c.rpc, c.now); });
 }
 
 }  // namespace aoc::worldd
@@ -454,6 +484,30 @@ std::optional<Send> PlayerBootstrap::market_registration_answer(const repl::Mark
     call.rpc = "ClientMarketplaceItemRegistrationResponse";
     call.params = *params;
     return rpcs(Role::PlayerController, "ClientMarketplaceItemRegistrationResponse", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::market_purchase_answer(const repl::GuidValue& listing, int32_t quantity, uint8_t response) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientMarketplaceItemPurchaseResponse");
+    if (!rpc) return std::nullopt;
+    const std::optional<repl::RpcParams> params = repl::market_purchase_params(*rpc, listing, quantity, response);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientMarketplaceItemPurchaseResponse";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientMarketplaceItemPurchaseResponse", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::market_removal_answer(const repl::GuidValue& listing, uint8_t response) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientMarketplaceItemRemovalResponse");
+    if (!rpc) return std::nullopt;
+    const std::optional<repl::RpcParams> params = repl::market_removal_params(*rpc, listing, response);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientMarketplaceItemRemovalResponse";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientMarketplaceItemRemovalResponse", std::span<const repl::RpcRequest>(&call, 1));
 }
 
 std::optional<Send> PlayerBootstrap::market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete) {

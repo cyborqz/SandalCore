@@ -29,6 +29,14 @@ type MailClaim struct {
 	InstanceGUID string // 32 lowercase hex digits, not all zero
 }
 
+// MoneyClaim names the money of one mail a claim takes, and the copper the claimer is crediting for it: the amount the mail held when the claimer read it. The claim is
+// refused (ErrMailClaimed, nothing written) when the mail holds another amount by the time the claim runs, so a sale that was added to the mail in between is never marked
+// claimed without being paid.
+type MoneyClaim struct {
+	MailID string // 32 lowercase hex digits, not all zero
+	Copper int64  // the amount the purse of the claim holds for this mail: at least 1
+}
+
 // ClaimBags is what a claim writes to the character's bags: the whole item list the bags hold after the claim, and the other parts of SaveInventoryEverything when their
 // flag says to replace them.
 type ClaimBags struct {
@@ -43,21 +51,38 @@ type ClaimBags struct {
 	ReplaceWarehouse bool
 }
 
-// ClaimResult says what a claim did: how many attachments it marked claimed now, and whether it was a repeat of an earlier claim (nothing written now).
+// ClaimResult says what a claim did: how many attachments (and mails' money) it marked claimed now, and whether it was a repeat of an earlier claim (nothing written now).
 type ClaimResult struct {
 	Claimed  int
 	Replayed bool
 }
 
-// validateClaims checks the names of the attachments a claim takes: at least one, none twice, each a mail id and an instance guid.
-func validateClaims(claims []MailClaim) error {
-	if len(claims) == 0 {
+// validateClaims checks the names of the attachments a claim takes and of the mails whose money it takes: at least one of them, none twice, each a mail id (and an instance
+// guid).
+func validateClaims(claims []MailClaim, moneyMails []MoneyClaim) error {
+	if len(claims) == 0 && len(moneyMails) == 0 {
 		return fmt.Errorf("%w: a claim names no attachment", ErrInvalid)
 	}
 	if len(claims) > MaxItems {
 		return fmt.Errorf("%w: a claim names %d attachments (at most %d)", ErrInvalid, len(claims), MaxItems)
 	}
+	if len(moneyMails) > MaxMails {
+		return fmt.Errorf("%w: a claim names the money of %d mails (at most %d)", ErrInvalid, len(moneyMails), MaxMails)
+	}
 	zero := strings.Repeat("0", 32)
+	seenMoney := make(map[string]bool, len(moneyMails))
+	for i, m := range moneyMails {
+		if !guidPattern.MatchString(m.MailID) || m.MailID == zero {
+			return fmt.Errorf("%w: money claim %d: mail id %q is not 32 lowercase hex digits (not all zero)", ErrInvalid, i, m.MailID)
+		}
+		if m.Copper < 1 || m.Copper > MaxWalletAmount {
+			return fmt.Errorf("%w: money claim %d: %d copper is not an amount a mail carries (1 to %d)", ErrInvalid, i, m.Copper, MaxWalletAmount)
+		}
+		if seenMoney[m.MailID] {
+			return fmt.Errorf("%w: money claim %d names the money of mail %s again", ErrInvalid, i, m.MailID)
+		}
+		seenMoney[m.MailID] = true
+	}
 	seen := make(map[MailClaim]bool, len(claims))
 	for i, c := range claims {
 		if !guidPattern.MatchString(c.MailID) || c.MailID == zero {
@@ -79,11 +104,24 @@ func validateClaims(claims []MailClaim) error {
 // ErrInvalid for names or bags the rules refuse; ErrMailClaimed for an attachment claimed before by a request with other bags. A request that repeats an earlier one whole
 // (every named attachment claimed and the stored items the same as the request's) answers with Replayed and writes nothing: a retry after a lost answer changes nothing.
 func (s *Store) ClaimMailItems(ctx context.Context, characterID string, claims []MailClaim, bags ClaimBags) (ClaimResult, error) {
+	return s.ClaimMail(ctx, characterID, claims, nil, bags)
+}
+
+// ClaimMail is ClaimMailItems that also takes the money of the named mails (Marketplace sales, migration 0031) into the purse: the bags' wallet is the purse after the money
+// (ReplaceWallet is required with a money mail), and the money is marked claimed in the same transaction that writes it. Each money names the copper the purse was credited
+// for it; under the mail's row lock the claim is refused (ErrMailClaimed, nothing written) when the mail holds another amount, as it does when a later sale of the same listing
+// was added to the mail after the claimer read it. A mail whose money was claimed before is refused (ErrMailClaimed) unless the request repeats the claim that did it: the
+// bags' items and the purse are then the stored ones (Replayed). A mail with no money, or one that is not the character's or was deleted, is ErrNotFound. A claim names an
+// attachment or a mail's money at least once; one may name both.
+func (s *Store) ClaimMail(ctx context.Context, characterID string, claims []MailClaim, moneyMails []MoneyClaim, bags ClaimBags) (ClaimResult, error) {
 	if !idPattern.MatchString(characterID) {
 		return ClaimResult{}, ErrNotFound
 	}
-	if err := validateClaims(claims); err != nil {
+	if err := validateClaims(claims, moneyMails); err != nil {
 		return ClaimResult{}, err
+	}
+	if len(moneyMails) > 0 && !bags.ReplaceWallet {
+		return ClaimResult{}, fmt.Errorf("%w: a claim of money carries the purse that holds it", ErrInvalid)
 	}
 	wallet := bags.Wallet
 	if bags.ReplaceWallet {
@@ -146,11 +184,42 @@ func (s *Store) ClaimMailItems(ctx context.Context, characterID string, claims [
 			already++
 		}
 	}
+	// ... and every named money must be the character's, in a live mail, and be the amount the claim credited: the row is locked, so a sale cannot be added to it from here to
+	// the end of the transaction, and one that was added before is seen now
+	for _, m := range moneyMails {
+		var claimed bool
+		var status int32
+		var copper int64
+		err := tx.QueryRow(ctx, `SELECT mm.claimed, mm.copper, m.status FROM character_mail_money mm JOIN character_mails m ON m.id = mm.mail_id
+			WHERE m.id = $1 AND m.character_id = $2 FOR UPDATE OF mm`, m.MailID, characterID).Scan(&claimed, &copper, &status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ClaimResult{}, fmt.Errorf("%w: mail %s has no money of the character's to claim", ErrNotFound, m.MailID)
+		}
+		if err != nil {
+			return ClaimResult{}, err
+		}
+		if status&MailStatusDeleted != 0 {
+			return ClaimResult{}, fmt.Errorf("%w: mail %s was deleted", ErrNotFound, m.MailID)
+		}
+		if copper != m.Copper {
+			return ClaimResult{}, fmt.Errorf("%w: the money of mail %s is %d copper now, not the %d the claim was made for", ErrMailClaimed, m.MailID, copper, m.Copper)
+		}
+		if claimed {
+			already++
+		}
+	}
 	if already > 0 {
-		if already == len(claims) {
+		if already == len(claims)+len(moneyMails) {
 			same, err := sameStoredItems(ctx, tx, characterID, bags.Items)
 			if err != nil {
 				return ClaimResult{}, err
+			}
+			if same && len(moneyMails) > 0 {
+				// money is only given once: the purse of a repeat of the claim is the one the claim stored, and any other purse is a second claim of money that was taken
+				same, err = sameStoredWallet(ctx, tx, characterID, wallet)
+				if err != nil {
+					return ClaimResult{}, err
+				}
 			}
 			if same {
 				// the request repeats the claim that did it: the answer is Ok and nothing is written
@@ -160,7 +229,7 @@ func (s *Store) ClaimMailItems(ctx context.Context, characterID string, claims [
 				return ClaimResult{Replayed: true}, nil
 			}
 		}
-		return ClaimResult{}, fmt.Errorf("%w: %d of the %d attachments were claimed before", ErrMailClaimed, already, len(claims))
+		return ClaimResult{}, fmt.Errorf("%w: %d of the %d attachments and moneys were claimed before", ErrMailClaimed, already, len(claims)+len(moneyMails))
 	}
 	// the bags first, then the marks: a failure of either leaves nothing
 	if err := writeInventory(ctx, tx, characterID, bags.Items, wallet, bags.Jobs, bags.ReplaceJobs, bags.KnownRecipes, bags.ReplaceKnown, warehouse, bags.ReplaceWarehouse); err != nil {
@@ -175,10 +244,46 @@ func (s *Store) ClaimMailItems(ctx context.Context, characterID string, claims [
 			return ClaimResult{}, fmt.Errorf("%w: the attachment %s of mail %s was claimed while this claim ran", ErrMailClaimed, c.InstanceGUID, c.MailID)
 		}
 	}
+	for _, m := range moneyMails {
+		tag, err := tx.Exec(ctx, `UPDATE character_mail_money SET claimed = true WHERE mail_id = $1 AND NOT claimed AND copper = $2`, m.MailID, m.Copper)
+		if err != nil {
+			return ClaimResult{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return ClaimResult{}, fmt.Errorf("%w: the money of mail %s was claimed or changed while this claim ran", ErrMailClaimed, m.MailID)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return ClaimResult{}, err
 	}
-	return ClaimResult{Claimed: len(claims)}, nil
+	return ClaimResult{Claimed: len(claims) + len(moneyMails)}, nil
+}
+
+// sameStoredWallet says whether the character's stored balance of each currency in `wallet` is the amount it names (a currency the character has no row for holds 0).
+func sameStoredWallet(ctx context.Context, tx pgx.Tx, characterID string, wallet []WalletEntry) (bool, error) {
+	rows, err := tx.Query(ctx, `SELECT currency_guid, amount FROM character_wallet WHERE character_id = $1`, characterID)
+	if err != nil {
+		return false, err
+	}
+	stored := map[int64]int64{}
+	for rows.Next() {
+		var guid, amount int64
+		if err := rows.Scan(&guid, &amount); err != nil {
+			rows.Close()
+			return false, err
+		}
+		stored[guid] = amount
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	for _, e := range wallet {
+		if stored[e.CurrencyGuid] != e.Amount {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // sameStoredItems says whether the character's stored items (both tables) are exactly items, place for place and field for field, read in tx.

@@ -39,6 +39,9 @@ const (
 	CharacterService_ClaimMailItems_FullMethodName          = "/aoc.character.v1.CharacterService/ClaimMailItems"
 	CharacterService_SaveInventoryAndListing_FullMethodName = "/aoc.character.v1.CharacterService/SaveInventoryAndListing"
 	CharacterService_ListMarketListings_FullMethodName      = "/aoc.character.v1.CharacterService/ListMarketListings"
+	CharacterService_BuyListing_FullMethodName              = "/aoc.character.v1.CharacterService/BuyListing"
+	CharacterService_RemoveListing_FullMethodName           = "/aoc.character.v1.CharacterService/RemoveListing"
+	CharacterService_ExpireListing_FullMethodName           = "/aoc.character.v1.CharacterService/ExpireListing"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -116,6 +119,10 @@ type CharacterServiceClient interface {
 	SaveInventoryAndListing(ctx context.Context, in *SaveInventoryAndListingRequest, opts ...grpc.CallOption) (*SaveInventoryAndListingResponse, error)
 	// Marketplace: every listed row of the world with its seller's name, oldest first by issue time. A world with no listing has none.
 	ListMarketListings(ctx context.Context, in *ListMarketListingsRequest, opts ...grpc.CallOption) (*ListMarketListingsResponse, error)
+	// Marketplace (migration 0031): a purchase, a removal and an expiry, each ONE transaction (see the messages).
+	BuyListing(ctx context.Context, in *BuyListingRequest, opts ...grpc.CallOption) (*BuyListingResponse, error)
+	RemoveListing(ctx context.Context, in *RemoveListingRequest, opts ...grpc.CallOption) (*RemoveListingResponse, error)
+	ExpireListing(ctx context.Context, in *ExpireListingRequest, opts ...grpc.CallOption) (*ExpireListingResponse, error)
 }
 
 type characterServiceClient struct {
@@ -286,6 +293,36 @@ func (c *characterServiceClient) ListMarketListings(ctx context.Context, in *Lis
 	return out, nil
 }
 
+func (c *characterServiceClient) BuyListing(ctx context.Context, in *BuyListingRequest, opts ...grpc.CallOption) (*BuyListingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BuyListingResponse)
+	err := c.cc.Invoke(ctx, CharacterService_BuyListing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) RemoveListing(ctx context.Context, in *RemoveListingRequest, opts ...grpc.CallOption) (*RemoveListingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveListingResponse)
+	err := c.cc.Invoke(ctx, CharacterService_RemoveListing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) ExpireListing(ctx context.Context, in *ExpireListingRequest, opts ...grpc.CallOption) (*ExpireListingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExpireListingResponse)
+	err := c.cc.Invoke(ctx, CharacterService_ExpireListing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -361,6 +398,10 @@ type CharacterServiceServer interface {
 	SaveInventoryAndListing(context.Context, *SaveInventoryAndListingRequest) (*SaveInventoryAndListingResponse, error)
 	// Marketplace: every listed row of the world with its seller's name, oldest first by issue time. A world with no listing has none.
 	ListMarketListings(context.Context, *ListMarketListingsRequest) (*ListMarketListingsResponse, error)
+	// Marketplace (migration 0031): a purchase, a removal and an expiry, each ONE transaction (see the messages).
+	BuyListing(context.Context, *BuyListingRequest) (*BuyListingResponse, error)
+	RemoveListing(context.Context, *RemoveListingRequest) (*RemoveListingResponse, error)
+	ExpireListing(context.Context, *ExpireListingRequest) (*ExpireListingResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -418,6 +459,15 @@ func (UnimplementedCharacterServiceServer) SaveInventoryAndListing(context.Conte
 }
 func (UnimplementedCharacterServiceServer) ListMarketListings(context.Context, *ListMarketListingsRequest) (*ListMarketListingsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMarketListings not implemented")
+}
+func (UnimplementedCharacterServiceServer) BuyListing(context.Context, *BuyListingRequest) (*BuyListingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BuyListing not implemented")
+}
+func (UnimplementedCharacterServiceServer) RemoveListing(context.Context, *RemoveListingRequest) (*RemoveListingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveListing not implemented")
+}
+func (UnimplementedCharacterServiceServer) ExpireListing(context.Context, *ExpireListingRequest) (*ExpireListingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExpireListing not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -728,6 +778,60 @@ func _CharacterService_ListMarketListings_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_BuyListing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BuyListingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).BuyListing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_BuyListing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).BuyListing(ctx, req.(*BuyListingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_RemoveListing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveListingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).RemoveListing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_RemoveListing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).RemoveListing(ctx, req.(*RemoveListingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_ExpireListing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExpireListingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).ExpireListing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_ExpireListing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).ExpireListing(ctx, req.(*ExpireListingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -798,6 +902,18 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMarketListings",
 			Handler:    _CharacterService_ListMarketListings_Handler,
+		},
+		{
+			MethodName: "BuyListing",
+			Handler:    _CharacterService_BuyListing_Handler,
+		},
+		{
+			MethodName: "RemoveListing",
+			Handler:    _CharacterService_RemoveListing_Handler,
+		},
+		{
+			MethodName: "ExpireListing",
+			Handler:    _CharacterService_ExpireListing_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

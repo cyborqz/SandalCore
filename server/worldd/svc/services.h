@@ -325,6 +325,9 @@ struct Mail {
     int64_t     issued_at_ms = 0;
     int64_t     expires_at_ms = 0;  // 0: no expiry
     std::vector<MailItem> items;
+    /// Marketplace sales (migration 0031): the money the mail carries, in copper (0: none), and whether the player took it into the purse.  Read only: a mail save never writes it.
+    int64_t     money = 0;
+    bool        money_claimed = false;
     bool operator==(const Mail&) const = default;
 };
 
@@ -364,6 +367,14 @@ struct MailClaim {
     bool operator==(const MailClaim&) const = default;
 };
 
+/// Mail: the money of one mail a claim takes into the purse, and the copper the claim credits for it (the amount the world read from its cache of the mail).  The service refuses the
+/// claim, and writes nothing, when the mail holds another amount by the time it runs: a sale of the same listing was added to the mail meanwhile.
+struct MoneyClaim {
+    std::string mail_id;        // 32 lowercase hex digits
+    int64_t     copper = 0;     // the amount the purse was credited for this mail
+    bool operator==(const MoneyClaim&) const = default;
+};
+
 /// Mail: what ClaimMailItems answers.  Ok: the bags and the claimed marks are stored (`replayed`: the request repeated an earlier one, so nothing was written now).
 /// Refused, NotFound: the claim wrote nothing and never will (bags the rules refuse, an attachment that is not the character's or was claimed before): the item goes back.
 /// Unavailable, Failed: no answer is known, so the claim may or may not have been stored.  It is never settled by a guess: it is asked again, the same request, until the service
@@ -392,10 +403,20 @@ struct MarketListing {
     bool operator==(const MarketListing&) const = default;
 };
 
+/// Marketplace sales (migration 0031): a node's stored sales tax (aoc.character.v1.NodeMarketTax): the rate it charges and the copper its sales have paid in.  A node with no row
+/// charges the game's default, 0.5.
+struct NodeMarketTax {
+    int64_t node = 0;
+    float   rate = 0.5f;
+    int64_t collected_copper = 0;
+    bool operator==(const NodeMarketTax&) const = default;
+};
+
 struct MarketListingsResult {
     CallStatus status = CallStatus::Failed;
     std::string reason;   // the service's message when status is not Ok; empty for Ok
     std::vector<MarketListing> listings;
+    std::vector<NodeMarketTax> node_taxes;   // the rate of every node that has one
 };
 
 struct MarketSaveResult {
@@ -403,6 +424,69 @@ struct MarketSaveResult {
     std::string reason;   // the service's message when status is not Ok; empty for Ok
     /// Ok because the service already held this listing for the seller (an earlier try committed): nothing was written this time.
     bool already_saved = false;
+};
+
+/// Marketplace sales (migration 0031): what a step of the Marketplace is answered with when the call itself is Ok.  Done and Replayed mean the step is stored (Replayed: an earlier
+/// try of the same request stored it, nothing was written now).  The others are refusals for a reason of the listing: nothing was written and nothing will be.
+enum class MarketOutcome : uint8_t { Unspecified, Done, Replayed, ListingGone, ListingExpired, Quantity, PriceChanged, RateChanged, OwnListing, NotExpired };
+inline bool market_outcome_stored(MarketOutcome o) { return o == MarketOutcome::Done || o == MarketOutcome::Replayed; }
+
+/// The bags a Marketplace step writes in its one transaction: the character's whole item list, purse, jobs, recipes and warehouse after the step.
+struct MarketBags {
+    std::vector<InventoryItem> items;
+    std::vector<WalletEntry>   wallet;
+    std::vector<ProcessingJob> jobs;
+    std::vector<int64_t>       known_recipes;
+    std::vector<WarehouseItem> warehouse;
+    bool operator==(const MarketBags&) const = default;
+};
+
+/// Marketplace sales: one purchase (aoc.character.v1.BuyListingRequest).  `purchase_id` is the request's id (32 lowercase hex digits): asked again, the service answers Replayed.
+struct BuyRequest {
+    std::string purchase_id;
+    std::string character_id;     // the buyer
+    std::string listing_id;
+    int32_t     quantity = 0;
+    int64_t     price_per_unit = 0;   // copper, the price the world charged
+    float       tax_rate = 0.5f;      // the node's rate the world charged
+    int64_t     tax = 0;              // copper
+    std::string item_name;
+    MarketBags  bags;                 // the buyer's bags and purse after the buy
+    bool operator==(const BuyRequest&) const = default;
+};
+
+struct BuyResult {
+    CallStatus   status = CallStatus::Failed;
+    std::string  reason;                      // the service's message when status is not Ok
+    MarketOutcome outcome = MarketOutcome::Unspecified;
+    int32_t      available = 0;               // Quantity: the units the listing holds
+    std::string  seller_id;                   // Done, Replayed: the seller, whose mail changed
+    Mail         seller_mail;                 // Done: the sale mail as it is now
+};
+
+/// Marketplace sales: a seller's removal of a listing (aoc.character.v1.RemoveListingRequest).
+struct RemoveRequest {
+    std::string character_id;     // the seller
+    std::string listing_id;
+    int32_t     expected_quantity = 0;
+    MarketBags  bags;             // the seller's bags with the stack back in them
+    bool operator==(const RemoveRequest&) const = default;
+};
+
+struct RemoveResult {
+    CallStatus    status = CallStatus::Failed;
+    std::string   reason;
+    MarketOutcome outcome = MarketOutcome::Unspecified;
+    int32_t       available = 0;
+};
+
+/// Marketplace sales: a listing whose time has come ends and its stack is mailed to the seller (aoc.character.v1.ExpireListingResponse).
+struct ExpireResult {
+    CallStatus    status = CallStatus::Failed;
+    std::string   reason;
+    MarketOutcome outcome = MarketOutcome::Unspecified;
+    std::string   seller_id;
+    Mail          seller_mail;
 };
 
 /// Mail: the mails the window counts as unread: live (no delete bit) and without the read bit.
@@ -680,9 +764,35 @@ public:
         (void)listing;
         return {};
     }
-    /// Marketplace: every listed row of the world with its seller's name, oldest first (the character service's order). Blocks; the caller may make it from the
-    /// network thread.
+    /// Marketplace: every listed row of the world with its seller's name, oldest first (the character service's order), and the rate of every node that has one. Blocks; the
+    /// caller may make it from the network thread.
     virtual MarketListingsResult list_market_listings() { return {}; }
+    /// Marketplace sales: one purchase, in ONE transaction (see aoc.character.v1.BuyListingRequest).  Ok with an outcome that is not stored: a refusal for a reason of the listing,
+    /// nothing written; Refused: bags or a request the rules refuse; NotFound: no such character; Unsupported: the service keeps no sales.  Blocks; the caller is the market worker.
+    virtual BuyResult buy_listing(const BuyRequest& request) {
+        (void)request;
+        return {};
+    }
+    /// Marketplace sales: a seller's removal of a listing, in ONE transaction.  Blocks; the caller is the market worker.
+    virtual RemoveResult remove_listing(const RemoveRequest& request) {
+        (void)request;
+        return {};
+    }
+    /// Marketplace sales: the expiry of a listing, in ONE transaction: the listing ends and the seller is mailed its stack.  Blocks; the caller is the market worker.
+    virtual ExpireResult expire_listing(const std::string& listing_id, const std::string& item_name) {
+        (void)listing_id;
+        (void)item_name;
+        return {};
+    }
+    /// Mail: ClaimMailItems that also takes the money of the mails named in `money_mails` into the purse (the `wallet` is the purse after it), in the same ONE transaction.  Each money
+    /// names the copper the purse was credited for it; a mail that holds another amount refuses the claim (Refused, claimed_before), and nothing is written.  With no money mail it is
+    /// claim_mail_items.  A fake that does not care answers Failed.
+    virtual MailClaimResult claim_mail(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<MoneyClaim>& money_mails,
+                                       const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                       const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) {
+        if (money_mails.empty()) return claim_mail_items(character_id, claims, items, wallet, jobs, known_recipes, warehouse);
+        return {};
+    }
 };
 
 /// Quests, slice 1: the quest service (aoc.quest.v1.QuestService).  A world server that cannot reach it plays without quests.

@@ -531,6 +531,9 @@ public:
     std::optional<Send> market_registration_answer(const repl::MarketListing& listing, uint8_t response);
     std::optional<Send> market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete);
     std::optional<Send> market_data(const repl::GuidValue& seller, std::span<const repl::MarketListing> listings);
+    /// The answers to a purchase (the listing, the units the request named and the response) and to a removal (the listing and the response).
+    std::optional<Send> market_purchase_answer(const repl::GuidValue& listing, int32_t quantity, uint8_t response);
+    std::optional<Send> market_removal_answer(const repl::GuidValue& listing, uint8_t response);
     /// The Marketplace Manager this connection opened last (market/window.h): every marketplace request acts only on his market.
     market::MarketWindow market_window;
     /// Crafting, step 0: ClientOpenCraftingStationUI on the PlayerController (reliable): the client opens the window of the station actor `station` (the recipes are the client's own

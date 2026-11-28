@@ -88,7 +88,9 @@ void PlayerSession::init_mail(const svc::Character& character) {
     mail_load_retry_at_ = Clock::time_point{};
     mail_load_in_flight_ = false;
     mail_unread_ = std::max<int32_t>(0, character.unread_mail_count);   // svc::Character::unread_mail_count
-    // The social component is not on the PlayerController here (join_sequence() adds it later): the count is sent by the first mail call.
+    mail_note_pending_ = false;
+    if (world_) world_->take_mail_note(character_id_);   // (a sale that mailed this character while it was away is in the count above)
+    // The social component is not on the PlayerController here (join_sequence() adds it later): the count is sent behind the phase-in (on_phase_in_ready), and again by the mail calls when it changes.
     spdlog::log(level_for(mail_logged_), "[mail] {}: {} unread mail(s) from the character load", name(), mail_unread_);
 }
 
@@ -132,6 +134,13 @@ bool PlayerSession::mail_wait_for_load(MailWait wait, Clock::time_point now, con
 
 void PlayerSession::run_mail(Connection& conn, Clock::time_point now) {
     if (!world_) return;
+    // a sale or an expiry of the Marketplace mailed this character: the list is read again and the client is told (the unread count too)
+    if (world_->take_mail_note(character_id_)) mail_note_pending_ = true;
+    if (mail_note_pending_ && sink_) {
+        MailWait wait;
+        wait.kind = MailWaitKind::Refresh;
+        if (mail_start_load("the Marketplace mailed this character", std::move(wait), now)) mail_note_pending_ = false;
+    }
     while (!mail_pending_.empty()) {
         MailJobAnswer answer;
         if (!world_->take_mail_job(mail_pending_.front().ticket, answer)) break;   // (one character's answers come in order)
@@ -217,6 +226,15 @@ void PlayerSession::mail_run_wait(Connection& conn, const MailWait& wait) {
     case MailWaitKind::ClaimAll:
         mail_claim_all(conn, wait.ids);
         break;
+    case MailWaitKind::ClaimMoney: {
+        const int found = mail_find(wait.id);
+        if (found < 0) {
+            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the money claim of {} is not in the cache: ignored", name(), wait.id);
+            break;
+        }
+        mail_claim_money(conn, static_cast<size_t>(found));
+        break;
+    }
     case MailWaitKind::Status: {
         const int found = mail_find(wait.id);
         if (found < 0) {
@@ -334,6 +352,16 @@ void PlayerSession::mail_say_bags_full(Connection& conn) {
     queue("Your bags are full.", [send = *line](bootstrap::PlayerBootstrap&) { return send; }, conn, /*must_build=*/true);
 }
 
+void PlayerSession::mail_say_purse_full(Connection& conn) {
+    const std::optional<bootstrap::Send> line = pb_.chat_line("Your purse is full.", 124, "Server");
+    if (!line) {
+        spdlog::log(level_for(mail_logged_), "[mail] {}: the full-purse line does not build", name());
+        return;
+    }
+    if (!room_for(1)) return;
+    queue("Your purse is full.", [send = *line](bootstrap::PlayerBootstrap&) { return send; }, conn, /*must_build=*/true);
+}
+
 void PlayerSession::mail_send_unread(Connection& conn, const char* why) {
     if (!room_for(1)) return;
     if (!pb_.set_num_unread_mail(mail_unread_)) return;   // (false before the social component: the next mail call sends it)
@@ -357,7 +385,7 @@ void PlayerSession::mail_send_headers(Connection& conn) {
         header.status = mail.status;
         header.expiration_time = mail.expires_at_ms;
         header.issue_time = mail.issued_at_ms;
-        header.has_attachments = std::any_of(mail.items.begin(), mail.items.end(), [](const svc::MailItem& item) { return !item.claimed; });
+        header.has_attachments = std::any_of(mail.items.begin(), mail.items.end(), [](const svc::MailItem& item) { return !item.claimed; }) || (mail.money > 0 && !mail.money_claimed);
         headers.push_back(std::move(header));
     }
     const std::optional<std::vector<bootstrap::Send>> pages = pb_.mail_headers(headers, mail_version_);
@@ -390,6 +418,12 @@ void PlayerSession::mail_send_detail(Connection& conn, const std::string& id) {
     data.status = mail.status;
     data.items.reserve(mail.items.size());
     for (const svc::MailItem& item : mail.items) data.items.push_back(repl::MailItem{items::to_instance(item.item), item.claimed});
+    if (mail.money > 0) {
+        // Marketplace sales: the money is a Money-tier amount in copper, as the Marketplace's own prices are
+        data.currency.entries.push_back({items::kMoneyTier, repl::kMoneyTierType, mail.money});
+        data.currency_claimed = mail.money_claimed;
+    }
+    data.message.system = mail.sender == "Marketplace";   // the Marketplace's mails are the system's
     const std::optional<bootstrap::Send> answer = pb_.mail_data(data);
     if (!answer) {
         spdlog::log(level_for(mail_logged_), "[mail] {}: the detail of {} does not build", name(), id);
@@ -572,6 +606,13 @@ void PlayerSession::mail_claim_undo_placed(PendingMail& job) {
         mail_added_events_.erase(it->guid);
     }
     job.placed.clear();
+    if (job.money_given) {
+        // the money the claim put in the purse goes out again: what the player earned or spent meanwhile stays (and a purse that holds less than the money has spent some of it)
+        wallet_.pay(std::min(wallet_.copper(), job.money_total));
+        job.money_given = false;
+        inventory_dirty_ = true;
+        inventory_changed_ = true;
+    }
 }
 
 /// Sends the one call that stores the claim: the bags as they are now and the attachments `job` names.
@@ -582,6 +623,7 @@ bool PlayerSession::mail_claim_submit(PendingMail job, const std::vector<svc::Ma
     for (size_t i = 0; i < job.ids.size(); ++i) {
         for (const size_t item : job.items[i]) request.claims.push_back(svc::MailClaim{job.ids[i], claimed_mails[i].items[item].item.instance_guid});
     }
+    request.money_mails = job.money_claims;
     request.items = inventory_.items();
     request.wallet = wallet_.entries();
     request.jobs = jobs_;
@@ -598,7 +640,7 @@ bool PlayerSession::mail_claim_submit(PendingMail job, const std::vector<svc::Ma
         // back and the claim waits for the log-in to be applied or refused.
         mail_claim_undo_placed(job);
         MailWait wait;
-        wait.kind = job.kind == MailJobKind::Claim ? MailWaitKind::Claim : MailWaitKind::ClaimAll;
+        wait.kind = job.money_only ? MailWaitKind::ClaimMoney : job.kind == MailJobKind::Claim ? MailWaitKind::Claim : MailWaitKind::ClaimAll;
         wait.id = job.id;
         wait.item = job.item;
         wait.ids = job.ids;
@@ -681,6 +723,60 @@ bool PlayerSession::mail_claim_one(Connection& conn, size_t mail_index, int32_t 
     return true;
 }
 
+/// The claim of one mail's money alone (ServerClaimMailCurrency): the money goes into the purse here, in the tick, as an attachment goes into the bags, and the one call of the
+/// character service stores the purse and the claimed mark together.  A purse that would pass its cap refuses: the money stays in the mail.
+bool PlayerSession::mail_claim_money(Connection& conn, size_t mail_index) {
+    if (mail_index >= mails_.size()) return false;
+    const svc::Mail& mail = mails_[mail_index];
+    const std::string id = mail.id;
+    if (mail.money <= 0 || mail.money_claimed) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the money of {} is claimed already, or there is none: ignored", name(), id);
+        return false;
+    }
+    if (mail_claim_in_flight_.count(id) != 0) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the money of {} is being claimed: ignored", name(), id);
+        return false;
+    }
+    if (market_save_in_flight_) {
+        // a Marketplace step's save writes the same bags and purse: the later of the two writes would win from an older copy
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: a Marketplace step's save is writing the bags and the purse: the money claim of {} is ignored", name(), id);
+        return false;
+    }
+    if (!sink_) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: no mail store is set: the money claim of {} is ignored", name(), id);
+        return false;
+    }
+    if (mail_claims_held()) {
+        MailWait wait;   // (one claim at a time, and none while a log-in of this character waits: see mail_claim_one)
+        wait.kind = MailWaitKind::ClaimMoney;
+        wait.id = id;
+        mail_claims_waiting_.push_back(std::move(wait));
+        return true;
+    }
+    if (wallet_.room() < mail.money) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the purse holds {} copper and takes {} at most: the {} copper of {} stay in the mail", name(), wallet_.copper(), wallet_.room(),
+                    mail.money, id);
+        mail_say_purse_full(conn);
+        return false;
+    }
+    PendingMail job;
+    job.kind = MailJobKind::Claim;
+    job.id = id;
+    job.money_only = true;
+    job.money_claims.push_back(svc::MoneyClaim{id, mail.money});   // the amount the purse is credited with: the service refuses the claim if the mail holds another by then
+    job.money_total = mail.money;
+    wallet_.give(mail.money);
+    job.money_given = true;
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    svc::Mail next = mail;
+    next.money_claimed = true;
+    job.ids.push_back(id);
+    job.items.push_back({});
+    if (!mail_claim_submit(std::move(job), {std::move(next)})) return false;
+    return true;
+}
+
 void PlayerSession::mail_claim_landed(Connection& conn, PendingMail job, const MailJobAnswer& answer) {
     const svc::MailClaimResult& claim = answer.claim;
     if (claim.status != svc::CallStatus::Ok && claim.status != svc::CallStatus::Refused && claim.status != svc::CallStatus::NotFound) {
@@ -701,6 +797,14 @@ void PlayerSession::mail_claim_landed(Connection& conn, PendingMail job, const M
         MailWait wait;
         wait.kind = MailWaitKind::Refresh;
         mail_start_load("a claim was not stored", std::move(wait), last_now_);
+        // The money a refused claim credited was given back above (mail_claim_undo_placed).  The mail may hold more than the world read (a sale of the same listing was added to it
+        // meanwhile): the open mail is sent again as the store has it, so the window shows the new amount and the player claims it again.
+        for (const svc::MoneyClaim& money : job.money_claims) {
+            MailWait detail;
+            detail.kind = MailWaitKind::Detail;
+            detail.id = money.mail_id;
+            mail_start_load("a money claim was not stored", std::move(detail), last_now_);
+        }
         mail_claim_settled(conn);
         if (world_) world_->close_mail_claim(job.ticket);   // (after the save the answer let go: a log-in never sees the gap)
         return;
@@ -720,6 +824,22 @@ void PlayerSession::mail_claim_landed(Connection& conn, PendingMail job, const M
                 queue("ClientClaimMailItem", [send = *answer_send](bootstrap::PlayerBootstrap&) { return send; }, conn, /*must_build=*/true);
             } else {
                 spdlog::log(level_for(mail_logged_), "[mail] {}: the claim answer of {} (item {}) does not build", name(), job.mails[i].id, item);
+            }
+        }
+    }
+    if (job.money_total > 0) {
+        // Marketplace sales: the money is in the purse (the claim stored it): the money popup, the purse and the answer for each mail
+        pb_.set_currency(items::kCopperCurrency, wallet_.copper());
+        queue("ClientShowCurrencyCallout", [total = job.money_total](bootstrap::PlayerBootstrap& pb) { return pb.currency_callout(items::kMoneyTier, total); }, conn, /*must_build=*/true);
+        queue("Currencies", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
+        for (const svc::MoneyClaim& money : job.money_claims) {
+            const std::string& id = money.mail_id;
+            const auto guid = items::guid_of(id);
+            const std::optional<bootstrap::Send> answer_send = guid ? pb_.mail_currency_claimed(*guid) : std::nullopt;
+            if (answer_send) {
+                queue("ClientClaimMailCurrency", [send = *answer_send](bootstrap::PlayerBootstrap&) { return send; }, conn, /*must_build=*/true);
+            } else {
+                spdlog::log(level_for(mail_logged_), "[mail] {}: the money claim answer of {} does not build", name(), id);
             }
         }
     }
@@ -770,7 +890,7 @@ bool PlayerSession::mail_claim_all(Connection& conn, const std::vector<std::stri
     PendingMail job;
     job.kind = MailJobKind::ClaimAll;
     std::vector<svc::Mail> claimed_mails;
-    // every item of the request that the cache holds and has not claimed
+    // every item of the request that the cache holds and has not claimed, and the money of the mails that carry some
     for (const std::string& id : ids) {
         const int found = mail_find(id);
         if (found < 0) {
@@ -788,14 +908,34 @@ bool PlayerSession::mail_claim_all(Connection& conn, const std::vector<std::stri
             }
             items.push_back(item);
         }
-        if (items.empty()) continue;
+        const bool money = mails_[mail_index].money > 0 && !mails_[mail_index].money_claimed;
+        if (items.empty() && !money) continue;
         svc::Mail next = mails_[mail_index];
         for (size_t item : items) next.items[item].claimed = true;
+        if (money) {
+            next.money_claimed = true;
+            job.money_claims.push_back(svc::MoneyClaim{id, mails_[mail_index].money});
+            job.money_total += mails_[mail_index].money;
+        }
         job.ids.push_back(id);
         job.items.push_back(std::move(items));
         claimed_mails.push_back(std::move(next));
     }
     if (claimed_mails.empty()) return false;
+    if (job.money_total > 0) {
+        // all or nothing: a purse that cannot hold all the money refuses the whole claim (the items go back, the money stays in the mails)
+        if (wallet_.room() < job.money_total) {
+            spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the purse takes {} copper at most and the claim-all holds {}: not claimed", name(), wallet_.room(), job.money_total);
+            job.money_total = 0;
+            mail_claim_undo_placed(job);
+            mail_say_purse_full(conn);
+            return false;
+        }
+        wallet_.give(job.money_total);
+        job.money_given = true;
+        inventory_dirty_ = true;
+        inventory_changed_ = true;
+    }
     if (!mail_claim_submit(std::move(job), claimed_mails)) return false;
     return true;
 }
@@ -862,10 +1002,25 @@ void PlayerSession::on_claim_mail_item(Connection& conn, const repl::ClientRpc& 
     mail_claim_one(conn, static_cast<size_t>(found), item_index);
 }
 
-void PlayerSession::on_claim_mail_currency(Connection& conn, const repl::ClientRpc& rpc) {
-    (void)conn;
-    (void)rpc;
-    spdlog::log(level_for(mail_logged_), "[mail] {}: a mail currency claim is ignored: the mails carry no money", name());
+void PlayerSession::on_claim_mail_currency(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    const std::optional<std::array<uint32_t, 4>> guid = mail_call_guid(rpc, "MailGuid");
+    if (!guid) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: a money claim names no mail: ignored", name());
+        return;
+    }
+    const std::string id = mail_hex(*guid);
+    if (mail_find(id) < 0 && !mail_loaded_) {
+        MailWait wait;
+        wait.kind = MailWaitKind::ClaimMoney;
+        wait.id = id;
+        if (mail_start_load("the client claimed the money of a mail", std::move(wait), now)) return;
+    }
+    const int found = mail_find(id);
+    if (found < 0) {
+        spdlog::log(level_for(mail_refused_logged_), "[mail] {}: the money claim of {} is not in the cache: ignored", name(), id);
+        return;
+    }
+    mail_claim_money(conn, static_cast<size_t>(found));
 }
 
 void PlayerSession::on_claim_all_mail(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
@@ -974,7 +1129,7 @@ void PlayerSession::register_mail_rpcs(RpcTable& t) {
     t.add(RpcScope::SocialComponent, "ServerGetMailData", [](PlayerSession& s, const RpcContext& c) { s.on_get_mail_data(c.conn, c.rpc, c.now); });
     t.add(RpcScope::SocialComponent, "ServerRefreshMailHeaders", [](PlayerSession& s, const RpcContext& c) { s.on_refresh_mail_headers(c.conn, c.rpc, c.now); });
     t.add(RpcScope::SocialComponent, "ServerClaimMailItem", [](PlayerSession& s, const RpcContext& c) { s.on_claim_mail_item(c.conn, c.rpc, c.now); });
-    t.add(RpcScope::SocialComponent, "ServerClaimMailCurrency", [](PlayerSession& s, const RpcContext& c) { s.on_claim_mail_currency(c.conn, c.rpc); });
+    t.add(RpcScope::SocialComponent, "ServerClaimMailCurrency", [](PlayerSession& s, const RpcContext& c) { s.on_claim_mail_currency(c.conn, c.rpc, c.now); });
     t.add(RpcScope::SocialComponent, "ServerClaimAllMail", [](PlayerSession& s, const RpcContext& c) { s.on_claim_all_mail(c.conn, c.rpc, c.now); });
     t.add(RpcScope::SocialComponent, "ServerUpdateMailStatus", [](PlayerSession& s, const RpcContext& c) { s.on_update_mail_status(c.conn, c.rpc, c.now); });
     t.add(RpcScope::SocialComponent, "ServerBulkUpdateMailStatus", [](PlayerSession& s, const RpcContext& c) { s.on_bulk_update_mail_status(c.conn, c.rpc, c.now); });
@@ -1142,9 +1297,16 @@ bool PlayerSession::mail_settle_on_finish() {
         orphan.character_id = character_id_;
         orphan.items_with = inventory_.items();
         const items::Inventory kept = inventory_;
+        const items::Wallet kept_purse = wallet_;
         mail_claim_undo_placed(job);
         orphan.items_without = inventory_.items();
         inventory_ = kept;
+        if (job.money_total > 0) {
+            // the purse the character ends with when the claim was refused: the money is not in it
+            orphan.wallet_without = wallet_.entries();
+            orphan.has_wallet_without = true;
+        }
+        wallet_ = kept_purse;
         orphan.wallet = wallet_.entries();
         orphan.jobs = jobs_;
         orphan.recipes = taught_;

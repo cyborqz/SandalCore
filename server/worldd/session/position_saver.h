@@ -159,6 +159,40 @@ public:
         (void)listing;
         return svc::MarketSaveResult{svc::CallStatus::Unavailable, std::string(), false};
     }
+    /// Marketplace sales (migration 0031): a purchase, a removal and an expiry, each ONE call of the character service and ONE transaction there.  All three block and are made on
+    /// the world's market worker, which asks again (the same request) until the answer is clear: Ok with an outcome that is stored (Done, Replayed) or a refusal for a reason of
+    /// the listing (nothing written), a refusal (Refused, NotFound) or Unsupported.  Unavailable and Failed settle nothing: the step may or may not be stored.  A purchase and a
+    /// removal write the character's bags, so they wait for a same-character inventory write in flight and drop a queued older bag, as the listing's save does.  A sink that cannot
+    /// ask answers Unavailable.
+    virtual svc::BuyResult buy_listing_now(const svc::BuyRequest& request) {
+        (void)request;
+        svc::BuyResult r;
+        r.status = svc::CallStatus::Unavailable;
+        return r;
+    }
+    virtual svc::RemoveResult remove_listing_now(const svc::RemoveRequest& request) {
+        (void)request;
+        svc::RemoveResult r;
+        r.status = svc::CallStatus::Unavailable;
+        return r;
+    }
+    virtual svc::ExpireResult expire_listing_now(const std::string& listing_id, const std::string& item_name) {
+        (void)listing_id;
+        (void)item_name;
+        svc::ExpireResult r;
+        r.status = svc::CallStatus::Unavailable;
+        return r;
+    }
+    /// Mail: the claim of attachments AND of the money of mails, in ONE call (see claim_mail_items).  With no money mail it is claim_mail_items.  A sink that cannot ask answers
+    /// Unavailable.
+    virtual svc::MailClaimResult claim_mail(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::MoneyClaim>& money_mails,
+                                            std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                            std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) {
+        if (money_mails.empty()) return claim_mail_items(character_id, claims, std::move(items), std::move(wallet), std::move(jobs), std::move(known_recipes), std::move(warehouse));
+        svc::MailClaimResult result;
+        result.status = svc::CallStatus::Unavailable;
+        return result;
+    }
     /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
     /// keeps nothing (a test's) answers false.
     virtual bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
@@ -253,6 +287,13 @@ public:
                                                          const svc::MarketListing& listing) override;
     /// The saver's own pause before a retry (Config::retry_delay): the world's market worker paces its repeated calls the same way.
     std::chrono::milliseconds retry_delay() const override { return config_.retry_delay; }
+    /// Marketplace sales (migration 0031): the blocking forwards (see PositionSink); a purchase and a removal also wait for a same-character inventory write in flight.
+    svc::BuyResult buy_listing_now(const svc::BuyRequest& request) override;
+    svc::RemoveResult remove_listing_now(const svc::RemoveRequest& request) override;
+    svc::ExpireResult expire_listing_now(const std::string& listing_id, const std::string& item_name) override;
+    svc::MailClaimResult claim_mail(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::MoneyClaim>& money_mails,
+                                    std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                    std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);

@@ -78,6 +78,10 @@ service CharacterService {
   rpc SaveInventoryAndListing(SaveInventoryAndListingRequest) returns (SaveInventoryAndListingResponse);
   // Marketplace: every listed row of the world with its seller's name, oldest first by issue time. A world with no listing has none.
   rpc ListMarketListings(ListMarketListingsRequest) returns (ListMarketListingsResponse);
+  // Marketplace (migration 0031): a purchase, a removal and an expiry, each ONE transaction (see the messages).
+  rpc BuyListing(BuyListingRequest) returns (BuyListingResponse);
+  rpc RemoveListing(RemoveListingRequest) returns (RemoveListingResponse);
+  rpc ExpireListing(ExpireListingRequest) returns (ExpireListingResponse);
 }
 
 message Position {
@@ -552,6 +556,8 @@ message Mail {
   int64 issued_at_ms = 6;   // Unix milliseconds
   int64 expires_at_ms = 7;  // Unix milliseconds; 0: none
   repeated MailItem items = 8; // in the mail's order
+  int64 money_copper = 9;   // Marketplace (migration 0031): the money the mail carries, in copper; 0: none. Read-only: a mail save never writes it.
+  bool money_claimed = 10;  // the money was taken into the purse
 }
 
 // Mail: the live mails of one character, newest first. NotFound for an unknown character.
@@ -588,8 +594,14 @@ message MailClaim {
 // processing jobs, known recipes and warehouse when their replace flags say so.
 message ClaimMailItemsRequest {
   string character_id = 1;
-  repeated MailClaim claims = 2; // at least one, each attachment once
+  repeated MailClaim claims = 2; // each attachment once; with no money_mail_ids at least one
   SaveInventoryRequest inventory = 3; // id is ignored: character_id names the character
+  // Marketplace (migration 0031): the mails whose money this claim takes into the purse (inventory's wallet is the purse after it), each mail once. The money is marked
+  // claimed in the same transaction that writes the bags. NotFound for a mail that is not the character's, was deleted or has no money.
+  repeated string money_mail_ids = 4;
+  // For each money_mail_ids entry, in the same order: the copper the purse was credited for that mail (the amount the caller read; at least 1). The claim is refused with
+  // AlreadyExists, nothing written, when a mail holds another amount by then (a sale was added to it meanwhile). One for each mail id, or InvalidArgument.
+  repeated int64 money_expected_copper = 5;
 }
 message ClaimMailItemsResponse {
   int32 claimed = 1;  // how many attachments the request marked claimed now
@@ -622,4 +634,75 @@ message SaveInventoryAndListingRequest {
 message SaveInventoryAndListingResponse {}
 
 message ListMarketListingsRequest {}
-message ListMarketListingsResponse { repeated MarketListing listings = 1; }
+message ListMarketListingsResponse {
+  repeated MarketListing listings = 1;
+  repeated NodeMarketTax node_taxes = 2;   // the rate of every node that has a row (a node with none charges the default, 0.5)
+}
+
+// Marketplace (migration 0031): a node's sales tax: the rate the node charges on a sale (0.1 to 1; the game's default is 0.5) and the copper its sales have paid in.
+message NodeMarketTax {
+  int64 node = 1;
+  float rate = 2;
+  int64 collected_copper = 3;
+}
+
+// Marketplace (migration 0031): what a step of the Marketplace answers when it is refused for a reason of the listing. The call is answered Ok with that outcome and
+// has written nothing; a request the rules refuse is InvalidArgument, an unknown character is NotFound.
+enum MarketOutcome {
+  MARKET_OUTCOME_UNSPECIFIED = 0;      // never sent: a service of an older version, or a bug
+  MARKET_OUTCOME_DONE = 1;             // the step was stored
+  MARKET_OUTCOME_REPLAYED = 2;         // the same request was stored before: nothing was written now
+  MARKET_OUTCOME_LISTING_GONE = 3;     // no such listing, not this seller's, or no longer listed (sold, removed, expired and claimed)
+  MARKET_OUTCOME_LISTING_EXPIRED = 4;  // listed, but its time has come: only the expiry takes it
+  MARKET_OUTCOME_QUANTITY = 5;         // fewer units are listed than asked for (the listing's quantity is in the answer)
+  MARKET_OUTCOME_PRICE_CHANGED = 6;    // the unit price is not the one the world charged
+  MARKET_OUTCOME_RATE_CHANGED = 7;     // the node's rate is not the one the world charged
+  MARKET_OUTCOME_OWN_LISTING = 8;      // the buyer is the seller
+  MARKET_OUTCOME_NOT_EXPIRED = 9;      // the expiry came before the listing's time
+}
+
+// Marketplace (migration 0031): a purchase. In ONE transaction it locks the listing, checks it (listed, not expired, quantity, price, the node's rate), writes the buyer's
+// bags and purse (inventory; id is ignored), lowers the listing's quantity or marks it SOLD, adds the sale to the seller's mail (one unclaimed sale mail per listing),
+// adds the tax to the node's total and records purchase_id. Asked again with the same purchase_id it answers REPLAYED and writes nothing.
+message BuyListingRequest {
+  string purchase_id = 1;       // 32 lowercase hex digits, not all zero: the request's id
+  string character_id = 2;      // the buyer
+  string listing_id = 3;
+  int32 quantity = 4;           // the units bought, 1 or more
+  int64 price_per_unit = 5;     // copper, the price the world charged
+  float tax_rate = 6;           // the node's rate the world charged
+  int64 tax = 7;                // copper, the tax the world charged on price_per_unit x quantity
+  string item_name = 8;         // the name the sale mail shows
+  SaveInventoryRequest inventory = 9;   // the buyer's bags and purse after the buy
+}
+message BuyListingResponse {
+  MarketOutcome outcome = 1;
+  int32 available = 2;          // QUANTITY: the units the listing holds now; the other outcomes of a listing that still holds some: its units
+  string seller_id = 3;         // DONE, REPLAYED: the seller's character id, whose mail changed
+  Mail seller_mail = 4;         // DONE: the sale mail as it is now (new, or the one this sale was added to)
+}
+
+// Marketplace (migration 0031): the seller takes a listing off. In ONE transaction it locks the listing, checks it (the seller's, listed, not expired, the quantity the
+// world holds), writes the seller's bags (inventory; id is ignored: the stack is back in them) and marks the listing REMOVED. The fee is not refunded.
+message RemoveListingRequest {
+  string character_id = 1;      // the seller
+  string listing_id = 2;
+  int32 expected_quantity = 3;  // the units the world's cache holds
+  SaveInventoryRequest inventory = 4;
+}
+message RemoveListingResponse {
+  MarketOutcome outcome = 1;
+  int32 available = 2;
+}
+
+// Marketplace (migration 0031): a listing whose time has come ends. In ONE transaction it locks the listing, marks it EXPIRED_CLAIMED and adds a mail to the seller with the
+// stack attached. Asked for a listing that is expired already it answers REPLAYED.
+message ExpireListingRequest {
+  string listing_id = 1;
+  string item_name = 2;         // the name the mail shows
+}
+message ExpireListingResponse {
+  MarketOutcome outcome = 1;
+  string seller_id = 2;
+  Mail seller_mail = 3;
+}

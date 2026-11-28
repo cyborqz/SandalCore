@@ -69,6 +69,10 @@ type Mail struct {
 	IssuedAtMs  int64
 	ExpiresAtMs int64
 	Items       []MailItem
+	// The money the mail carries (Marketplace sales, migration 0031): copper, 0 for none, and whether the player took it into the purse. Read only: SaveMail and CreateMail
+	// never write it; a Marketplace step makes it, and ClaimMail takes it.
+	MoneyCopper  int64
+	MoneyClaimed bool
 }
 
 // NewMail is what CreateMail adds: the store gives the id, the issue time and the absolute expiry, and gives every attachment its instance guid and creation
@@ -249,14 +253,15 @@ func (s *Store) Mails(ctx context.Context, characterID string) ([]Mail, error) {
 	}
 	defer tx.Rollback(ctx) // a no-op once committed
 	var out []Mail
-	rows, err := tx.Query(ctx, `SELECT id, sender, subject, body, status, issued_at_ms, expires_at_ms FROM character_mails
-		WHERE character_id = $1 AND (status & $2) = 0 ORDER BY issued_at_ms DESC, id`, characterID, MailStatusDeleted)
+	rows, err := tx.Query(ctx, `SELECT m.id, m.sender, m.subject, m.body, m.status, m.issued_at_ms, m.expires_at_ms, COALESCE(mm.copper, 0), COALESCE(mm.claimed, false)
+		FROM character_mails m LEFT JOIN character_mail_money mm ON mm.mail_id = m.id
+		WHERE m.character_id = $1 AND (m.status & $2) = 0 ORDER BY m.issued_at_ms DESC, m.id`, characterID, MailStatusDeleted)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var m Mail
-		if err := rows.Scan(&m.ID, &m.Sender, &m.Subject, &m.Body, &m.Status, &m.IssuedAtMs, &m.ExpiresAtMs); err != nil {
+		if err := rows.Scan(&m.ID, &m.Sender, &m.Subject, &m.Body, &m.Status, &m.IssuedAtMs, &m.ExpiresAtMs, &m.MoneyCopper, &m.MoneyClaimed); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -323,11 +328,17 @@ func (s *Store) SaveMail(ctx context.Context, characterID string, m Mail) error 
 		return err
 	}
 	var stored int32
-	if err := tx.QueryRow(ctx, `SELECT status FROM character_mails WHERE id = $1 AND character_id = $2 FOR UPDATE`, m.ID, characterID).Scan(&stored); err != nil {
+	var storedSender, storedSubject, storedBody string
+	if err := tx.QueryRow(ctx, `SELECT status, sender, subject, body FROM character_mails WHERE id = $1 AND character_id = $2 FOR UPDATE`, m.ID, characterID).Scan(&stored,
+		&storedSender, &storedSubject, &storedBody); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
+	}
+	if storedSender == MarketMailSender {
+		// the Marketplace's mail text is the Marketplace's: a save from a cache that is older than a later sale added to the mail must not put the older text back
+		m.Sender, m.Subject, m.Body = storedSender, storedSubject, storedBody
 	}
 	if m.Status&stored != stored {
 		return fmt.Errorf("%w: the save has status %d and would clear a mark of the stored status %d", ErrMailStale, m.Status, stored)
@@ -397,7 +408,8 @@ func (s *Store) CreateMail(ctx context.Context, characterID string, n NewMail) (
 		return Mail{}, err
 	}
 	var live int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM character_mails WHERE character_id = $1 AND (status & $2) = 0`, characterID, MailStatusDeleted).Scan(&live); err != nil {
+	// (the Marketplace's mails, a sale's and an expiry's, are not counted: they have a bound of their own, the seller's listings, and the cap is for the other mail)
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM character_mails WHERE character_id = $1 AND (status & $2) = 0 AND sender <> $3`, characterID, MailStatusDeleted, MarketMailSender).Scan(&live); err != nil {
 		return Mail{}, err
 	}
 	if live >= MaxMails {

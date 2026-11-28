@@ -90,6 +90,78 @@ func (ItemContainer) EnumDescriptor() ([]byte, []int) {
 	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{0}
 }
 
+// Marketplace (migration 0031): what a step of the Marketplace answers when it is refused for a reason of the listing. The call is answered Ok with that outcome and
+// has written nothing; a request the rules refuse is InvalidArgument, an unknown character is NotFound.
+type MarketOutcome int32
+
+const (
+	MarketOutcome_MARKET_OUTCOME_UNSPECIFIED     MarketOutcome = 0 // never sent: a service of an older version, or a bug
+	MarketOutcome_MARKET_OUTCOME_DONE            MarketOutcome = 1 // the step was stored
+	MarketOutcome_MARKET_OUTCOME_REPLAYED        MarketOutcome = 2 // the same request was stored before: nothing was written now
+	MarketOutcome_MARKET_OUTCOME_LISTING_GONE    MarketOutcome = 3 // no such listing, not this seller's, or no longer listed (sold, removed, expired and claimed)
+	MarketOutcome_MARKET_OUTCOME_LISTING_EXPIRED MarketOutcome = 4 // listed, but its time has come: only the expiry takes it
+	MarketOutcome_MARKET_OUTCOME_QUANTITY        MarketOutcome = 5 // fewer units are listed than asked for (the listing's quantity is in the answer)
+	MarketOutcome_MARKET_OUTCOME_PRICE_CHANGED   MarketOutcome = 6 // the unit price is not the one the world charged
+	MarketOutcome_MARKET_OUTCOME_RATE_CHANGED    MarketOutcome = 7 // the node's rate is not the one the world charged
+	MarketOutcome_MARKET_OUTCOME_OWN_LISTING     MarketOutcome = 8 // the buyer is the seller
+	MarketOutcome_MARKET_OUTCOME_NOT_EXPIRED     MarketOutcome = 9 // the expiry came before the listing's time
+)
+
+// Enum value maps for MarketOutcome.
+var (
+	MarketOutcome_name = map[int32]string{
+		0: "MARKET_OUTCOME_UNSPECIFIED",
+		1: "MARKET_OUTCOME_DONE",
+		2: "MARKET_OUTCOME_REPLAYED",
+		3: "MARKET_OUTCOME_LISTING_GONE",
+		4: "MARKET_OUTCOME_LISTING_EXPIRED",
+		5: "MARKET_OUTCOME_QUANTITY",
+		6: "MARKET_OUTCOME_PRICE_CHANGED",
+		7: "MARKET_OUTCOME_RATE_CHANGED",
+		8: "MARKET_OUTCOME_OWN_LISTING",
+		9: "MARKET_OUTCOME_NOT_EXPIRED",
+	}
+	MarketOutcome_value = map[string]int32{
+		"MARKET_OUTCOME_UNSPECIFIED":     0,
+		"MARKET_OUTCOME_DONE":            1,
+		"MARKET_OUTCOME_REPLAYED":        2,
+		"MARKET_OUTCOME_LISTING_GONE":    3,
+		"MARKET_OUTCOME_LISTING_EXPIRED": 4,
+		"MARKET_OUTCOME_QUANTITY":        5,
+		"MARKET_OUTCOME_PRICE_CHANGED":   6,
+		"MARKET_OUTCOME_RATE_CHANGED":    7,
+		"MARKET_OUTCOME_OWN_LISTING":     8,
+		"MARKET_OUTCOME_NOT_EXPIRED":     9,
+	}
+)
+
+func (x MarketOutcome) Enum() *MarketOutcome {
+	p := new(MarketOutcome)
+	*p = x
+	return p
+}
+
+func (x MarketOutcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MarketOutcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_aoc_character_v1_character_proto_enumTypes[1].Descriptor()
+}
+
+func (MarketOutcome) Type() protoreflect.EnumType {
+	return &file_aoc_character_v1_character_proto_enumTypes[1]
+}
+
+func (x MarketOutcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MarketOutcome.Descriptor instead.
+func (MarketOutcome) EnumDescriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{1}
+}
+
 type Position struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	X             float64                `protobuf:"fixed64,1,opt,name=x,proto3" json:"x,omitempty"`
@@ -3319,14 +3391,16 @@ func (x *MailItem) GetClaimed() bool {
 // when it expires, and its attachments in the mail's order.
 type Mail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                         // 32 lowercase hex digits, not all zero
-	Sender        string                 `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`                                 // at most 64 UTF-8 bytes
-	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`                               // the title; at most 128 UTF-8 bytes
-	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`                                     // at most 4096 UTF-8 bytes
-	Status        int32                  `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`                                // 2 deleted, 4 read; other bits are kept
-	IssuedAtMs    int64                  `protobuf:"varint,6,opt,name=issued_at_ms,json=issuedAtMs,proto3" json:"issued_at_ms,omitempty"`    // Unix milliseconds
-	ExpiresAtMs   int64                  `protobuf:"varint,7,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"` // Unix milliseconds; 0: none
-	Items         []*MailItem            `protobuf:"bytes,8,rep,name=items,proto3" json:"items,omitempty"`                                   // in the mail's order
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                           // 32 lowercase hex digits, not all zero
+	Sender        string                 `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`                                   // at most 64 UTF-8 bytes
+	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`                                 // the title; at most 128 UTF-8 bytes
+	Body          string                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`                                       // at most 4096 UTF-8 bytes
+	Status        int32                  `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`                                  // 2 deleted, 4 read; other bits are kept
+	IssuedAtMs    int64                  `protobuf:"varint,6,opt,name=issued_at_ms,json=issuedAtMs,proto3" json:"issued_at_ms,omitempty"`      // Unix milliseconds
+	ExpiresAtMs   int64                  `protobuf:"varint,7,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`   // Unix milliseconds; 0: none
+	Items         []*MailItem            `protobuf:"bytes,8,rep,name=items,proto3" json:"items,omitempty"`                                     // in the mail's order
+	MoneyCopper   int64                  `protobuf:"varint,9,opt,name=money_copper,json=moneyCopper,proto3" json:"money_copper,omitempty"`     // Marketplace (migration 0031): the money the mail carries, in copper; 0: none. Read-only: a mail save never writes it.
+	MoneyClaimed  bool                   `protobuf:"varint,10,opt,name=money_claimed,json=moneyClaimed,proto3" json:"money_claimed,omitempty"` // the money was taken into the purse
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3415,6 +3489,20 @@ func (x *Mail) GetItems() []*MailItem {
 		return x.Items
 	}
 	return nil
+}
+
+func (x *Mail) GetMoneyCopper() int64 {
+	if x != nil {
+		return x.MoneyCopper
+	}
+	return 0
+}
+
+func (x *Mail) GetMoneyClaimed() bool {
+	if x != nil {
+		return x.MoneyClaimed
+	}
+	return false
 }
 
 // Mail: the live mails of one character, newest first. NotFound for an unknown character.
@@ -3782,12 +3870,18 @@ func (x *MailClaim) GetInstanceGuid() string {
 // Mail: the attachments to claim and the bags that hold them after the claim (see ClaimMailItems). The bags are what SaveInventory takes: the items, and the wallet,
 // processing jobs, known recipes and warehouse when their replace flags say so.
 type ClaimMailItemsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CharacterId   string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"`
-	Claims        []*MailClaim           `protobuf:"bytes,2,rep,name=claims,proto3" json:"claims,omitempty"`       // at least one, each attachment once
-	Inventory     *SaveInventoryRequest  `protobuf:"bytes,3,opt,name=inventory,proto3" json:"inventory,omitempty"` // id is ignored: character_id names the character
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"`
+	Claims      []*MailClaim           `protobuf:"bytes,2,rep,name=claims,proto3" json:"claims,omitempty"`       // each attachment once; with no money_mail_ids at least one
+	Inventory   *SaveInventoryRequest  `protobuf:"bytes,3,opt,name=inventory,proto3" json:"inventory,omitempty"` // id is ignored: character_id names the character
+	// Marketplace (migration 0031): the mails whose money this claim takes into the purse (inventory's wallet is the purse after it), each mail once. The money is marked
+	// claimed in the same transaction that writes the bags. NotFound for a mail that is not the character's, was deleted or has no money.
+	MoneyMailIds []string `protobuf:"bytes,4,rep,name=money_mail_ids,json=moneyMailIds,proto3" json:"money_mail_ids,omitempty"`
+	// For each money_mail_ids entry, in the same order: the copper the purse was credited for that mail (the amount the caller read; at least 1). The claim is refused with
+	// AlreadyExists, nothing written, when a mail holds another amount by then (a sale was added to it meanwhile). One for each mail id, or InvalidArgument.
+	MoneyExpectedCopper []int64 `protobuf:"varint,5,rep,packed,name=money_expected_copper,json=moneyExpectedCopper,proto3" json:"money_expected_copper,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ClaimMailItemsRequest) Reset() {
@@ -3837,6 +3931,20 @@ func (x *ClaimMailItemsRequest) GetClaims() []*MailClaim {
 func (x *ClaimMailItemsRequest) GetInventory() *SaveInventoryRequest {
 	if x != nil {
 		return x.Inventory
+	}
+	return nil
+}
+
+func (x *ClaimMailItemsRequest) GetMoneyMailIds() []string {
+	if x != nil {
+		return x.MoneyMailIds
+	}
+	return nil
+}
+
+func (x *ClaimMailItemsRequest) GetMoneyExpectedCopper() []int64 {
+	if x != nil {
+		return x.MoneyExpectedCopper
 	}
 	return nil
 }
@@ -4171,6 +4279,7 @@ func (*ListMarketListingsRequest) Descriptor() ([]byte, []int) {
 type ListMarketListingsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Listings      []*MarketListing       `protobuf:"bytes,1,rep,name=listings,proto3" json:"listings,omitempty"`
+	NodeTaxes     []*NodeMarketTax       `protobuf:"bytes,2,rep,name=node_taxes,json=nodeTaxes,proto3" json:"node_taxes,omitempty"` // the rate of every node that has a row (a node with none charges the default, 0.5)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4208,6 +4317,489 @@ func (*ListMarketListingsResponse) Descriptor() ([]byte, []int) {
 func (x *ListMarketListingsResponse) GetListings() []*MarketListing {
 	if x != nil {
 		return x.Listings
+	}
+	return nil
+}
+
+func (x *ListMarketListingsResponse) GetNodeTaxes() []*NodeMarketTax {
+	if x != nil {
+		return x.NodeTaxes
+	}
+	return nil
+}
+
+// Marketplace (migration 0031): a node's sales tax: the rate the node charges on a sale (0.1 to 1; the game's default is 0.5) and the copper its sales have paid in.
+type NodeMarketTax struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Node            int64                  `protobuf:"varint,1,opt,name=node,proto3" json:"node,omitempty"`
+	Rate            float32                `protobuf:"fixed32,2,opt,name=rate,proto3" json:"rate,omitempty"`
+	CollectedCopper int64                  `protobuf:"varint,3,opt,name=collected_copper,json=collectedCopper,proto3" json:"collected_copper,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *NodeMarketTax) Reset() {
+	*x = NodeMarketTax{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeMarketTax) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeMarketTax) ProtoMessage() {}
+
+func (x *NodeMarketTax) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeMarketTax.ProtoReflect.Descriptor instead.
+func (*NodeMarketTax) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *NodeMarketTax) GetNode() int64 {
+	if x != nil {
+		return x.Node
+	}
+	return 0
+}
+
+func (x *NodeMarketTax) GetRate() float32 {
+	if x != nil {
+		return x.Rate
+	}
+	return 0
+}
+
+func (x *NodeMarketTax) GetCollectedCopper() int64 {
+	if x != nil {
+		return x.CollectedCopper
+	}
+	return 0
+}
+
+// Marketplace (migration 0031): a purchase. In ONE transaction it locks the listing, checks it (listed, not expired, quantity, price, the node's rate), writes the buyer's
+// bags and purse (inventory; id is ignored), lowers the listing's quantity or marks it SOLD, adds the sale to the seller's mail (one unclaimed sale mail per listing),
+// adds the tax to the node's total and records purchase_id. Asked again with the same purchase_id it answers REPLAYED and writes nothing.
+type BuyListingRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PurchaseId    string                 `protobuf:"bytes,1,opt,name=purchase_id,json=purchaseId,proto3" json:"purchase_id,omitempty"`    // 32 lowercase hex digits, not all zero: the request's id
+	CharacterId   string                 `protobuf:"bytes,2,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"` // the buyer
+	ListingId     string                 `protobuf:"bytes,3,opt,name=listing_id,json=listingId,proto3" json:"listing_id,omitempty"`
+	Quantity      int32                  `protobuf:"varint,4,opt,name=quantity,proto3" json:"quantity,omitempty"`                               // the units bought, 1 or more
+	PricePerUnit  int64                  `protobuf:"varint,5,opt,name=price_per_unit,json=pricePerUnit,proto3" json:"price_per_unit,omitempty"` // copper, the price the world charged
+	TaxRate       float32                `protobuf:"fixed32,6,opt,name=tax_rate,json=taxRate,proto3" json:"tax_rate,omitempty"`                 // the node's rate the world charged
+	Tax           int64                  `protobuf:"varint,7,opt,name=tax,proto3" json:"tax,omitempty"`                                         // copper, the tax the world charged on price_per_unit x quantity
+	ItemName      string                 `protobuf:"bytes,8,opt,name=item_name,json=itemName,proto3" json:"item_name,omitempty"`                // the name the sale mail shows
+	Inventory     *SaveInventoryRequest  `protobuf:"bytes,9,opt,name=inventory,proto3" json:"inventory,omitempty"`                              // the buyer's bags and purse after the buy
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuyListingRequest) Reset() {
+	*x = BuyListingRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuyListingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuyListingRequest) ProtoMessage() {}
+
+func (x *BuyListingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuyListingRequest.ProtoReflect.Descriptor instead.
+func (*BuyListingRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *BuyListingRequest) GetPurchaseId() string {
+	if x != nil {
+		return x.PurchaseId
+	}
+	return ""
+}
+
+func (x *BuyListingRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *BuyListingRequest) GetListingId() string {
+	if x != nil {
+		return x.ListingId
+	}
+	return ""
+}
+
+func (x *BuyListingRequest) GetQuantity() int32 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+func (x *BuyListingRequest) GetPricePerUnit() int64 {
+	if x != nil {
+		return x.PricePerUnit
+	}
+	return 0
+}
+
+func (x *BuyListingRequest) GetTaxRate() float32 {
+	if x != nil {
+		return x.TaxRate
+	}
+	return 0
+}
+
+func (x *BuyListingRequest) GetTax() int64 {
+	if x != nil {
+		return x.Tax
+	}
+	return 0
+}
+
+func (x *BuyListingRequest) GetItemName() string {
+	if x != nil {
+		return x.ItemName
+	}
+	return ""
+}
+
+func (x *BuyListingRequest) GetInventory() *SaveInventoryRequest {
+	if x != nil {
+		return x.Inventory
+	}
+	return nil
+}
+
+type BuyListingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Outcome       MarketOutcome          `protobuf:"varint,1,opt,name=outcome,proto3,enum=aoc.character.v1.MarketOutcome" json:"outcome,omitempty"`
+	Available     int32                  `protobuf:"varint,2,opt,name=available,proto3" json:"available,omitempty"`                    // QUANTITY: the units the listing holds now; the other outcomes of a listing that still holds some: its units
+	SellerId      string                 `protobuf:"bytes,3,opt,name=seller_id,json=sellerId,proto3" json:"seller_id,omitempty"`       // DONE, REPLAYED: the seller's character id, whose mail changed
+	SellerMail    *Mail                  `protobuf:"bytes,4,opt,name=seller_mail,json=sellerMail,proto3" json:"seller_mail,omitempty"` // DONE: the sale mail as it is now (new, or the one this sale was added to)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuyListingResponse) Reset() {
+	*x = BuyListingResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuyListingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuyListingResponse) ProtoMessage() {}
+
+func (x *BuyListingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuyListingResponse.ProtoReflect.Descriptor instead.
+func (*BuyListingResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *BuyListingResponse) GetOutcome() MarketOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return MarketOutcome_MARKET_OUTCOME_UNSPECIFIED
+}
+
+func (x *BuyListingResponse) GetAvailable() int32 {
+	if x != nil {
+		return x.Available
+	}
+	return 0
+}
+
+func (x *BuyListingResponse) GetSellerId() string {
+	if x != nil {
+		return x.SellerId
+	}
+	return ""
+}
+
+func (x *BuyListingResponse) GetSellerMail() *Mail {
+	if x != nil {
+		return x.SellerMail
+	}
+	return nil
+}
+
+// Marketplace (migration 0031): the seller takes a listing off. In ONE transaction it locks the listing, checks it (the seller's, listed, not expired, the quantity the
+// world holds), writes the seller's bags (inventory; id is ignored: the stack is back in them) and marks the listing REMOVED. The fee is not refunded.
+type RemoveListingRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	CharacterId      string                 `protobuf:"bytes,1,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"` // the seller
+	ListingId        string                 `protobuf:"bytes,2,opt,name=listing_id,json=listingId,proto3" json:"listing_id,omitempty"`
+	ExpectedQuantity int32                  `protobuf:"varint,3,opt,name=expected_quantity,json=expectedQuantity,proto3" json:"expected_quantity,omitempty"` // the units the world's cache holds
+	Inventory        *SaveInventoryRequest  `protobuf:"bytes,4,opt,name=inventory,proto3" json:"inventory,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *RemoveListingRequest) Reset() {
+	*x = RemoveListingRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveListingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveListingRequest) ProtoMessage() {}
+
+func (x *RemoveListingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveListingRequest.ProtoReflect.Descriptor instead.
+func (*RemoveListingRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *RemoveListingRequest) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *RemoveListingRequest) GetListingId() string {
+	if x != nil {
+		return x.ListingId
+	}
+	return ""
+}
+
+func (x *RemoveListingRequest) GetExpectedQuantity() int32 {
+	if x != nil {
+		return x.ExpectedQuantity
+	}
+	return 0
+}
+
+func (x *RemoveListingRequest) GetInventory() *SaveInventoryRequest {
+	if x != nil {
+		return x.Inventory
+	}
+	return nil
+}
+
+type RemoveListingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Outcome       MarketOutcome          `protobuf:"varint,1,opt,name=outcome,proto3,enum=aoc.character.v1.MarketOutcome" json:"outcome,omitempty"`
+	Available     int32                  `protobuf:"varint,2,opt,name=available,proto3" json:"available,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveListingResponse) Reset() {
+	*x = RemoveListingResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveListingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveListingResponse) ProtoMessage() {}
+
+func (x *RemoveListingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveListingResponse.ProtoReflect.Descriptor instead.
+func (*RemoveListingResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *RemoveListingResponse) GetOutcome() MarketOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return MarketOutcome_MARKET_OUTCOME_UNSPECIFIED
+}
+
+func (x *RemoveListingResponse) GetAvailable() int32 {
+	if x != nil {
+		return x.Available
+	}
+	return 0
+}
+
+// Marketplace (migration 0031): a listing whose time has come ends. In ONE transaction it locks the listing, marks it EXPIRED_CLAIMED and adds a mail to the seller with the
+// stack attached. Asked for a listing that is expired already it answers REPLAYED.
+type ExpireListingRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ListingId     string                 `protobuf:"bytes,1,opt,name=listing_id,json=listingId,proto3" json:"listing_id,omitempty"`
+	ItemName      string                 `protobuf:"bytes,2,opt,name=item_name,json=itemName,proto3" json:"item_name,omitempty"` // the name the mail shows
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpireListingRequest) Reset() {
+	*x = ExpireListingRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpireListingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpireListingRequest) ProtoMessage() {}
+
+func (x *ExpireListingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpireListingRequest.ProtoReflect.Descriptor instead.
+func (*ExpireListingRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *ExpireListingRequest) GetListingId() string {
+	if x != nil {
+		return x.ListingId
+	}
+	return ""
+}
+
+func (x *ExpireListingRequest) GetItemName() string {
+	if x != nil {
+		return x.ItemName
+	}
+	return ""
+}
+
+type ExpireListingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Outcome       MarketOutcome          `protobuf:"varint,1,opt,name=outcome,proto3,enum=aoc.character.v1.MarketOutcome" json:"outcome,omitempty"`
+	SellerId      string                 `protobuf:"bytes,2,opt,name=seller_id,json=sellerId,proto3" json:"seller_id,omitempty"`
+	SellerMail    *Mail                  `protobuf:"bytes,3,opt,name=seller_mail,json=sellerMail,proto3" json:"seller_mail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpireListingResponse) Reset() {
+	*x = ExpireListingResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpireListingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpireListingResponse) ProtoMessage() {}
+
+func (x *ExpireListingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpireListingResponse.ProtoReflect.Descriptor instead.
+func (*ExpireListingResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *ExpireListingResponse) GetOutcome() MarketOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return MarketOutcome_MARKET_OUTCOME_UNSPECIFIED
+}
+
+func (x *ExpireListingResponse) GetSellerId() string {
+	if x != nil {
+		return x.SellerId
+	}
+	return ""
+}
+
+func (x *ExpireListingResponse) GetSellerMail() *Mail {
+	if x != nil {
+		return x.SellerMail
 	}
 	return nil
 }
@@ -4528,7 +5120,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\aclaimed\x18\n" +
 	" \x01(\bR\aclaimedB\x13\n" +
 	"\x11_persisted_healthB\x11\n" +
-	"\x0f_persisted_mana\"\xec\x01\n" +
+	"\x0f_persisted_mana\"\xb4\x02\n" +
 	"\x04Mail\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06sender\x18\x02 \x01(\tR\x06sender\x12\x18\n" +
@@ -4538,7 +5130,10 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\fissued_at_ms\x18\x06 \x01(\x03R\n" +
 	"issuedAtMs\x12\"\n" +
 	"\rexpires_at_ms\x18\a \x01(\x03R\vexpiresAtMs\x120\n" +
-	"\x05items\x18\b \x03(\v2\x1a.aoc.character.v1.MailItemR\x05items\"4\n" +
+	"\x05items\x18\b \x03(\v2\x1a.aoc.character.v1.MailItemR\x05items\x12!\n" +
+	"\fmoney_copper\x18\t \x01(\x03R\vmoneyCopper\x12#\n" +
+	"\rmoney_claimed\x18\n" +
+	" \x01(\bR\fmoneyClaimed\"4\n" +
 	"\x0fGetMailsRequest\x12!\n" +
 	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\"@\n" +
 	"\x10GetMailsResponse\x12,\n" +
@@ -4558,11 +5153,13 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x04mail\x18\x01 \x01(\v2\x16.aoc.character.v1.MailR\x04mail\"I\n" +
 	"\tMailClaim\x12\x17\n" +
 	"\amail_id\x18\x01 \x01(\tR\x06mailId\x12#\n" +
-	"\rinstance_guid\x18\x02 \x01(\tR\finstanceGuid\"\xb5\x01\n" +
+	"\rinstance_guid\x18\x02 \x01(\tR\finstanceGuid\"\x8f\x02\n" +
 	"\x15ClaimMailItemsRequest\x12!\n" +
 	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x123\n" +
 	"\x06claims\x18\x02 \x03(\v2\x1b.aoc.character.v1.MailClaimR\x06claims\x12D\n" +
-	"\tinventory\x18\x03 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\tinventory\"N\n" +
+	"\tinventory\x18\x03 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\tinventory\x12$\n" +
+	"\x0emoney_mail_ids\x18\x04 \x03(\tR\fmoneyMailIds\x122\n" +
+	"\x15money_expected_copper\x18\x05 \x03(\x03R\x13moneyExpectedCopper\"N\n" +
 	"\x16ClaimMailItemsResponse\x12\x18\n" +
 	"\aclaimed\x18\x01 \x01(\x05R\aclaimed\x12\x1a\n" +
 	"\breplayed\x18\x02 \x01(\bR\breplayed\"\xb2\x02\n" +
@@ -4587,9 +5184,51 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x0fwarehouse_items\x18\x06 \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\x129\n" +
 	"\alisting\x18\a \x01(\v2\x1f.aoc.character.v1.MarketListingR\alisting\"!\n" +
 	"\x1fSaveInventoryAndListingResponse\"\x1b\n" +
-	"\x19ListMarketListingsRequest\"Y\n" +
+	"\x19ListMarketListingsRequest\"\x99\x01\n" +
 	"\x1aListMarketListingsResponse\x12;\n" +
-	"\blistings\x18\x01 \x03(\v2\x1f.aoc.character.v1.MarketListingR\blistings*\xde\x01\n" +
+	"\blistings\x18\x01 \x03(\v2\x1f.aoc.character.v1.MarketListingR\blistings\x12>\n" +
+	"\n" +
+	"node_taxes\x18\x02 \x03(\v2\x1f.aoc.character.v1.NodeMarketTaxR\tnodeTaxes\"b\n" +
+	"\rNodeMarketTax\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\x03R\x04node\x12\x12\n" +
+	"\x04rate\x18\x02 \x01(\x02R\x04rate\x12)\n" +
+	"\x10collected_copper\x18\x03 \x01(\x03R\x0fcollectedCopper\"\xc8\x02\n" +
+	"\x11BuyListingRequest\x12\x1f\n" +
+	"\vpurchase_id\x18\x01 \x01(\tR\n" +
+	"purchaseId\x12!\n" +
+	"\fcharacter_id\x18\x02 \x01(\tR\vcharacterId\x12\x1d\n" +
+	"\n" +
+	"listing_id\x18\x03 \x01(\tR\tlistingId\x12\x1a\n" +
+	"\bquantity\x18\x04 \x01(\x05R\bquantity\x12$\n" +
+	"\x0eprice_per_unit\x18\x05 \x01(\x03R\fpricePerUnit\x12\x19\n" +
+	"\btax_rate\x18\x06 \x01(\x02R\ataxRate\x12\x10\n" +
+	"\x03tax\x18\a \x01(\x03R\x03tax\x12\x1b\n" +
+	"\titem_name\x18\b \x01(\tR\bitemName\x12D\n" +
+	"\tinventory\x18\t \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\tinventory\"\xc3\x01\n" +
+	"\x12BuyListingResponse\x129\n" +
+	"\aoutcome\x18\x01 \x01(\x0e2\x1f.aoc.character.v1.MarketOutcomeR\aoutcome\x12\x1c\n" +
+	"\tavailable\x18\x02 \x01(\x05R\tavailable\x12\x1b\n" +
+	"\tseller_id\x18\x03 \x01(\tR\bsellerId\x127\n" +
+	"\vseller_mail\x18\x04 \x01(\v2\x16.aoc.character.v1.MailR\n" +
+	"sellerMail\"\xcb\x01\n" +
+	"\x14RemoveListingRequest\x12!\n" +
+	"\fcharacter_id\x18\x01 \x01(\tR\vcharacterId\x12\x1d\n" +
+	"\n" +
+	"listing_id\x18\x02 \x01(\tR\tlistingId\x12+\n" +
+	"\x11expected_quantity\x18\x03 \x01(\x05R\x10expectedQuantity\x12D\n" +
+	"\tinventory\x18\x04 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\tinventory\"p\n" +
+	"\x15RemoveListingResponse\x129\n" +
+	"\aoutcome\x18\x01 \x01(\x0e2\x1f.aoc.character.v1.MarketOutcomeR\aoutcome\x12\x1c\n" +
+	"\tavailable\x18\x02 \x01(\x05R\tavailable\"R\n" +
+	"\x14ExpireListingRequest\x12\x1d\n" +
+	"\n" +
+	"listing_id\x18\x01 \x01(\tR\tlistingId\x12\x1b\n" +
+	"\titem_name\x18\x02 \x01(\tR\bitemName\"\xa8\x01\n" +
+	"\x15ExpireListingResponse\x129\n" +
+	"\aoutcome\x18\x01 \x01(\x0e2\x1f.aoc.character.v1.MarketOutcomeR\aoutcome\x12\x1b\n" +
+	"\tseller_id\x18\x02 \x01(\tR\bsellerId\x127\n" +
+	"\vseller_mail\x18\x03 \x01(\v2\x16.aoc.character.v1.MailR\n" +
+	"sellerMail*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +
 	"\x1aITEM_CONTAINER_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ITEM_CONTAINER_BACKPACK\x10\x01\x12\x1c\n" +
@@ -4597,7 +5236,18 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x14ITEM_CONTAINER_QUEST\x10\x03\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE0\x10\x04\x12\x1c\n" +
 	"\x18ITEM_CONTAINER_RESOURCE1\x10\x05\x12\x1c\n" +
-	"\x18ITEM_CONTAINER_RESOURCE2\x10\x062\xe2\f\n" +
+	"\x18ITEM_CONTAINER_RESOURCE2\x10\x06*\xca\x02\n" +
+	"\rMarketOutcome\x12\x1e\n" +
+	"\x1aMARKET_OUTCOME_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13MARKET_OUTCOME_DONE\x10\x01\x12\x1b\n" +
+	"\x17MARKET_OUTCOME_REPLAYED\x10\x02\x12\x1f\n" +
+	"\x1bMARKET_OUTCOME_LISTING_GONE\x10\x03\x12\"\n" +
+	"\x1eMARKET_OUTCOME_LISTING_EXPIRED\x10\x04\x12\x1b\n" +
+	"\x17MARKET_OUTCOME_QUANTITY\x10\x05\x12 \n" +
+	"\x1cMARKET_OUTCOME_PRICE_CHANGED\x10\x06\x12\x1f\n" +
+	"\x1bMARKET_OUTCOME_RATE_CHANGED\x10\a\x12\x1e\n" +
+	"\x1aMARKET_OUTCOME_OWN_LISTING\x10\b\x12\x1e\n" +
+	"\x1aMARKET_OUTCOME_NOT_EXPIRED\x10\t2\xff\x0e\n" +
 	"\x10CharacterService\x12f\n" +
 	"\x0fCreateCharacter\x12(.aoc.character.v1.CreateCharacterRequest\x1a).aoc.character.v1.CreateCharacterResponse\x12c\n" +
 	"\x0eListCharacters\x12'.aoc.character.v1.ListCharactersRequest\x1a(.aoc.character.v1.ListCharactersResponse\x12]\n" +
@@ -4615,7 +5265,11 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"CreateMail\x12#.aoc.character.v1.CreateMailRequest\x1a$.aoc.character.v1.CreateMailResponse\x12c\n" +
 	"\x0eClaimMailItems\x12'.aoc.character.v1.ClaimMailItemsRequest\x1a(.aoc.character.v1.ClaimMailItemsResponse\x12~\n" +
 	"\x17SaveInventoryAndListing\x120.aoc.character.v1.SaveInventoryAndListingRequest\x1a1.aoc.character.v1.SaveInventoryAndListingResponse\x12o\n" +
-	"\x12ListMarketListings\x12+.aoc.character.v1.ListMarketListingsRequest\x1a,.aoc.character.v1.ListMarketListingsResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
+	"\x12ListMarketListings\x12+.aoc.character.v1.ListMarketListingsRequest\x1a,.aoc.character.v1.ListMarketListingsResponse\x12W\n" +
+	"\n" +
+	"BuyListing\x12#.aoc.character.v1.BuyListingRequest\x1a$.aoc.character.v1.BuyListingResponse\x12`\n" +
+	"\rRemoveListing\x12&.aoc.character.v1.RemoveListingRequest\x1a'.aoc.character.v1.RemoveListingResponse\x12`\n" +
+	"\rExpireListing\x12&.aoc.character.v1.ExpireListingRequest\x1a'.aoc.character.v1.ExpireListingResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
 
 var (
 	file_aoc_character_v1_character_proto_rawDescOnce sync.Once
@@ -4629,154 +5283,176 @@ func file_aoc_character_v1_character_proto_rawDescGZIP() []byte {
 	return file_aoc_character_v1_character_proto_rawDescData
 }
 
-var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
+var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
 var file_aoc_character_v1_character_proto_goTypes = []any{
 	(ItemContainer)(0),                      // 0: aoc.character.v1.ItemContainer
-	(*Position)(nil),                        // 1: aoc.character.v1.Position
-	(*Character)(nil),                       // 2: aoc.character.v1.Character
-	(*PvpState)(nil),                        // 3: aoc.character.v1.PvpState
-	(*Friend)(nil),                          // 4: aoc.character.v1.Friend
-	(*FriendRequest)(nil),                   // 5: aoc.character.v1.FriendRequest
-	(*GuildRank)(nil),                       // 6: aoc.character.v1.GuildRank
-	(*GuildMember)(nil),                     // 7: aoc.character.v1.GuildMember
-	(*Guild)(nil),                           // 8: aoc.character.v1.Guild
-	(*WarehouseItem)(nil),                   // 9: aoc.character.v1.WarehouseItem
-	(*ProcessingJob)(nil),                   // 10: aoc.character.v1.ProcessingJob
-	(*JobResource)(nil),                     // 11: aoc.character.v1.JobResource
-	(*JobRarity)(nil),                       // 12: aoc.character.v1.JobRarity
-	(*WalletEntry)(nil),                     // 13: aoc.character.v1.WalletEntry
-	(*ProfessionState)(nil),                 // 14: aoc.character.v1.ProfessionState
-	(*TreeRanks)(nil),                       // 15: aoc.character.v1.TreeRanks
-	(*ActionbarSlot)(nil),                   // 16: aoc.character.v1.ActionbarSlot
-	(*Experience)(nil),                      // 17: aoc.character.v1.Experience
-	(*Item)(nil),                            // 18: aoc.character.v1.Item
-	(*CreateCharacterRequest)(nil),          // 19: aoc.character.v1.CreateCharacterRequest
-	(*CreateCharacterResponse)(nil),         // 20: aoc.character.v1.CreateCharacterResponse
-	(*ListCharactersRequest)(nil),           // 21: aoc.character.v1.ListCharactersRequest
-	(*ListCharactersResponse)(nil),          // 22: aoc.character.v1.ListCharactersResponse
-	(*GetCharacterRequest)(nil),             // 23: aoc.character.v1.GetCharacterRequest
-	(*GetCharacterResponse)(nil),            // 24: aoc.character.v1.GetCharacterResponse
-	(*GetCharacterByNameRequest)(nil),       // 25: aoc.character.v1.GetCharacterByNameRequest
-	(*GetCharacterByNameResponse)(nil),      // 26: aoc.character.v1.GetCharacterByNameResponse
-	(*SaveCharacterStateRequest)(nil),       // 27: aoc.character.v1.SaveCharacterStateRequest
-	(*SaveCharacterStateResponse)(nil),      // 28: aoc.character.v1.SaveCharacterStateResponse
-	(*DeleteCharacterRequest)(nil),          // 29: aoc.character.v1.DeleteCharacterRequest
-	(*DeleteCharacterResponse)(nil),         // 30: aoc.character.v1.DeleteCharacterResponse
-	(*SaveInventoryRequest)(nil),            // 31: aoc.character.v1.SaveInventoryRequest
-	(*SaveInventoryResponse)(nil),           // 32: aoc.character.v1.SaveInventoryResponse
-	(*SaveProgressRequest)(nil),             // 33: aoc.character.v1.SaveProgressRequest
-	(*SaveProgressResponse)(nil),            // 34: aoc.character.v1.SaveProgressResponse
-	(*SaveGuildRequest)(nil),                // 35: aoc.character.v1.SaveGuildRequest
-	(*SaveGuildResponse)(nil),               // 36: aoc.character.v1.SaveGuildResponse
-	(*SaveGuildCooldownRequest)(nil),        // 37: aoc.character.v1.SaveGuildCooldownRequest
-	(*SaveGuildCooldownResponse)(nil),       // 38: aoc.character.v1.SaveGuildCooldownResponse
-	(*MailItem)(nil),                        // 39: aoc.character.v1.MailItem
-	(*Mail)(nil),                            // 40: aoc.character.v1.Mail
-	(*GetMailsRequest)(nil),                 // 41: aoc.character.v1.GetMailsRequest
-	(*GetMailsResponse)(nil),                // 42: aoc.character.v1.GetMailsResponse
-	(*SaveMailRequest)(nil),                 // 43: aoc.character.v1.SaveMailRequest
-	(*SaveMailResponse)(nil),                // 44: aoc.character.v1.SaveMailResponse
-	(*CreateMailRequest)(nil),               // 45: aoc.character.v1.CreateMailRequest
-	(*CreateMailResponse)(nil),              // 46: aoc.character.v1.CreateMailResponse
-	(*MailClaim)(nil),                       // 47: aoc.character.v1.MailClaim
-	(*ClaimMailItemsRequest)(nil),           // 48: aoc.character.v1.ClaimMailItemsRequest
-	(*ClaimMailItemsResponse)(nil),          // 49: aoc.character.v1.ClaimMailItemsResponse
-	(*MarketListing)(nil),                   // 50: aoc.character.v1.MarketListing
-	(*SaveInventoryAndListingRequest)(nil),  // 51: aoc.character.v1.SaveInventoryAndListingRequest
-	(*SaveInventoryAndListingResponse)(nil), // 52: aoc.character.v1.SaveInventoryAndListingResponse
-	(*ListMarketListingsRequest)(nil),       // 53: aoc.character.v1.ListMarketListingsRequest
-	(*ListMarketListingsResponse)(nil),      // 54: aoc.character.v1.ListMarketListingsResponse
+	(MarketOutcome)(0),                      // 1: aoc.character.v1.MarketOutcome
+	(*Position)(nil),                        // 2: aoc.character.v1.Position
+	(*Character)(nil),                       // 3: aoc.character.v1.Character
+	(*PvpState)(nil),                        // 4: aoc.character.v1.PvpState
+	(*Friend)(nil),                          // 5: aoc.character.v1.Friend
+	(*FriendRequest)(nil),                   // 6: aoc.character.v1.FriendRequest
+	(*GuildRank)(nil),                       // 7: aoc.character.v1.GuildRank
+	(*GuildMember)(nil),                     // 8: aoc.character.v1.GuildMember
+	(*Guild)(nil),                           // 9: aoc.character.v1.Guild
+	(*WarehouseItem)(nil),                   // 10: aoc.character.v1.WarehouseItem
+	(*ProcessingJob)(nil),                   // 11: aoc.character.v1.ProcessingJob
+	(*JobResource)(nil),                     // 12: aoc.character.v1.JobResource
+	(*JobRarity)(nil),                       // 13: aoc.character.v1.JobRarity
+	(*WalletEntry)(nil),                     // 14: aoc.character.v1.WalletEntry
+	(*ProfessionState)(nil),                 // 15: aoc.character.v1.ProfessionState
+	(*TreeRanks)(nil),                       // 16: aoc.character.v1.TreeRanks
+	(*ActionbarSlot)(nil),                   // 17: aoc.character.v1.ActionbarSlot
+	(*Experience)(nil),                      // 18: aoc.character.v1.Experience
+	(*Item)(nil),                            // 19: aoc.character.v1.Item
+	(*CreateCharacterRequest)(nil),          // 20: aoc.character.v1.CreateCharacterRequest
+	(*CreateCharacterResponse)(nil),         // 21: aoc.character.v1.CreateCharacterResponse
+	(*ListCharactersRequest)(nil),           // 22: aoc.character.v1.ListCharactersRequest
+	(*ListCharactersResponse)(nil),          // 23: aoc.character.v1.ListCharactersResponse
+	(*GetCharacterRequest)(nil),             // 24: aoc.character.v1.GetCharacterRequest
+	(*GetCharacterResponse)(nil),            // 25: aoc.character.v1.GetCharacterResponse
+	(*GetCharacterByNameRequest)(nil),       // 26: aoc.character.v1.GetCharacterByNameRequest
+	(*GetCharacterByNameResponse)(nil),      // 27: aoc.character.v1.GetCharacterByNameResponse
+	(*SaveCharacterStateRequest)(nil),       // 28: aoc.character.v1.SaveCharacterStateRequest
+	(*SaveCharacterStateResponse)(nil),      // 29: aoc.character.v1.SaveCharacterStateResponse
+	(*DeleteCharacterRequest)(nil),          // 30: aoc.character.v1.DeleteCharacterRequest
+	(*DeleteCharacterResponse)(nil),         // 31: aoc.character.v1.DeleteCharacterResponse
+	(*SaveInventoryRequest)(nil),            // 32: aoc.character.v1.SaveInventoryRequest
+	(*SaveInventoryResponse)(nil),           // 33: aoc.character.v1.SaveInventoryResponse
+	(*SaveProgressRequest)(nil),             // 34: aoc.character.v1.SaveProgressRequest
+	(*SaveProgressResponse)(nil),            // 35: aoc.character.v1.SaveProgressResponse
+	(*SaveGuildRequest)(nil),                // 36: aoc.character.v1.SaveGuildRequest
+	(*SaveGuildResponse)(nil),               // 37: aoc.character.v1.SaveGuildResponse
+	(*SaveGuildCooldownRequest)(nil),        // 38: aoc.character.v1.SaveGuildCooldownRequest
+	(*SaveGuildCooldownResponse)(nil),       // 39: aoc.character.v1.SaveGuildCooldownResponse
+	(*MailItem)(nil),                        // 40: aoc.character.v1.MailItem
+	(*Mail)(nil),                            // 41: aoc.character.v1.Mail
+	(*GetMailsRequest)(nil),                 // 42: aoc.character.v1.GetMailsRequest
+	(*GetMailsResponse)(nil),                // 43: aoc.character.v1.GetMailsResponse
+	(*SaveMailRequest)(nil),                 // 44: aoc.character.v1.SaveMailRequest
+	(*SaveMailResponse)(nil),                // 45: aoc.character.v1.SaveMailResponse
+	(*CreateMailRequest)(nil),               // 46: aoc.character.v1.CreateMailRequest
+	(*CreateMailResponse)(nil),              // 47: aoc.character.v1.CreateMailResponse
+	(*MailClaim)(nil),                       // 48: aoc.character.v1.MailClaim
+	(*ClaimMailItemsRequest)(nil),           // 49: aoc.character.v1.ClaimMailItemsRequest
+	(*ClaimMailItemsResponse)(nil),          // 50: aoc.character.v1.ClaimMailItemsResponse
+	(*MarketListing)(nil),                   // 51: aoc.character.v1.MarketListing
+	(*SaveInventoryAndListingRequest)(nil),  // 52: aoc.character.v1.SaveInventoryAndListingRequest
+	(*SaveInventoryAndListingResponse)(nil), // 53: aoc.character.v1.SaveInventoryAndListingResponse
+	(*ListMarketListingsRequest)(nil),       // 54: aoc.character.v1.ListMarketListingsRequest
+	(*ListMarketListingsResponse)(nil),      // 55: aoc.character.v1.ListMarketListingsResponse
+	(*NodeMarketTax)(nil),                   // 56: aoc.character.v1.NodeMarketTax
+	(*BuyListingRequest)(nil),               // 57: aoc.character.v1.BuyListingRequest
+	(*BuyListingResponse)(nil),              // 58: aoc.character.v1.BuyListingResponse
+	(*RemoveListingRequest)(nil),            // 59: aoc.character.v1.RemoveListingRequest
+	(*RemoveListingResponse)(nil),           // 60: aoc.character.v1.RemoveListingResponse
+	(*ExpireListingRequest)(nil),            // 61: aoc.character.v1.ExpireListingRequest
+	(*ExpireListingResponse)(nil),           // 62: aoc.character.v1.ExpireListingResponse
 }
 var file_aoc_character_v1_character_proto_depIdxs = []int32{
-	1,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
-	18, // 1: aoc.character.v1.Character.items:type_name -> aoc.character.v1.Item
-	17, // 2: aoc.character.v1.Character.experience:type_name -> aoc.character.v1.Experience
-	15, // 3: aoc.character.v1.Character.skill_ranks:type_name -> aoc.character.v1.TreeRanks
-	16, // 4: aoc.character.v1.Character.action_bar:type_name -> aoc.character.v1.ActionbarSlot
-	14, // 5: aoc.character.v1.Character.professions:type_name -> aoc.character.v1.ProfessionState
-	13, // 6: aoc.character.v1.Character.wallet:type_name -> aoc.character.v1.WalletEntry
-	10, // 7: aoc.character.v1.Character.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
-	9,  // 8: aoc.character.v1.Character.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
-	4,  // 9: aoc.character.v1.Character.friends:type_name -> aoc.character.v1.Friend
-	5,  // 10: aoc.character.v1.Character.friend_requests:type_name -> aoc.character.v1.FriendRequest
-	3,  // 11: aoc.character.v1.Character.pvp:type_name -> aoc.character.v1.PvpState
-	8,  // 12: aoc.character.v1.Character.guild:type_name -> aoc.character.v1.Guild
-	6,  // 13: aoc.character.v1.Guild.ranks:type_name -> aoc.character.v1.GuildRank
-	7,  // 14: aoc.character.v1.Guild.members:type_name -> aoc.character.v1.GuildMember
-	11, // 15: aoc.character.v1.ProcessingJob.resources:type_name -> aoc.character.v1.JobResource
-	12, // 16: aoc.character.v1.JobResource.rarities:type_name -> aoc.character.v1.JobRarity
+	2,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
+	19, // 1: aoc.character.v1.Character.items:type_name -> aoc.character.v1.Item
+	18, // 2: aoc.character.v1.Character.experience:type_name -> aoc.character.v1.Experience
+	16, // 3: aoc.character.v1.Character.skill_ranks:type_name -> aoc.character.v1.TreeRanks
+	17, // 4: aoc.character.v1.Character.action_bar:type_name -> aoc.character.v1.ActionbarSlot
+	15, // 5: aoc.character.v1.Character.professions:type_name -> aoc.character.v1.ProfessionState
+	14, // 6: aoc.character.v1.Character.wallet:type_name -> aoc.character.v1.WalletEntry
+	11, // 7: aoc.character.v1.Character.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
+	10, // 8: aoc.character.v1.Character.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
+	5,  // 9: aoc.character.v1.Character.friends:type_name -> aoc.character.v1.Friend
+	6,  // 10: aoc.character.v1.Character.friend_requests:type_name -> aoc.character.v1.FriendRequest
+	4,  // 11: aoc.character.v1.Character.pvp:type_name -> aoc.character.v1.PvpState
+	9,  // 12: aoc.character.v1.Character.guild:type_name -> aoc.character.v1.Guild
+	7,  // 13: aoc.character.v1.Guild.ranks:type_name -> aoc.character.v1.GuildRank
+	8,  // 14: aoc.character.v1.Guild.members:type_name -> aoc.character.v1.GuildMember
+	12, // 15: aoc.character.v1.ProcessingJob.resources:type_name -> aoc.character.v1.JobResource
+	13, // 16: aoc.character.v1.JobResource.rarities:type_name -> aoc.character.v1.JobRarity
 	0,  // 17: aoc.character.v1.Item.container:type_name -> aoc.character.v1.ItemContainer
-	2,  // 18: aoc.character.v1.CreateCharacterResponse.character:type_name -> aoc.character.v1.Character
-	2,  // 19: aoc.character.v1.ListCharactersResponse.characters:type_name -> aoc.character.v1.Character
-	2,  // 20: aoc.character.v1.GetCharacterResponse.character:type_name -> aoc.character.v1.Character
-	2,  // 21: aoc.character.v1.GetCharacterByNameResponse.character:type_name -> aoc.character.v1.Character
-	1,  // 22: aoc.character.v1.SaveCharacterStateRequest.position:type_name -> aoc.character.v1.Position
-	2,  // 23: aoc.character.v1.SaveCharacterStateResponse.character:type_name -> aoc.character.v1.Character
-	18, // 24: aoc.character.v1.SaveInventoryRequest.items:type_name -> aoc.character.v1.Item
-	13, // 25: aoc.character.v1.SaveInventoryRequest.wallet:type_name -> aoc.character.v1.WalletEntry
-	10, // 26: aoc.character.v1.SaveInventoryRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
-	9,  // 27: aoc.character.v1.SaveInventoryRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
-	17, // 28: aoc.character.v1.SaveProgressRequest.experience:type_name -> aoc.character.v1.Experience
-	15, // 29: aoc.character.v1.SaveProgressRequest.skill_ranks:type_name -> aoc.character.v1.TreeRanks
-	16, // 30: aoc.character.v1.SaveProgressRequest.action_bar:type_name -> aoc.character.v1.ActionbarSlot
-	14, // 31: aoc.character.v1.SaveProgressRequest.professions:type_name -> aoc.character.v1.ProfessionState
-	4,  // 32: aoc.character.v1.SaveProgressRequest.friends:type_name -> aoc.character.v1.Friend
-	5,  // 33: aoc.character.v1.SaveProgressRequest.friend_requests:type_name -> aoc.character.v1.FriendRequest
-	3,  // 34: aoc.character.v1.SaveProgressRequest.pvp:type_name -> aoc.character.v1.PvpState
-	2,  // 35: aoc.character.v1.SaveProgressResponse.character:type_name -> aoc.character.v1.Character
-	8,  // 36: aoc.character.v1.SaveGuildRequest.guild:type_name -> aoc.character.v1.Guild
-	39, // 37: aoc.character.v1.Mail.items:type_name -> aoc.character.v1.MailItem
-	40, // 38: aoc.character.v1.GetMailsResponse.mails:type_name -> aoc.character.v1.Mail
-	40, // 39: aoc.character.v1.SaveMailRequest.mail:type_name -> aoc.character.v1.Mail
-	39, // 40: aoc.character.v1.CreateMailRequest.items:type_name -> aoc.character.v1.MailItem
-	40, // 41: aoc.character.v1.CreateMailResponse.mail:type_name -> aoc.character.v1.Mail
-	47, // 42: aoc.character.v1.ClaimMailItemsRequest.claims:type_name -> aoc.character.v1.MailClaim
-	31, // 43: aoc.character.v1.ClaimMailItemsRequest.inventory:type_name -> aoc.character.v1.SaveInventoryRequest
-	18, // 44: aoc.character.v1.MarketListing.item:type_name -> aoc.character.v1.Item
-	18, // 45: aoc.character.v1.SaveInventoryAndListingRequest.items:type_name -> aoc.character.v1.Item
-	13, // 46: aoc.character.v1.SaveInventoryAndListingRequest.wallet:type_name -> aoc.character.v1.WalletEntry
-	10, // 47: aoc.character.v1.SaveInventoryAndListingRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
-	9,  // 48: aoc.character.v1.SaveInventoryAndListingRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
-	50, // 49: aoc.character.v1.SaveInventoryAndListingRequest.listing:type_name -> aoc.character.v1.MarketListing
-	50, // 50: aoc.character.v1.ListMarketListingsResponse.listings:type_name -> aoc.character.v1.MarketListing
-	19, // 51: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
-	21, // 52: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
-	23, // 53: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
-	25, // 54: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
-	27, // 55: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
-	29, // 56: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
-	31, // 57: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
-	33, // 58: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
-	35, // 59: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
-	37, // 60: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
-	41, // 61: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
-	43, // 62: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
-	45, // 63: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
-	48, // 64: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
-	51, // 65: aoc.character.v1.CharacterService.SaveInventoryAndListing:input_type -> aoc.character.v1.SaveInventoryAndListingRequest
-	53, // 66: aoc.character.v1.CharacterService.ListMarketListings:input_type -> aoc.character.v1.ListMarketListingsRequest
-	20, // 67: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
-	22, // 68: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
-	24, // 69: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
-	26, // 70: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
-	28, // 71: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
-	30, // 72: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
-	32, // 73: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
-	34, // 74: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
-	36, // 75: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
-	38, // 76: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
-	42, // 77: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
-	44, // 78: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
-	46, // 79: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
-	49, // 80: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
-	52, // 81: aoc.character.v1.CharacterService.SaveInventoryAndListing:output_type -> aoc.character.v1.SaveInventoryAndListingResponse
-	54, // 82: aoc.character.v1.CharacterService.ListMarketListings:output_type -> aoc.character.v1.ListMarketListingsResponse
-	67, // [67:83] is the sub-list for method output_type
-	51, // [51:67] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	3,  // 18: aoc.character.v1.CreateCharacterResponse.character:type_name -> aoc.character.v1.Character
+	3,  // 19: aoc.character.v1.ListCharactersResponse.characters:type_name -> aoc.character.v1.Character
+	3,  // 20: aoc.character.v1.GetCharacterResponse.character:type_name -> aoc.character.v1.Character
+	3,  // 21: aoc.character.v1.GetCharacterByNameResponse.character:type_name -> aoc.character.v1.Character
+	2,  // 22: aoc.character.v1.SaveCharacterStateRequest.position:type_name -> aoc.character.v1.Position
+	3,  // 23: aoc.character.v1.SaveCharacterStateResponse.character:type_name -> aoc.character.v1.Character
+	19, // 24: aoc.character.v1.SaveInventoryRequest.items:type_name -> aoc.character.v1.Item
+	14, // 25: aoc.character.v1.SaveInventoryRequest.wallet:type_name -> aoc.character.v1.WalletEntry
+	11, // 26: aoc.character.v1.SaveInventoryRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
+	10, // 27: aoc.character.v1.SaveInventoryRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
+	18, // 28: aoc.character.v1.SaveProgressRequest.experience:type_name -> aoc.character.v1.Experience
+	16, // 29: aoc.character.v1.SaveProgressRequest.skill_ranks:type_name -> aoc.character.v1.TreeRanks
+	17, // 30: aoc.character.v1.SaveProgressRequest.action_bar:type_name -> aoc.character.v1.ActionbarSlot
+	15, // 31: aoc.character.v1.SaveProgressRequest.professions:type_name -> aoc.character.v1.ProfessionState
+	5,  // 32: aoc.character.v1.SaveProgressRequest.friends:type_name -> aoc.character.v1.Friend
+	6,  // 33: aoc.character.v1.SaveProgressRequest.friend_requests:type_name -> aoc.character.v1.FriendRequest
+	4,  // 34: aoc.character.v1.SaveProgressRequest.pvp:type_name -> aoc.character.v1.PvpState
+	3,  // 35: aoc.character.v1.SaveProgressResponse.character:type_name -> aoc.character.v1.Character
+	9,  // 36: aoc.character.v1.SaveGuildRequest.guild:type_name -> aoc.character.v1.Guild
+	40, // 37: aoc.character.v1.Mail.items:type_name -> aoc.character.v1.MailItem
+	41, // 38: aoc.character.v1.GetMailsResponse.mails:type_name -> aoc.character.v1.Mail
+	41, // 39: aoc.character.v1.SaveMailRequest.mail:type_name -> aoc.character.v1.Mail
+	40, // 40: aoc.character.v1.CreateMailRequest.items:type_name -> aoc.character.v1.MailItem
+	41, // 41: aoc.character.v1.CreateMailResponse.mail:type_name -> aoc.character.v1.Mail
+	48, // 42: aoc.character.v1.ClaimMailItemsRequest.claims:type_name -> aoc.character.v1.MailClaim
+	32, // 43: aoc.character.v1.ClaimMailItemsRequest.inventory:type_name -> aoc.character.v1.SaveInventoryRequest
+	19, // 44: aoc.character.v1.MarketListing.item:type_name -> aoc.character.v1.Item
+	19, // 45: aoc.character.v1.SaveInventoryAndListingRequest.items:type_name -> aoc.character.v1.Item
+	14, // 46: aoc.character.v1.SaveInventoryAndListingRequest.wallet:type_name -> aoc.character.v1.WalletEntry
+	11, // 47: aoc.character.v1.SaveInventoryAndListingRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
+	10, // 48: aoc.character.v1.SaveInventoryAndListingRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
+	51, // 49: aoc.character.v1.SaveInventoryAndListingRequest.listing:type_name -> aoc.character.v1.MarketListing
+	51, // 50: aoc.character.v1.ListMarketListingsResponse.listings:type_name -> aoc.character.v1.MarketListing
+	56, // 51: aoc.character.v1.ListMarketListingsResponse.node_taxes:type_name -> aoc.character.v1.NodeMarketTax
+	32, // 52: aoc.character.v1.BuyListingRequest.inventory:type_name -> aoc.character.v1.SaveInventoryRequest
+	1,  // 53: aoc.character.v1.BuyListingResponse.outcome:type_name -> aoc.character.v1.MarketOutcome
+	41, // 54: aoc.character.v1.BuyListingResponse.seller_mail:type_name -> aoc.character.v1.Mail
+	32, // 55: aoc.character.v1.RemoveListingRequest.inventory:type_name -> aoc.character.v1.SaveInventoryRequest
+	1,  // 56: aoc.character.v1.RemoveListingResponse.outcome:type_name -> aoc.character.v1.MarketOutcome
+	1,  // 57: aoc.character.v1.ExpireListingResponse.outcome:type_name -> aoc.character.v1.MarketOutcome
+	41, // 58: aoc.character.v1.ExpireListingResponse.seller_mail:type_name -> aoc.character.v1.Mail
+	20, // 59: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
+	22, // 60: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
+	24, // 61: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
+	26, // 62: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
+	28, // 63: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
+	30, // 64: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
+	32, // 65: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
+	34, // 66: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
+	36, // 67: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
+	38, // 68: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
+	42, // 69: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
+	44, // 70: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
+	46, // 71: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
+	49, // 72: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
+	52, // 73: aoc.character.v1.CharacterService.SaveInventoryAndListing:input_type -> aoc.character.v1.SaveInventoryAndListingRequest
+	54, // 74: aoc.character.v1.CharacterService.ListMarketListings:input_type -> aoc.character.v1.ListMarketListingsRequest
+	57, // 75: aoc.character.v1.CharacterService.BuyListing:input_type -> aoc.character.v1.BuyListingRequest
+	59, // 76: aoc.character.v1.CharacterService.RemoveListing:input_type -> aoc.character.v1.RemoveListingRequest
+	61, // 77: aoc.character.v1.CharacterService.ExpireListing:input_type -> aoc.character.v1.ExpireListingRequest
+	21, // 78: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
+	23, // 79: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
+	25, // 80: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
+	27, // 81: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
+	29, // 82: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
+	31, // 83: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
+	33, // 84: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
+	35, // 85: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
+	37, // 86: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
+	39, // 87: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
+	43, // 88: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
+	45, // 89: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
+	47, // 90: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
+	50, // 91: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
+	53, // 92: aoc.character.v1.CharacterService.SaveInventoryAndListing:output_type -> aoc.character.v1.SaveInventoryAndListingResponse
+	55, // 93: aoc.character.v1.CharacterService.ListMarketListings:output_type -> aoc.character.v1.ListMarketListingsResponse
+	58, // 94: aoc.character.v1.CharacterService.BuyListing:output_type -> aoc.character.v1.BuyListingResponse
+	60, // 95: aoc.character.v1.CharacterService.RemoveListing:output_type -> aoc.character.v1.RemoveListingResponse
+	62, // 96: aoc.character.v1.CharacterService.ExpireListing:output_type -> aoc.character.v1.ExpireListingResponse
+	78, // [78:97] is the sub-list for method output_type
+	59, // [59:78] is the sub-list for method input_type
+	59, // [59:59] is the sub-list for extension type_name
+	59, // [59:59] is the sub-list for extension extendee
+	0,  // [0:59] is the sub-list for field type_name
 }
 
 func init() { file_aoc_character_v1_character_proto_init() }
@@ -4792,8 +5468,8 @@ func file_aoc_character_v1_character_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_character_v1_character_proto_rawDesc), len(file_aoc_character_v1_character_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   54,
+			NumEnums:      2,
+			NumMessages:   61,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

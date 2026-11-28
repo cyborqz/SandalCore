@@ -56,7 +56,7 @@ func before30(t *testing.T) *pgxpool.Pool {
 // schemaWithoutMarketListings lists every column, constraint, index and table but the one of 0030: what 0030 must not change.
 func schemaWithoutMarketListings(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_market_listings')`
+	const skip = `('character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
@@ -292,6 +292,7 @@ func TestMigration0030RollbackFromTheREADME(t *testing.T) {
 		('11112222333344445555666677778888', $1, 1, 7001, '0123456789abcdef0123456789abcdef', 1, 1, 0, 100, 0, 1771000000000, 0)`, cybID); err != nil {
 		t.Fatal(err)
 	}
+	rollBackLaterMigrations(t, pool) // (0031 depends on this migration's tables: it goes first, as the README says)
 	if _, err := pool.Exec(ctx, rollback); err != nil {
 		t.Fatalf("the README's rollback: %v", err)
 	}

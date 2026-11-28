@@ -183,3 +183,4 @@ void PlayerSession::register_interact_rpcs(RpcTable& t) {
 
 #include "market/market.inc"
 #include "market/market_requests.inc"
+#include "market/market_sales.inc"

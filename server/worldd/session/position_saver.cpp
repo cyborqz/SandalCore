@@ -353,11 +353,17 @@ bool CharacterSaver::claim_the_inventory_write(const std::string& character_id) 
 svc::MailClaimResult CharacterSaver::claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>& claims, std::vector<svc::InventoryItem> items,
                                                       std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
                                                       std::vector<svc::WarehouseItem> warehouse) {
+    return claim_mail(character_id, claims, {}, std::move(items), std::move(wallet), std::move(jobs), std::move(known_recipes), std::move(warehouse));
+}
+
+svc::MailClaimResult CharacterSaver::claim_mail(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::MoneyClaim>& money_mails,
+                                                std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                                std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) {
     svc::MailClaimResult result;
     result.status = svc::CallStatus::Unavailable;
     if (!claim_the_inventory_write(character_id)) return result;
     try {
-        result = api_.claim_mail_items(character_id, claims, items, wallet, jobs, known_recipes, warehouse);
+        result = api_.claim_mail(character_id, claims, money_mails, items, wallet, jobs, known_recipes, warehouse);
         if (result.status == svc::CallStatus::Ok) {
             std::lock_guard<std::mutex> lock(mu_);
             ++inventories_saved_;
@@ -401,6 +407,60 @@ svc::MarketSaveResult CharacterSaver::save_inventory_and_listing_now(const std::
     } catch (const std::exception& e) {
         spdlog::error("[saver] the market listing save of {} threw {}", character_id, e.what());
         return svc::MarketSaveResult{svc::CallStatus::Unavailable, "the call threw"};
+    }
+}
+
+svc::BuyResult CharacterSaver::buy_listing_now(const svc::BuyRequest& request) {
+    svc::BuyResult result;
+    result.status = svc::CallStatus::Unavailable;
+    result.reason = "the saver is stopping";
+    if (!claim_the_inventory_write(request.character_id)) return result;
+    try {
+        result = api_.buy_listing(request);
+        if (result.status == svc::CallStatus::Ok && svc::market_outcome_stored(result.outcome)) {
+            std::lock_guard<std::mutex> lock(mu_);
+            ++inventories_saved_;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] the market purchase of {} threw {}", request.character_id, e.what());
+        result = {};
+        result.status = svc::CallStatus::Unavailable;
+        result.reason = "the call threw";
+        return result;
+    }
+}
+
+svc::RemoveResult CharacterSaver::remove_listing_now(const svc::RemoveRequest& request) {
+    svc::RemoveResult result;
+    result.status = svc::CallStatus::Unavailable;
+    result.reason = "the saver is stopping";
+    if (!claim_the_inventory_write(request.character_id)) return result;
+    try {
+        result = api_.remove_listing(request);
+        if (result.status == svc::CallStatus::Ok && svc::market_outcome_stored(result.outcome)) {
+            std::lock_guard<std::mutex> lock(mu_);
+            ++inventories_saved_;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] the market removal of {} threw {}", request.character_id, e.what());
+        result = {};
+        result.status = svc::CallStatus::Unavailable;
+        result.reason = "the call threw";
+        return result;
+    }
+}
+
+svc::ExpireResult CharacterSaver::expire_listing_now(const std::string& listing_id, const std::string& item_name) {
+    try {
+        return api_.expire_listing(listing_id, item_name);
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] the market expiry of listing {} threw {}", listing_id, e.what());
+        svc::ExpireResult result;
+        result.status = svc::CallStatus::Unavailable;
+        result.reason = "the call threw";
+        return result;
     }
 }
 

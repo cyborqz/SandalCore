@@ -40,7 +40,7 @@ public:
 
 private:
     /// What a request that needed the list does when the load lands.
-    enum class MailWaitKind : uint8_t { None, Fetch, Refresh, Detail, Claim, ClaimAll, Status, BulkStatus };
+    enum class MailWaitKind : uint8_t { None, Fetch, Refresh, Detail, Claim, ClaimAll, Status, BulkStatus, ClaimMoney };
     struct MailWait {
         MailWaitKind               kind = MailWaitKind::None;
         std::string                id;        // Detail, Claim, Status
@@ -66,6 +66,10 @@ private:
         std::vector<std::vector<size_t>> items; // Claim/ClaimAll: the item indices of each id
         std::vector<svc::Mail>     mails;      // Claim/ClaimAll: each mail as it is once its claim is stored; BulkStatus/SaveMail: the copies the worker writes
         std::vector<MailPlaced>    placed;     // Claim/ClaimAll: what the tick changed in the bags
+        std::vector<svc::MoneyClaim> money_claims;  // Claim/ClaimAll: the mails whose money the claim takes into the purse (Marketplace sales), each with the copper the purse was credited for it
+        int64_t                    money_total = 0;   // ... the copper of them together, which the purse holds already (money_given) until the claim is refused
+        bool                       money_given = false;
+        bool                       money_only = false;   // the claim of one mail's money alone (ServerClaimMailCurrency)
         GmMailDone                 gm_done;    // CreateMail: the admin entry's answer
     };
 
@@ -94,6 +98,8 @@ private:
     void mail_send_detail(Connection& conn, const std::string& id);
     void mail_send_status_answers(Connection& conn, const std::vector<std::pair<std::string, int32_t>>& answers);
     bool mail_claim_one(Connection& conn, size_t mail_index, int32_t item_index);
+    bool mail_claim_money(Connection& conn, size_t mail_index);
+    void mail_say_purse_full(Connection& conn);
     bool mail_claim_all(Connection& conn, const std::vector<std::string>& ids);
     bool mail_bulk_status(Connection& conn, const std::vector<std::string>& ids, int32_t status);
     void mail_update_status(Connection& conn, const std::string& id, int32_t bits);
@@ -113,7 +119,7 @@ private:
     void on_get_mail_data(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_refresh_mail_headers(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_claim_mail_item(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
-    void on_claim_mail_currency(Connection& conn, const protocol::repl::ClientRpc& rpc);
+    void on_claim_mail_currency(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_claim_all_mail(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_update_mail_status(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_bulk_update_mail_status(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);

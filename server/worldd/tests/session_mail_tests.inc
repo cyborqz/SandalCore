@@ -937,7 +937,7 @@ static void test_mail_list_shows_the_headers_the_store_holds() {
 }
 
 static void test_mail_login_unread_count_comes_from_the_character_load() {
-    std::printf("the unread count comes from the character load, and only the first mail call sends it\n");
+    std::printf("the unread count comes from the character load, and the phase-in sends it without reading the store\n");
     std::fflush(stdout);
     TestMailStore store;
     store.mails.push_back(test_mail_mail(test_mail_hex(4), "Sender", "Subject", "Body", 0, {}));
@@ -952,19 +952,19 @@ static void test_mail_login_unread_count_comes_from_the_character_load() {
     CHECK(store.loads == 0, "the login does not read the mail store");
     CHECK(!w[0].s->mail_loaded(), "the cache is not loaded at the login");
     int32_t social = -1;
-    CHECK(test_mail_unread_state(w, 0, social) && social == 0, "the social component does not show the count before a mail call");
+    CHECK(test_mail_unread_state(w, 0, social) && social == 2, "the social component shows the two the login carried (the phase-in sent them), before any mail call");
     const size_t from = w[0].got.size();
     CHECK(test_mail_fetch_num(w, 0), "ServerFetchMailNum is sent");
     w.settle();
-    CHECK(test_mail_unread_state(w, 0, social) && social == 2, "the count reaches the social component");
-    CHECK(test_mail_social_delta(w, 0, from), "the changed count's delta is sent");
+    CHECK(test_mail_unread_state(w, 0, social) && social == 2, "the count call leaves the two on the social component");
+    CHECK(!test_mail_social_delta(w, 0, from), "the count call sends no delta: the count was sent at the log-in and has not changed");
     CHECK(store.loads == 0, "the count call does not read the mail store");
     CHECK(!w[0].s->mail_loaded(), "the count call does not load the cache");
     CHECK(test_mail_count_named(test_mail_pc_calls(w, 0, from), "ClientUpdateMailHeaders") == 0, "the count call sends no headers");
 }
 
 static void test_mail_login_count_reaches_the_client_at_the_first_call() {
-    std::printf("the login's unread count reaches the client at the first mail call, the list\n");
+    std::printf("the login's unread count reaches the client at the log-in, and the list does not send it again\n");
     std::fflush(stdout);
     TestMailStore store;
     store.mails.push_back(test_mail_mail(test_mail_hex(6), "Sender", "Subject", "Body", 0, {}));
@@ -976,12 +976,12 @@ static void test_mail_login_count_reaches_the_client_at_the_first_call() {
         return;
     }
     int32_t social = -1;
-    CHECK(test_mail_unread_state(w, 0, social) && social == 0, "the login itself sends no count");
+    CHECK(test_mail_unread_state(w, 0, social) && social == 2, "the log-in sends the count: the phase-in carried the two the character load held");
     const size_t from = w[0].got.size();
     CHECK(test_mail_fetch(w, 0), "ServerFetchMail is the first mail call");
     w.settle();
-    CHECK(test_mail_unread_state(w, 0, social) && social == 2, "the list sets the two the character load carried");
-    CHECK(test_mail_social_delta(w, 0, from), "the count's delta is sent with the list");
+    CHECK(test_mail_unread_state(w, 0, social) && social == 2, "the list leaves the two the character load carried");
+    CHECK(!test_mail_social_delta(w, 0, from), "the list sends no count delta: it was sent at the log-in");
     CHECK(w[0].s->mail_loaded(), "the list loaded the cache");
 }
 

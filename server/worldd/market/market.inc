@@ -5,6 +5,7 @@
 //  market/market.inc (see market.h)
 // ============================================================================
 #include "market/market.h"
+#include "market/market_tax.h"
 
 #include "bootstrap/bootstrap.h"
 #include "session/player_session.h"
@@ -37,7 +38,8 @@ void PlayerSession::open_marketplace(Connection& conn, const world::WorldActor& 
     if (!room_for(1)) return;
     pb_.market_window = market::MarketWindow{manager.id, node};
     const repl::GuidValue guid = market::marketplace_guid(node);
-    const repl::NodeTaxDetails tax = vendor::default_table(node);
+    // the node's own rate (the game's default until its mayor sets one): the window shows the rate the sale charges, from one function (market/market_tax.h)
+    const repl::NodeTaxDetails tax = market::market_tax_table(node, world_ ? world_->market_listings()->node_rate(node) : market::kDefaultTaxRate);
     spdlog::info("[session] {}: opens the marketplace of node {} (market {}/{}/{}/{}, {} tax tags)", name(), node, guid.a, guid.b, guid.c, guid.d, tax.entries.size());
     queue("ClientOpenMarketplaceUI", [guid, tax](bootstrap::PlayerBootstrap& pb) { return pb.open_marketplace(guid, tax); }, conn, /*must_build=*/true);
     push_storefront_pages(conn, node);   // the window's tabs learn their market from the last page

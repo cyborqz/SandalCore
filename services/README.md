@@ -665,6 +665,18 @@ DELETE FROM schema_migrations WHERE version = 30;
 COMMIT;
 ```
 
+**Rolling back migration 0031.** Migration 0031 (Marketplace sales) adds THREE tables and writes nowhere else: `character_mail_money` (the money a mail carries: a sale's price, whether the player took it into the purse, and for a sale mail its listing and the units it sums up), `node_market_taxes` (the rate each node's sales tax charges and the copper its sales have paid in; a node with no row charges the game's default, 0.5) and `market_purchases` (the id of every purchase, so one asked for again is answered "done" and writes nothing). It backfills nothing and touches no existing table or column. The character service's `BuyListing`, `RemoveListing` and `ExpireListing` store a sale, a removal and an expiry in one transaction each, and `ClaimMailItems` takes a mail's money into the purse in the transaction that marks it claimed. The rollback drops the three tables with whatever they hold: every sale mail's money that was not claimed is forgotten (the mails themselves stay, with their text), every node's total of tax is forgotten, and a purchase asked for again after the rollback is a new purchase. A listing keeps its status (1 sold, 2 removed, 4 expired and mailed) and the mails of expired listings keep their attached items. Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0031 (market sales)
+BEGIN;
+DROP TABLE market_purchases;
+DROP TABLE node_market_taxes;
+DROP TABLE character_mail_money;
+DELETE FROM schema_migrations WHERE version = 31;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or

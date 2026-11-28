@@ -322,7 +322,22 @@ void PlayerWorld::init_from_data() {
 void PlayerWorld::set_position_sink(PositionSink* sink) {
     sink_ = sink;
     market_listings_.set_login_check([this](const std::string& character_id) { return login_pending(character_id); });   // (a listing waits out a log-in of its seller: see submit_listing)
+    market_listings_.set_mail_note([this](const std::string& character_id) { note_mail(character_id); });   // (a sale or an expiry mails the seller: see ServiceMarketStore::apply)
     market_listings_.attach(sink, content_, world_clock_);
+}
+
+void PlayerWorld::note_mail(const std::string& character_id) const {
+    std::lock_guard<std::mutex> lock(mail_notes_mu_);
+    mail_notes_.insert(character_id);
+    mail_notes_count_ = mail_notes_.size();
+}
+
+bool PlayerWorld::take_mail_note(const std::string& character_id) const {
+    if (mail_notes_count_ == 0) return false;
+    std::lock_guard<std::mutex> lock(mail_notes_mu_);
+    const bool had = mail_notes_.erase(character_id) != 0;
+    mail_notes_count_ = mail_notes_.size();
+    return had;
 }
 
 void PlayerWorld::settle_market(std::chrono::milliseconds max_wait) { market_listings_.settle(max_wait, item_catalog(), world_clock_); }

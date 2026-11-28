@@ -31,6 +31,12 @@ inline constexpr uint8_t kListed = 0;
 inline constexpr double kListingSeconds = 259200.0;
 /// The most active listings one seller may hold in this world (the owner's choice; the game's data shows no cap).
 inline constexpr size_t kMaxListingsPerSeller = 10;
+/// The sales tax rate of a node that has no stored rate (the game's TaxDefaultValue), and the game's limits of a rate.  Each node stores its own, so that the mayors' feature only has
+/// to change the stored one.
+inline constexpr float kDefaultTaxRate = 0.5f;
+inline constexpr float kMinTaxRate = 0.1f;
+inline constexpr float kMaxTaxRate = 1.0f;
+inline bool valid_tax_rate(float rate) { return rate >= kMinTaxRate && rate <= kMaxTaxRate; }   // (false for NaN)
 
 /// One registered listing: the market's node, its seller (the character's guid and name), the listing's own guid, the stack
 /// as it was listed (its quantity is the listed quantity), the name the client shows, the unit price in copper and the dates.
@@ -70,10 +76,16 @@ struct ListingSave {
     std::vector<svc::WarehouseItem>  warehouse;
 };
 
-/// The answer that settles a listing's save: Ok (the store has the listing), or a refusal that leaves nothing written.
+/// The answer that settles a step (a listing's save, a purchase, a removal, an expiry): the call's status and, for Ok, how the step stands (svc::MarketOutcome: stored, or refused
+/// for a reason of the listing with nothing written).  A listing's save has no outcome of its own: it is Done when the call is Ok.
 struct ListingSaveAnswer {
-    svc::CallStatus status = svc::CallStatus::Failed;
-    std::string     reason;
+    svc::CallStatus    status = svc::CallStatus::Failed;
+    std::string        reason;
+    svc::MarketOutcome outcome = svc::MarketOutcome::Unspecified;
+    int32_t            available = 0;      // a refusal for the units: what the listing holds
+    std::string        seller_id;          // a purchase or an expiry that was stored: the seller, whose mail changed
+    /// Whether the step is in the database now.
+    bool stored() const { return status == svc::CallStatus::Ok && svc::market_outcome_stored(outcome); }
 };
 
 /// Whether an answer of the character service settles a save: the store has it (Ok), or it does not and will not (a refusal, an unknown character, a service that keeps no
@@ -82,14 +94,8 @@ inline bool is_clear(svc::CallStatus status) {
     return status == svc::CallStatus::Ok || status == svc::CallStatus::Refused || status == svc::CallStatus::NotFound || status == svc::CallStatus::Unsupported;
 }
 
-/// One listing whose save is not decided yet, as a session keeps it: the save's ticket, the listing, the stack before the units left it, how many left and the fee.
-struct PendingListing {
-    uint64_t           ticket = 0;
-    Listing            listing;
-    svc::InventoryItem taken;       // the stack before the units left it
-    int32_t            quantity = 0;
-    int64_t            fee = 0;
-};
+/// The steps a character's session has in flight at the market: a listing's save, a purchase and a removal (an expiry is the world's own, not a session's).
+enum class StepKind : uint8_t { Register, Buy, Remove };
 
 /// A seller's bags, purse and the rest as a session leaves them.
 struct BagSnapshot {
@@ -98,6 +104,18 @@ struct BagSnapshot {
     std::vector<svc::ProcessingJob>  jobs;
     std::vector<int64_t>             recipes;
     std::vector<svc::WarehouseItem>  warehouse;
+};
+
+/// One step whose save is not decided yet, as a session keeps it: the save's ticket, the listing and, for a listing's save, the stack before the units left it, how many left and
+/// the fee.  A purchase or a removal carries, for a session that ends before the answer, the bags the character ends with if the step is refused (`without`).
+struct PendingListing {
+    uint64_t           ticket = 0;
+    Listing            listing;
+    svc::InventoryItem taken;       // the stack before the units left it
+    int32_t            quantity = 0;   // the units the step moves
+    int64_t            fee = 0;
+    StepKind           kind = StepKind::Register;
+    BagSnapshot        without;        // Buy, Remove: the bags had the step been refused
 };
 
 /// What a session that ends while listing saves are in flight hands to the world: the saves, oldest first, and the bags it ends with.  The world takes each save's answer,
@@ -124,10 +142,20 @@ public:
     /// The listing with `guid` (nullptr: none).
     virtual const Listing* find(const ::aoc::protocol::repl::GuidValue& guid) const = 0;
     virtual size_t size() const = 0;
+    /// The rate of the sales tax of `node`: the one its row stores, or the game's default.
+    virtual float node_rate(int64_t) const { return kDefaultTaxRate; }
+    /// Whether a purchase, a removal or an expiry of the listing is in flight (one step at a time for a listing).
+    virtual bool listing_busy(const ::aoc::protocol::repl::GuidValue&) const { return false; }
     /// Whether the saved listings were read: until they are, a registration is refused and no storefront answers.  A store that keeps them in memory is ready.
     virtual bool loaded() const { return true; }
     /// Queues one listing's save; its ticket names the answer.  0: the store cannot save it.
     virtual uint64_t submit_listing(ListingSave) { return 0; }
+    /// Queues a purchase or a removal (the request carries the character's bags after the step); the ticket names the answer, taken with take_listing.  0: the store cannot, or a
+    /// step of the listing is in flight, or a log-in of the character waits.  `listing` is the listing as the world holds it now.
+    virtual uint64_t submit_buy(svc::BuyRequest, const Listing&) { return 0; }
+    virtual uint64_t submit_remove(svc::RemoveRequest, const Listing&) { return 0; }
+    /// Asks for the expiry of a listing that is past its time at once, unless a step of it is in flight; the world's market worker makes the call.
+    virtual void sweep_now(const ::aoc::protocol::repl::GuidValue&) {}
     /// Takes a ticket's answer when the save has it (a clear one: the store asks for an unclear one again); false while it has not.  The listing joins the cache when the
     /// answer is Ok.
     virtual bool take_listing(uint64_t, ListingSaveAnswer&) { return false; }
@@ -209,6 +237,39 @@ public:
         by_seller_at_node_.clear();
         by_seller_.clear();
         by_guid_.clear();
+    }
+
+    /// Takes the listing with `guid` out (a sold, removed or expired listing); false when there is none.  The indexes are made again, so a pointer find() gave is not valid after it.
+    bool remove(const ::aoc::protocol::repl::GuidValue& guid) {
+        const auto it = by_guid_.find(key_of(guid));
+        if (it == by_guid_.end()) return false;
+        std::vector<Listing> kept;
+        kept.reserve(listings_.size());
+        for (size_t i = 0; i < listings_.size(); ++i) {
+            if (i != it->second) kept.push_back(std::move(listings_[i]));
+        }
+        clear();
+        for (const Listing& l : kept) add(l);
+        return true;
+    }
+
+    /// The listings (up to `limit`, oldest first) whose time has come at `clock_now` (the synchronized clock): the expiry sweep's candidates.
+    std::vector<Listing> expired(double clock_now, size_t limit) const {
+        std::vector<Listing> out;
+        for (const Listing& l : listings_) {
+            if (l.status != kListed || !(l.expiration_date > 0) || l.expiration_date > clock_now) continue;
+            out.push_back(l);
+            if (out.size() >= limit) break;
+        }
+        return out;
+    }
+
+    /// Sets the units of the listing with `guid` (a part of it was sold); false when there is none or the quantity is not above 0.
+    bool set_quantity(const ::aoc::protocol::repl::GuidValue& guid, int32_t quantity) {
+        const auto it = by_guid_.find(key_of(guid));
+        if (it == by_guid_.end() || quantity < 1) return false;
+        listings_[it->second].item.quantity = quantity;
+        return true;
     }
 
 private:

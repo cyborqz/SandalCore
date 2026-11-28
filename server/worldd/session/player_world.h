@@ -91,12 +91,15 @@
 #include "world/world_clock.h"
 // [C.O.A - Cyb]
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -224,6 +227,11 @@ public:
     void login_began(const std::string& character_id, uint64_t session_id) const;
     void login_ended(uint64_t session_id) const;
     bool login_pending(const std::string& character_id) const;
+    /// Marketplace sales: a character's mail changed because of a sale or an expiry (the store tells the world when it takes the answer).  The character's session, when it is online,
+    /// takes the note on its next tick and reads its mail again, so the seller sees the new mail and the unread count at once; an offline seller sees it at the next log-in.
+    void note_mail(const std::string& character_id) const;
+    /// Takes a note for the character: true when there was one.
+    bool take_mail_note(const std::string& character_id) const;
     /// How the mail worker asks again for a claim without an answer (a test makes the pauses short).  It takes effect before the first mail call.
     void set_mail_job_config(const MailJobs::Config& config) { mail_job_config_ = config; }
     /// A test's hook: called on the world's thread right before a mail job is handed to the worker, so a test can mark a log-in between a session's check and the worker's
@@ -657,6 +665,9 @@ private:
     mutable std::unique_ptr<MailJobs>      mail_jobs_;        // created at the first mail call; destroyed with the world (before the sink it holds)
     mutable std::mutex                     mail_jobs_mu_;     // guards the pointer: the log-in's thread reads it too
     MailJobs::Config                       mail_job_config_;
+    mutable std::mutex                     mail_notes_mu_;          // guards mail_notes_ (the store notes on the world's thread, sessions take on theirs)
+    mutable std::set<std::string>          mail_notes_;             // the characters whose mail changed and whose session has not looked yet
+    mutable std::atomic<size_t>            mail_notes_count_{0};    // mail_notes_.size(): a tick that has no note does not take the lock
     std::function<void()>                  mail_submit_hook_;   // a test's (see set_mail_submit_hook)
     MailJobs* mail_jobs(bool create) const;
     world::ActorRegistry                 registry_;

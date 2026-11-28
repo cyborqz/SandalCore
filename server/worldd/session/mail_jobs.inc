@@ -166,8 +166,8 @@ void MailJobs::run() {
         case MailJobKind::Claim:
         case MailJobKind::ClaimAll:
             if (job.sink) {
-                answer.claim = job.sink->claim_mail_items(job.request.character_id, job.request.claims, job.request.items, job.request.wallet, job.request.jobs, job.request.recipes,
-                                                          job.request.warehouse);
+                answer.claim = job.sink->claim_mail(job.request.character_id, job.request.claims, job.request.money_mails, job.request.items, job.request.wallet, job.request.jobs,
+                                                    job.request.recipes, job.request.warehouse);
                 ++job.asks;
             } else {
                 answer.claim.status = svc::CallStatus::Unavailable;
@@ -245,7 +245,10 @@ void MailJobs::run() {
                 OrphanClaim& left = orphan->second;
                 PositionSink* sink = orphan_sinks_[job.ticket];
                 const bool stored = answer.claim.status == svc::CallStatus::Ok;
-                if (sink) sink->save_inventory(left.character_id, stored ? left.items_with : left.items_without, left.wallet, left.jobs, left.recipes, left.warehouse);
+                if (sink) {
+                    const std::vector<svc::WalletEntry>& purse = (!stored && left.has_wallet_without) ? left.wallet_without : left.wallet;
+                    sink->save_inventory(left.character_id, stored ? left.items_with : left.items_without, purse, left.jobs, left.recipes, left.warehouse);
+                }
                 open_claims_.erase(job.ticket);
             }
             orphan_sinks_.erase(job.ticket);

@@ -92,6 +92,8 @@ Mail mail_of(const characterv1::Mail& m) {
     out.issued_at_ms = m.issued_at_ms();
     out.expires_at_ms = m.expires_at_ms();
     for (const auto& i : m.items()) out.items.push_back(mail_item_of(i));
+    out.money = m.money_copper();
+    out.money_claimed = m.money_claimed();
     return out;
 }
 
@@ -689,6 +691,7 @@ MarketListingsResult GrpcServices::list_market_listings() {
         return r;
     }
     for (const auto& l : resp.listings()) r.listings.push_back(market_listing_of(l));
+    for (const auto& t : resp.node_taxes()) r.node_taxes.push_back(NodeMarketTax{t.node(), t.rate(), t.collected_copper()});
     return r;
 }
 
@@ -829,6 +832,12 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
 MailClaimResult GrpcServices::claim_mail_items(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<InventoryItem>& items,
                                                const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs, const std::vector<int64_t>& known_recipes,
                                                const std::vector<WarehouseItem>& warehouse) {
+    return claim_mail(character_id, claims, {}, items, wallet, jobs, known_recipes, warehouse);
+}
+
+MailClaimResult GrpcServices::claim_mail(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<MoneyClaim>& money_mails,
+                                         const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                         const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) {
     grpc::ClientContext ctx;
     prepare(ctx, save_timeout_);
     characterv1::ClaimMailItemsRequest req;
@@ -837,6 +846,10 @@ MailClaimResult GrpcServices::claim_mail_items(const std::string& character_id, 
         auto* c = req.add_claims();
         c->set_mail_id(claim.mail_id);
         c->set_instance_guid(claim.instance_guid);
+    }
+    for (const MoneyClaim& money : money_mails) {
+        req.add_money_mail_ids(money.mail_id);
+        req.add_money_expected_copper(money.copper);
     }
     fill_inventory_request(*req.mutable_inventory(), items, wallet, /*with_wallet=*/true, &jobs, &known_recipes, &warehouse);
     characterv1::ClaimMailItemsResponse resp;
@@ -850,6 +863,98 @@ MailClaimResult GrpcServices::claim_mail_items(const std::string& character_id, 
     }
     r.claimed = resp.claimed();
     r.replayed = resp.replayed();
+    return r;
+}
+
+namespace {
+
+/// Marketplace sales (migration 0031): the outcome a step answers with, in worldd's own form.
+MarketOutcome market_outcome_of(characterv1::MarketOutcome o) {
+    switch (o) {
+    case characterv1::MARKET_OUTCOME_DONE: return MarketOutcome::Done;
+    case characterv1::MARKET_OUTCOME_REPLAYED: return MarketOutcome::Replayed;
+    case characterv1::MARKET_OUTCOME_LISTING_GONE: return MarketOutcome::ListingGone;
+    case characterv1::MARKET_OUTCOME_LISTING_EXPIRED: return MarketOutcome::ListingExpired;
+    case characterv1::MARKET_OUTCOME_QUANTITY: return MarketOutcome::Quantity;
+    case characterv1::MARKET_OUTCOME_PRICE_CHANGED: return MarketOutcome::PriceChanged;
+    case characterv1::MARKET_OUTCOME_RATE_CHANGED: return MarketOutcome::RateChanged;
+    case characterv1::MARKET_OUTCOME_OWN_LISTING: return MarketOutcome::OwnListing;
+    case characterv1::MARKET_OUTCOME_NOT_EXPIRED: return MarketOutcome::NotExpired;
+    default: break;
+    }
+    return MarketOutcome::Unspecified;
+}
+
+}  // namespace
+
+BuyResult GrpcServices::buy_listing(const BuyRequest& request) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::BuyListingRequest req;
+    req.set_purchase_id(request.purchase_id);
+    req.set_character_id(request.character_id);
+    req.set_listing_id(request.listing_id);
+    req.set_quantity(request.quantity);
+    req.set_price_per_unit(request.price_per_unit);
+    req.set_tax_rate(request.tax_rate);
+    req.set_tax(request.tax);
+    req.set_item_name(request.item_name);
+    fill_inventory_request(*req.mutable_inventory(), request.bags.items, request.bags.wallet, /*with_wallet=*/true, &request.bags.jobs, &request.bags.known_recipes,
+                           &request.bags.warehouse);
+    characterv1::BuyListingResponse resp;
+    const grpc::Status s = stubs_->character->BuyListing(&ctx, req, &resp);
+    BuyResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    r.outcome = market_outcome_of(resp.outcome());
+    r.available = resp.available();
+    r.seller_id = resp.seller_id();
+    if (resp.has_seller_mail()) r.seller_mail = mail_of(resp.seller_mail());
+    return r;
+}
+
+RemoveResult GrpcServices::remove_listing(const RemoveRequest& request) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::RemoveListingRequest req;
+    req.set_character_id(request.character_id);
+    req.set_listing_id(request.listing_id);
+    req.set_expected_quantity(request.expected_quantity);
+    fill_inventory_request(*req.mutable_inventory(), request.bags.items, request.bags.wallet, /*with_wallet=*/true, &request.bags.jobs, &request.bags.known_recipes,
+                           &request.bags.warehouse);
+    characterv1::RemoveListingResponse resp;
+    const grpc::Status s = stubs_->character->RemoveListing(&ctx, req, &resp);
+    RemoveResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    r.outcome = market_outcome_of(resp.outcome());
+    r.available = resp.available();
+    return r;
+}
+
+ExpireResult GrpcServices::expire_listing(const std::string& listing_id, const std::string& item_name) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::ExpireListingRequest req;
+    req.set_listing_id(listing_id);
+    req.set_item_name(item_name);
+    characterv1::ExpireListingResponse resp;
+    const grpc::Status s = stubs_->character->ExpireListing(&ctx, req, &resp);
+    ExpireResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    r.outcome = market_outcome_of(resp.outcome());
+    r.seller_id = resp.seller_id();
+    if (resp.has_seller_mail()) r.seller_mail = mail_of(resp.seller_mail());
     return r;
 }
 // ~ Cyb - C O A ~

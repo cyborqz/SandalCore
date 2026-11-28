@@ -63,7 +63,7 @@ func before27(t *testing.T) *pgxpool.Pool {
 // schemaWithoutMails lists every column, constraint, index and table but the two of 0027: what 0027 must not change.
 func schemaWithoutMails(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_mails', 'character_mail_items', 'character_market_listings')`
+	const skip = `('character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
@@ -383,6 +383,7 @@ func TestMigration0027RollbackFromTheREADME(t *testing.T) {
 		persisted_health, persisted_mana, lock_expiration, claimed) VALUES ('11112222333344445555666677778888', 0, 7001, '0123456789abcdef0123456789abcdef', 1, 1, 11, NULL, NULL, 0, false)`); err != nil {
 		t.Fatal(err)
 	}
+	rollBackLaterMigrations(t, pool) // (0031 depends on this migration's tables: it goes first, as the README says)
 	if _, err := pool.Exec(ctx, rollback); err != nil {
 		t.Fatalf("the README's rollback: %v", err)
 	}

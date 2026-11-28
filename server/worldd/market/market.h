@@ -27,6 +27,11 @@ inline constexpr int64_t kManagerInstance = 6064632772964253696ll;     // Node_V
 inline constexpr int64_t kManagerComponent = 6064633962143220653ll;    // ICD_ID_MarketplaceVendor
 inline constexpr int64_t kManagerInteraction = 6064632772967071745ll;  // ID_MarketplaceVendor
 
+/// The steps (purchases and removals) a session holds in line behind the one it has in flight: the Buy panel sends one purchase for each line of its cart in one frame, and the
+/// session runs them one at a time, each with all its checks when it starts.  A line past this many is answered 3 (the client's cart has no known limit; 10 is a storefront's whole
+/// listings).
+inline constexpr size_t kMaxQueuedSteps = 10;
+
 /// The storefronts on one page the window's open sends, and the most it sends (the Refresh button and the search reach the rest): 30 pages stay inside a session's reply queue.
 inline constexpr size_t kStorefrontPageSize = 100;
 inline constexpr size_t kMaxPushedStorefronts = 30 * kStorefrontPageSize;

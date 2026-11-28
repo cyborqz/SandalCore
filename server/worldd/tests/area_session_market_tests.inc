@@ -17,6 +17,7 @@
 // ============================================================================
 #include "items/wallet.h"
 #include "market/market.h"
+#include "market/market_tax.h"
 #include "protocol/repl/rpc_fields.h"
 #include "spawns/area_loader.h"
 
@@ -164,11 +165,13 @@ struct MarketPeer {
             s->end_of_datagram(conn);
         }
     }
+    /// A listing's save or a mail job of this session runs on the world's worker thread, which the fake clock never lets run: while one is pending each step first waits 1 ms of real time.
     void settle() {
         for (int quiet = 0, i = 0; quiet < 5 && i < 600; ++i) {
+            if (s->mail_pending() > 0 || s->market_pending() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
             const size_t before = got.size();
             step();
-            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0) ? quiet + 1 : 0;
+            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0 && s->mail_pending() == 0 && s->market_pending() == 0) ? quiet + 1 : 0;
         }
     }
     void play() {
@@ -222,13 +225,13 @@ static void check_no_market_data(const std::vector<repl::RpcCall>& calls) {
     }
 }
 
-/// The one open call's guid words and the node's whole default tax table.
+/// The one open call's guid words and the node's whole tax table: the default one with the MarketplaceTax row at the node's rate (0.5 until its mayor sets one) and both its flags on.
 static void check_market_open(const repl::RpcCall& c) {
     CHECK(c.decoded, "the open call reads with the client's schema");
     const auto word = [&](const char* path) { return repl::rpcf::int_or(repl::rpcf::value_of(*c.rpc, c.params, path), 0); };
     const auto a = word("MarketplaceGuid.A"), b = word("MarketplaceGuid.B"), cc = word("MarketplaceGuid.C"), d = word("MarketplaceGuid.D");
     const auto* tax = repl::rpcf::as<repl::NodeTaxDetails>(repl::rpcf::value_of(*c.rpc, c.params, "NodeTaxDetails"));
-    const repl::NodeTaxDetails expected = vendor::default_table(kNode);
+    const repl::NodeTaxDetails expected = market::market_tax_table(kNode, 0.5f);
     bool same = a && b && cc && d && *a == static_cast<int64_t>(kGuidA) && *b == static_cast<int64_t>(kGuidB) && *cc == static_cast<int64_t>(kGuidC) && *d == static_cast<int64_t>(kGuidD);
     CHECK(same, "the market guid is the node's stable one (0x25765679, 0x000062D0, 0x4D4B5450, 1)");
     bool table = tax && tax->node == kNode && tax->entries.size() == expected.entries.size();
@@ -237,7 +240,7 @@ static void check_market_open(const repl::RpcCall& c) {
         const repl::NodeTaxEntry& y = expected.entries[i];
         table = x.tag == y.tag && x.details == y.details && x.flat_tax == y.flat_tax && x.tax_percent == y.tax_percent && x.owning_node_percent == y.owning_node_percent && x.flag_a == y.flag_a && x.flag_b == y.flag_b;
     }
-    CHECK(table, "the node's whole default tax table is the one the vendor window sends");
+    CHECK(table, "the node's whole tax table is the default one with the MarketplaceTax row set to the node's rate");
 }
 
 /// The Manager's open chain: every block reads to its last bit with its class.

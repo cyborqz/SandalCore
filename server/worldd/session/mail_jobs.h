@@ -42,6 +42,7 @@ struct MailJobRequest {
     svc::NewMail                   new_mail;    // CreateMail, GmSend
     std::string                    character_name;   // GmSend: the name to look up
     std::vector<svc::MailClaim>    claims;      // Claim/ClaimAll: the attachments to mark claimed
+    std::vector<svc::MoneyClaim>   money_mails; // Claim/ClaimAll: the mails whose money the claim takes into the purse (`wallet` holds it), each with the copper the purse was credited for it
     std::vector<svc::InventoryItem> items;      // Claim/ClaimAll: the bags as the tick has them
     std::vector<svc::WalletEntry>  wallet;
     std::vector<svc::ProcessingJob> jobs;
@@ -68,7 +69,9 @@ struct OrphanClaim {
     uint64_t                        ticket = 0;
     std::string                     character_id;
     std::vector<svc::InventoryItem> items_with, items_without;
-    std::vector<svc::WalletEntry>   wallet;
+    std::vector<svc::WalletEntry>   wallet;          // the purse the character ends with when the claim was stored (with the money, if it took any)
+    std::vector<svc::WalletEntry>   wallet_without;  // ... and when it was not, when the claim took money (has_wallet_without); otherwise `wallet` is the purse in both cases
+    bool                            has_wallet_without = false;
     std::vector<svc::ProcessingJob> jobs;
     std::vector<int64_t>            recipes;
     std::vector<svc::WarehouseItem> warehouse;
