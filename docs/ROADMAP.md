@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 27 November 2026
+**Last updated:** 28 November 2026
 
 ---
 
@@ -93,6 +93,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Seeing other players (first seven parts): players within 150 m of each other are shown to each other as their characters, standing, walking, stopping, and riding their mounts, with the gear they wear, the weapons in their hands, their level, their live Health and Mana and their corruption kept current; a dead player is shown dead and a Cleric's Resurrection revives him in place; a player's combat stance follows his (the draw, the fight, the PvP combat, the PvP key and the name colour of his flag), one player's heals, buffs, cleanses and Resurrect reach another, the rules between players decide a harmful ability (the PvP key, the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level, alive state, place and heading. Still to come: suppression areas, guards and pets, guild and node wars, and other players' abilities shown to the players who see them.
 - The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
 - Stealth: the full-bag pile on the ground, the client's own Camouflage look pinned on the wire, and creatures that detect a stealthed player by the game's rule.
+- Social: player trading (window, live offer updates for backpack items, materials and currency, and cancellation; lock and swap next).
 
 ### Left
 - Quests: objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.

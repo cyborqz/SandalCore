@@ -70,6 +70,7 @@
 #include "protocol/repl/craft_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
 #include "protocol/repl/market_rpc.h"
+#include "protocol/repl/trade_rpc.h"
 
 #include <array>
 #include <map>
@@ -991,6 +992,15 @@ public:
     /// PvP: NotifyCorruptionDeltaForKill(CorruptionDelta, Target) ("Gained {0} corruption for killing {1}") and NotifyCorruptionLostForDying(CorruptionDelta).
     std::optional<Send> notify_corruption_for_kill(float delta, const emit::FIntrepidNetworkGUID& target);
     std::optional<Send> notify_corruption_lost_for_dying(float delta);
+
+    // ---- player trading (bootstrap/bootstrap_trade.cpp) -------------------------------------------------------------------
+    std::optional<Send> trade_request(const repl::GuidValue& from);
+    std::optional<Send> trade_request_response(const repl::GuidValue& target, uint8_t response);
+    std::optional<Send> trade_begin(const repl::GuidValue& trade_guid, const repl::GuidValue& partner);
+    std::optional<Send> trade_update(const repl::GuidValue& owner, const repl::TradeOffer& offer);
+    std::optional<Send> trade_close(uint8_t status);
+    bool                set_trade_in_progress(bool in_progress);
+    bool                set_observer_trade_in_progress(repl::Actor& shown, bool in_progress);
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 

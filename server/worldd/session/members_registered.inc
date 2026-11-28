@@ -36,3 +36,4 @@
 #include "session/members/raid.inc"
 #include "session/members/mail.inc"
 #include "session/members/market.inc"
+#include "session/members/trade.inc"

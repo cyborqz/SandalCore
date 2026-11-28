@@ -180,6 +180,7 @@ void PlayerSession::pvp_set_corruption(Connection& conn, double value, const cha
     pvp_stats_dirty_ = true;
     if (corruption_ > 0) {
         pvp_state_ = pvp::Flag::Corrupted;   // (assigning Corrupted removes Combatant: AssignAlignment's conflicting alignments)
+        trade_interrupted(last_now_, "became corrupted");
     } else if (pvp_state_ == pvp::Flag::Corrupted) {
         pvp_state_ = pvp::Flag::NonCombatant;
         pvp_combatant_since_ = -1;

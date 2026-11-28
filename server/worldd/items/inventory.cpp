@@ -193,6 +193,7 @@ std::optional<ItemInfo> ContentItemCatalog::info(int64_t record) const {
     i.two_handed = rec->occupies_all_equip_slots;
     i.resource = rec->resource;
     i.quest = rec->quest;
+    i.tradeable = rec->tradeable;
     i.inv_w = rec->inv_w;
     i.inv_h = rec->inv_h;
     i.max_stack = std::max(1, rec->max_stack_size);

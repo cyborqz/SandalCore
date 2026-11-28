@@ -1312,6 +1312,7 @@ void PlayerWorld::tick_world(double now_seconds) {
     t = std::chrono::steady_clock::now();
     if (combat_) combat_->tick(now_seconds);
     if (duel_book_) duel_book_->tick(now_seconds);   // PvP: the requests' lapse, the countdowns, the radius, the longest duel   // #23 (MrJambix)
+    if (trade_book_) trade_book_->tick(now_seconds);
     const double combat_ms = ms(t);
     window_cost_.max_combat_ms = std::max(window_cost_.max_combat_ms, combat_ms);
     t = std::chrono::steady_clock::now();

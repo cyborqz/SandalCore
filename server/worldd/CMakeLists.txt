@@ -141,11 +141,14 @@ target_link_libraries(worldd_ability_content PUBLIC
 )
 set_target_properties(worldd_ability_content PROPERTIES FOLDER "Servers/worldd")
 
+find_package(ZLIB REQUIRED)
+
 # ── worldd_core ─────────────────────────────────────────────────────────────
 add_library(worldd_core STATIC
     bootstrap/ability_replication.h
     bootstrap/bootstrap.cpp
     bootstrap/bootstrap.h
+    bootstrap/bootstrap_trade.cpp
     bootstrap/captured_abilities.h
     bootstrap/captured_bits.h
     bootstrap/captured_character.h
@@ -307,6 +310,8 @@ add_library(worldd_core STATIC
     spawns/spawn_filter.cpp
     spawns/spawn_filter.h
     spawns/spawn_util.h
+    trade/trade_book.cpp
+    trade/trade_book.h
     vendor/gm_vendor.cpp
     vendor/gm_vendor.h
     vendor/node_tax.cpp
@@ -364,6 +369,7 @@ target_link_libraries(worldd_core PUBLIC
     OpenSSL::Crypto
     nlohmann_json::nlohmann_json
     unofficial::sqlite3::sqlite3
+    ZLIB::ZLIB
     $<$<PLATFORM_ID:Windows>:ws2_32>
 )
 if(MSVC)
@@ -663,3 +669,8 @@ foreach(part 2 3 4)
         ABILITY_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
         NPC_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv")
 endforeach()
+
+# player trading (window, offers, validation, auto-cancels and persistence boundary)
+worldd_add_test(test_worldd_trade)
+target_compile_definitions(test_worldd_trade PRIVATE
+    TRADE_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")

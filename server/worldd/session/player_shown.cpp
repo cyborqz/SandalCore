@@ -76,6 +76,7 @@ void PlayerSession::run_shown(Connection& conn, Clock::time_point now) {
     sync_shown_level_ups(conn);
     sync_shown_stats();
     sync_shown_death();
+    sync_shown_trade();
     sync_shown_stance();   // (Social, seeing other players: their combat stances; the declaration is in session/members/stance.inc)
     sync_shown_guild();    // (social, step 9: the guild's name over the nameplate; session/members/guild.inc)
 }
@@ -277,6 +278,22 @@ void PlayerSession::sync_shown_death() {
     }
     shown_dead_ = dead_;
     spdlog::log(level_for(shown_death_logged_), "[players] {}: the other players are shown it {}", name(), dead_ ? "dead" : "alive again");
+}
+
+void PlayerSession::sync_shown_trade() {
+    if (trade_in_progress_ == shown_trade_in_progress_) return;
+    bool ok = false;
+    const bool done = show_in_pawn(world::Change::State, [&](world::WorldActor& w) {
+        ok = pb_.set_observer_trade_in_progress(w.actor, trade_in_progress_);
+    });
+    if (!done || !ok) {
+        if (++shown_failures_ <= kLoggedPerKind) {
+            spdlog::warn("[players] {}: the observer pawn did not accept bTradeInProgress ({})", name(),
+                         done ? "a value does not fit" : "the pawn is not in the world");
+        }
+        return;
+    }
+    shown_trade_in_progress_ = trade_in_progress_;
 }
 
 void PlayerSession::sync_shown_level_ups(Connection& conn) {

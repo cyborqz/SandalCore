@@ -40,6 +40,9 @@ private:
     void sync_shown_death();
     /// The death bit the pawn the other players are shown carries now (tests).
     bool shown_dead() const { return shown_dead_; }
+    /// BaseCharacterInfo.bTradeInProgress synced to the observer pawn.
+    void sync_shown_trade();
+    bool shown_trade_in_progress() const { return shown_trade_in_progress_; }
     /// The player's equipment changed in an update that moved `marks` equipment slots: the pawn the others are shown takes its look, held items and stats at the next tick.
     void note_shown_gear(size_t marks) {
         shown_gear_dirty_ = true;
@@ -77,6 +80,7 @@ private:
     bool                                 shown_level_dirty_ = false;
     int                                  shown_level_ = 0;
     bool                                 shown_dead_ = false;      // the death bit the pawn the others are shown carries
+    bool                                 shown_trade_in_progress_ = false;
     size_t                               shown_death_logged_ = 0;
     /// The announcement serial each other player's pawn had when this session last looked at it (a pawn it never looked at is not an effect to play: its open has the level).
     std::unordered_map<uint64_t, uint64_t> shown_level_ups_;

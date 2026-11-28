@@ -110,7 +110,7 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
     const Want wants[] = {
         {&g.alignment, {"Alignments"}, {}},
         {&g.base_character_info,
-         {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D", "CharacterName", "Race", "Gender", "Level", "ServerId", "bHasBeenPossessed"},
+         {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D", "CharacterName", "Race", "Gender", "Level", "ServerId", "bHasBeenPossessed", "bTradeInProgress"},
          {"HeldItems"}},
         {&g.combat_info,
          {"bIsTargeting", "bIsDead", "bInCombat", "bPvPForceFlag", "InPvpSuppressionArea", "bInPVPCombat", "PrimaryClassId.Guid", "bIsUsingRangedWeapon"},
@@ -125,6 +125,9 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
         repl::Subobject sub;
         if (!observer_component(*from, w.paths, w.arrays, sub)) return std::nullopt;
         if (w.guid == &g.ability && !observer_ability_component(*from, sub)) return std::nullopt;
+        if (w.guid == &g.base_character_info && !sub.obj.state.get(*sub.obj.schema, "bTradeInProgress")) {
+            if (!sub.obj.state.set(*sub.obj.schema, "bTradeInProgress", Value::boolean(false))) return std::nullopt;
+        }
         if (w.guid == &g.combat_info) {
             // the stance bits go out even when the player's pawn never set one, so another client's copy starts from the game's own defaults (0) and the bits are current in the open
             for (const char* path : {"bIsTargeting", "bInCombat", "bPvPForceFlag", "InPvpSuppressionArea", "bInPVPCombat"}) {

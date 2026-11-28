@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
+#include <zlib.h>
 
 #include <algorithm>
 #include <cctype>
@@ -81,6 +82,7 @@ constexpr const char* kResourceBagCellSql = "SELECT col, row, value FROM resourc
 // Gathering stage 3, "the pick-up popup" (contentc version 16): schema.go's item.display_name.  Not among the statements every file must answer: a file of version 15 has no such column
 constexpr const char* kItemNameSql = "SELECT display_name FROM item WHERE guid = ?1";
 constexpr const char* kItemSlotsSql = "SELECT slot FROM item_equip_slot WHERE item_guid = ?1 ORDER BY ord";
+constexpr const char* kItemRecordDataSql = "SELECT data FROM record WHERE guid = ?1 AND schema = 'ItemRecordBase' LIMIT 1";
 // Item rarities, step 0: RarityMin and RarityMax (contentc version 19's item_vendor; not among the statements every file must answer: an older file holds no bound), an item's MaxDurability
 // row (stat_block_stat: its Min and Max at each rarity) and a variation's Quality formula (item_variation, ab_expr)
 constexpr const char* kRarityBoundsSql = "SELECT rarity_min, rarity_max FROM item_vendor WHERE item_guid = ?1";
@@ -249,6 +251,51 @@ void read_item_rarity(sqlite3* db, int64_t guid, ItemRecord& rec) {
         row.max[static_cast<size_t>(r)] = sqlite3_column_double(q.get(), 2 * r + 1);
     }
     rec.durability_stat = row;
+}
+
+/// Reads ItemRecordBase.Tradeable from content.db's `record` table (gzip-inflated JSON, capped at 1 MB).
+/// Leaves `out_tradeable` unchanged (default true) if the table/row is absent or unreadable.
+void read_item_tradeable(sqlite3* db, int64_t guid, bool& out_tradeable) {
+    constexpr size_t kMaxInflatedBytes = 1024 * 1024;
+    Stmt q(db, kItemRecordDataSql);
+    if (!q.ok()) return;
+    sqlite3_bind_int64(q.get(), 1, guid);
+    if (sqlite3_step(q.get()) != SQLITE_ROW) return;
+    const void* blob = sqlite3_column_blob(q.get(), 0);
+    const int n = sqlite3_column_bytes(q.get(), 0);
+    if (!blob || n <= 0) return;
+    const auto* bytes = static_cast<const uint8_t*>(blob);
+    std::string payload;
+    if (n >= 2 && bytes[0] == 0x1fu && bytes[1] == 0x8bu) {
+        z_stream zs{};
+        zs.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(bytes));
+        zs.avail_in = static_cast<uInt>(n);
+        if (inflateInit2(&zs, 16 + MAX_WBITS) != Z_OK) return;
+        uint8_t chunk[16384];
+        int rc = Z_OK;
+        while (rc == Z_OK) {
+            zs.next_out = chunk;
+            zs.avail_out = static_cast<uInt>(sizeof(chunk));
+            rc = inflate(&zs, Z_NO_FLUSH);
+            const size_t produced = sizeof(chunk) - zs.avail_out;
+            if (payload.size() + produced > kMaxInflatedBytes) {
+                inflateEnd(&zs);
+                return;
+            }
+            if (produced > 0) payload.append(reinterpret_cast<const char*>(chunk), produced);
+            if (rc == Z_OK && zs.avail_in == 0 && produced == 0) break;
+        }
+        inflateEnd(&zs);
+        if (rc != Z_STREAM_END) return;
+    } else {
+        if (static_cast<size_t>(n) > kMaxInflatedBytes) return;
+        payload.assign(reinterpret_cast<const char*>(bytes), static_cast<size_t>(n));
+    }
+    const nlohmann::json j = nlohmann::json::parse(payload, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return;
+    if (const auto it = j.find("Tradeable"); it != j.end() && it->is_boolean()) {
+        out_tradeable = it->get<bool>();
+    }
 }
 
 }  // namespace
@@ -640,6 +687,7 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
             rec.quest = sqlite3_step(q.get()) == SQLITE_ROW;
         }
     }
+    read_item_tradeable(db_, guid, rec.tradeable);
     read_item_rarity(db_, guid, rec);   // item rarities, step 0: its quality curve, RarityMin..RarityMax and MaxDurability row
     Stmt q(db_, kItemSlotsSql);
     if (!q.ok()) {

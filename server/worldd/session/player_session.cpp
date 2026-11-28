@@ -159,6 +159,7 @@ PlayerSession::~PlayerSession() {
     forget_party();
     forget_guild();   // social, step 9: the roster loses its online flag
     leave_duels(last_now_);   // #23 (MrJambix)
+    leave_trade(last_now_);
     forget_friends();   // social, step 7: the reverse index loses this session
     clear_pet();
     cancel_quick_make(nullptr, "the session is destroyed");
@@ -394,6 +395,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         spdlog::info("[session] {}: {} weapon lines, {} with XP{}", setup.name, p->weapon_.lines()->size(), p->weapon_.with_xp().size(), lines.empty() ? std::string() : ": " + lines);
     }
     p->connect_duels(world);    // PvP: the world's duels  // #23 (MrJambix)
+    p->connect_trade(world);
     p->list_item_chunk(conn);   // storage clerks, step 0: the base item chunk is on the pawn from the join, listed in OwnerInfo (queued behind the join)
     p->pump(conn);
     if (refusal) *refusal = bootstrap::SetupRefusal::None;
@@ -597,6 +599,7 @@ void PlayerSession::finish(const char* why) {
     leave_party_on_finish();
     leave_guild_on_finish();   // social, step 9: the roster says the member is offline now, and the other members are told
     leave_duels(last_now_);   // #23 (MrJambix)
+    leave_trade(last_now_);
     leave_friends(why);   // social, step 7: the sessions that list this character are told it is offline
     clear_pet();
     cancel_quick_make(nullptr, why);   // Crafting, step 3: nothing was taken, so nothing is given back

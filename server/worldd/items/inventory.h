@@ -142,6 +142,8 @@ struct ItemInfo {
     bool                 resource = false;
     /// Quests, "the Quest bag": the record's InventoryFilterType is Quest (contentc's quest_item table): a grant keeps the item in the Quest storage, not in the item bag.
     bool                 quest = false;
+    /// Whether the item record permits player-to-player trading (ItemRecordBase.Tradeable).
+    bool                 tradeable = true;
     int                  inv_w = 1;
     int                  inv_h = 1;
     int                  max_stack = 1;

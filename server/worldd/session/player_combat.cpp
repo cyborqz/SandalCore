@@ -182,6 +182,7 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
         if (pb_.set_in_combat(combat_flag_)) {
             queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("combat state"); }, conn, /*must_build=*/true);
         }
+        if (combat_flag_) trade_interrupted(now, "entered combat");
     }
     drain_pvp(conn, now);   // PvP: the flag, its notices and its end, bInPVPCombat, the kills (session/player_pvp.cpp)   // #23 (MrJambix)
 }
@@ -285,6 +286,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     // PvP: contributed by MrJambix in #23.
     // PvP: a death of anything but his duel partner's blow ends his duel (session/player_duels.cpp; the partner's ended it at the blow)
     duel_died(now);
+    trade_interrupted(now, "player died");
     // what he put on the creatures ends at once, not at the next tick of an effect; PvP: the player whose blow it was hears of the kill, while the victim's flag is as it was
     if (combat_side_ && npc_world_ && npc_world_->combat()) npc_world_->combat()->player_died(combat_side_->actor_id(), last_blow_by_, pvp_world_now(now));
     const combat::pvp::Flag flag_at_death = pvp_state_;

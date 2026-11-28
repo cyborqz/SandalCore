@@ -41,3 +41,4 @@ AOC_RPC_FEATURE(guild)   // social, step 9
 AOC_RPC_FEATURE(raid)
 AOC_RPC_FEATURE(mail)
 AOC_RPC_FEATURE(market)
+AOC_RPC_FEATURE(trade)

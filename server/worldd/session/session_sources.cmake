@@ -59,6 +59,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_session_util.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_shown.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_talents.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_trade.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_vendors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_view_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rpc_table.h
