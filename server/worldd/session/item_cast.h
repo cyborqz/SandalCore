@@ -14,6 +14,7 @@
 #include "stats/stat_engine.h"
 
 #include <cstdint>
+#include <map>   // #22 (war-drayv)
 #include <string>
 #include <vector>
 
@@ -24,6 +25,10 @@ struct ItemCast {
     int64_t                      ability = 0;      // the ability the item casts
     int                          quality = 1;      // the item's quality: the rarity band its stat block is read at
     std::vector<stats::StatMod>  stats;            // the stat block's values at that quality, by stat guid (what GetConsumedItemStat answers)
+    /// A modelled client-data gap: an effect mod on a stat of this map is applied to the other stat.  The Might Potion's ability (Arcane Surge) reads and   // #22 (war-drayv)
+    /// names MagicalPowerRating, while the buff it must give is Physical Power: `stats` holds the item's value under the key the ability reads, and this map   // #22 (war-drayv)
+    /// moves the mod to the stat the buff raises.   // #22 (war-drayv)
+    std::map<int64_t, int64_t>   effect_stat_remap;   // #22 (war-drayv)
     int                          container = 0;    // the bag the item lay in (svc::ItemContainer as a number)
     int32_t                      slot = -1;        // ... and its slot there
     std::string                  instance_guid;    // ... and its instance

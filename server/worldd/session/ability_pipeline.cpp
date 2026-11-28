@@ -1414,7 +1414,12 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
             if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
             continue;
         }
-        mods.push_back({m.stat_guid, v});
+        int64_t stat = m.stat_guid;   // #22 (war-drayv)
+        if (consumable_item_) {   // a modelled gap: the item's ability names another stat than the one its buff must raise (the Might Potion)   // #22 (war-drayv)
+            const auto remap = consumable_item_->effect_stat_remap.find(stat);   // #22 (war-drayv)
+            if (remap != consumable_item_->effect_stat_remap.end()) stat = remap->second;   // #22 (war-drayv)
+        }   // #22 (war-drayv)
+        mods.push_back({stat, v});   // #22 (war-drayv)
     }
     auto give_shield = [&](EffectInst& e) {
         if (!shield) return;

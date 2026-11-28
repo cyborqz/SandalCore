@@ -11,3 +11,4 @@
 #include "items_session_consumables_tests.inc"
 #include "items_session_interruption_tests.inc"   // #21 (war-drayv)
 #include "items_session_recipe_shops_outposts_tests.inc"
+#include "items_session_remaps_tests.inc"   // #22 (war-drayv)
