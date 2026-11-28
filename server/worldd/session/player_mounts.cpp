@@ -609,6 +609,7 @@ void PlayerSession::mount_died(Connection& conn, Clock::time_point now) {
 }
 
 void PlayerSession::apply_persist(Connection* conn, const MountController::Persist& p) {
+    if (trade_commit_pending()) return;
     const std::string guid = items::guid_hex(p.item_guid);
     const items::Outcome o = inventory_.update_mount(guid, p.health, p.lock_expiration, /*events=*/conn != nullptr && p.died);
     if (!o.ok) {

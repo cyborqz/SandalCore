@@ -331,6 +331,7 @@ void PlayerSession::end_gathering(const char* why) {
 }
 
 bool PlayerSession::complete_gather(Connection& conn, Clock::time_point now) {
+    if (trade_commit_pending()) return false;   // defer harvest completion until the in-flight trade commit settles
     gather::Gathering* g = npc_world_ ? npc_world_->gathering() : nullptr;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     if (!g || !db || !gather_.def) return true;

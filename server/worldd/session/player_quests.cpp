@@ -213,6 +213,10 @@ void PlayerSession::remove_quest_items(Connection& conn, int64_t quest, Clock::t
 }
 
 void PlayerSession::on_abandon_quests(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    if (trade_commit_pending()) {
+        ++quests_refused_;
+        return;
+    }
     const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
     const repl::Value* guids = quest_rpc_value(rpc, "QuestGuids");
     const repl::ArrayValue* list = guids ? guids->get_if<repl::ArrayValue>() : nullptr;

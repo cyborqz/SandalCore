@@ -158,6 +158,13 @@ type MarketSalesStore interface {
 
 var _ MarketSalesStore = (*character.Store)(nil)
 
+// TradeStore is the part of character.Store that commits atomic two-character player trades (migration 0032).
+type TradeStore interface {
+	CommitPlayerTrade(ctx context.Context, r character.CommitTradeRequest) (character.CommitTradeResult, error)
+}
+
+var _ TradeStore = (*character.Store)(nil)
+
 // NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
 // character). A store without it cannot answer GetCharacterByName.
 type NameStore interface {
@@ -822,6 +829,39 @@ func (s *Server) ExpireListing(ctx context.Context, r *characterv1.ExpireListing
 	return out, nil
 }
 
+// CommitPlayerTrade commits a two-character trade in one transaction (migration 0032; see character.Store.CommitPlayerTrade).
+func (s *Server) CommitPlayerTrade(ctx context.Context, r *characterv1.CommitPlayerTradeRequest) (*characterv1.CommitPlayerTradeResponse, error) {
+	ts, ok := s.store.(TradeStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no player trades")
+	}
+	if r.GetSideA() == nil || r.GetSideB() == nil {
+		return nil, status.Error(codes.InvalidArgument, "both trade sides are required")
+	}
+	bagsA, err := claimBagsOf(r.GetSideA())
+	if err != nil {
+		return nil, err
+	}
+	bagsB, err := claimBagsOf(r.GetSideB())
+	if err != nil {
+		return nil, err
+	}
+	res, err := ts.CommitPlayerTrade(ctx, character.CommitTradeRequest{
+		TradeID:       r.GetTradeId(),
+		SideA:         character.TradeSide{ID: r.GetSideA().GetId(), Bags: bagsA},
+		SideB:         character.TradeSide{ID: r.GetSideB().GetId(), Bags: bagsB},
+		CopperAToB:    r.GetCopperAToB(),
+		CopperBToA:    r.GetCopperBToA(),
+		ItemsAToB:     r.GetItemsAToB(),
+		ItemsBToA:     r.GetItemsBToA(),
+		CommittedAtMs: r.GetCommittedAtMs(),
+	})
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.CommitPlayerTradeResponse{Replayed: res.Replayed}, nil
+}
+
 // addTalents puts the character's bought ranks and its action bar (plan D1, stage 2) into a reply.
 func (s *Server) addTalents(ctx context.Context, id string, out *characterv1.Character) error {
 	ranks, err := s.store.SkillRanks(ctx, id)
@@ -1020,7 +1060,7 @@ func toStatus(ctx context.Context, err error) error {
 		return status.Error(codes.ResourceExhausted, err.Error())
 	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken), errors.Is(err, character.ErrGuildNameTaken), errors.Is(err, character.ErrListingSaved):
 		return status.Error(codes.AlreadyExists, err.Error())
-	case errors.Is(err, character.ErrGuildVersion), errors.Is(err, character.ErrMailStale):
+	case errors.Is(err, character.ErrGuildVersion), errors.Is(err, character.ErrMailStale), errors.Is(err, character.ErrTradeCommitted):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, character.ErrMailClaimed):
 		return status.Error(codes.AlreadyExists, err.Error())

@@ -82,6 +82,9 @@ service CharacterService {
   rpc BuyListing(BuyListingRequest) returns (BuyListingResponse);
   rpc RemoveListing(RemoveListingRequest) returns (RemoveListingResponse);
   rpc ExpireListing(ExpireListingRequest) returns (ExpireListingResponse);
+  // Player trading (migration 0032): commits a two-character trade in ONE transaction, writing both characters'
+  // inventories, wallets, processing jobs, known recipes and warehouses together with an idempotency record.
+  rpc CommitPlayerTrade(CommitPlayerTradeRequest) returns (CommitPlayerTradeResponse);
 }
 
 message Position {
@@ -705,4 +708,23 @@ message ExpireListingResponse {
   MarketOutcome outcome = 1;
   string seller_id = 2;
   Mail seller_mail = 3;
+}
+
+// Player trading (migration 0032): commits a two-character trade atomically in one transaction.
+// Locks both characters in canonical id order, checks trade_id idempotency, replaces both characters'
+// inventories (allowing an empty post-trade bag when a player gifts their last item), wallets,
+// processing jobs, known recipes and warehouses, and records the trade_id.
+message CommitPlayerTradeRequest {
+  string trade_id = 1;               // 32 lowercase hex digits, not all zero: idempotency key
+  SaveInventoryRequest side_a = 2;   // character A post-trade snapshot (id required)
+  SaveInventoryRequest side_b = 3;   // character B post-trade snapshot (id required)
+  int64 copper_a_to_b = 4;           // copper transferred from A to B (0..10000000)
+  int64 copper_b_to_a = 5;           // copper transferred from B to A (0..10000000)
+  int32 items_a_to_b = 6;            // item stacks transferred from A to B (>= 0)
+  int32 items_b_to_a = 7;            // item stacks transferred from B to A (>= 0)
+  int64 committed_at_ms = 8;         // Unix milliseconds (> 0)
+}
+
+message CommitPlayerTradeResponse {
+  bool replayed = 1;                 // true: trade_id already committed for the same pair; nothing rewritten
 }

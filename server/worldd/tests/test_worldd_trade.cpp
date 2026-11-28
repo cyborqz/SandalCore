@@ -32,16 +32,21 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace aoc::worldd;
@@ -67,6 +72,7 @@ static int g_pass = 0, g_fail = 0;
 static const std::string kAliceId = "bbec5c86eb101fe5f38c87f0fa22e7d0";
 static const std::string kBobId   = "bbec5c86eb101fe5f38c87f0fa22e7d1";
 static const std::string kCarolId = "bbec5c86eb101fe5f38c87f0fa22e7d2";
+static const std::string kDaveId  = "bbec5c86eb101fe5f38c87f0fa22e7d3";
 static const std::string kMachine = "DESKTOP-TRADE-TEST-0123456789ABCDEF";
 static const Clock::time_point t0{seconds(5000)};
 static constexpr uint32_t kServerId = 60;
@@ -188,18 +194,94 @@ static BunchWriter pawn_rpc_bunch(const char* rpc_name, const repl::RpcParams& p
 
 struct RecordingSink : PositionSink {
     struct SavedInv {
-        std::string id;
+        std::string                     id;
         std::vector<svc::InventoryItem> items;
+        std::vector<svc::WalletEntry>   wallet;
     };
-    std::vector<svc::Position> positions;
-    std::vector<SavedInv> inventories;
-    std::vector<std::pair<std::string, svc::Progress>> progress;
-    void save(const std::string&, const svc::Position& p) override { positions.push_back(p); }
-    void save_inventory(const std::string& id, std::vector<svc::InventoryItem> items) override { inventories.push_back({id, std::move(items)}); }
-    void save_progress(const std::string& id, svc::Progress p) override { progress.emplace_back(id, std::move(p)); }
+    mutable std::mutex                                                  mu;
+    std::vector<svc::Position>                                          positions;
+    std::vector<SavedInv>                                               inventories;
+    std::vector<std::pair<std::string, svc::Progress>>                  progress;
+    std::vector<svc::CommitTradeRequest>                                commits;
+    std::function<svc::CommitTradeResult(const svc::CommitTradeRequest&)> on_commit;
+    std::function<svc::MailsResult(const std::string&)>                 on_load_mails;
+    std::function<svc::MailClaimResult(const std::string&)>             on_claim_mail;
+
+    void save(const std::string&, const svc::Position& p) override {
+        std::lock_guard<std::mutex> lk(mu);
+        positions.push_back(p);
+    }
+    void save_inventory(const std::string& id, std::vector<svc::InventoryItem> items) override {
+        std::lock_guard<std::mutex> lk(mu);
+        inventories.push_back({id, std::move(items), {}});
+    }
+    void save_inventory(const std::string& id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,
+                        std::vector<svc::ProcessingJob>, std::vector<int64_t>, std::vector<svc::WarehouseItem>) override {
+        std::lock_guard<std::mutex> lk(mu);
+        inventories.push_back({id, std::move(items), std::move(wallet)});
+    }
+    void save_progress(const std::string& id, svc::Progress p) override {
+        std::lock_guard<std::mutex> lk(mu);
+        progress.emplace_back(id, std::move(p));
+    }
+    svc::CommitTradeResult commit_player_trade_now(const svc::CommitTradeRequest& req) override {
+        std::function<svc::CommitTradeResult(const svc::CommitTradeRequest&)> hook;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            commits.push_back(req);
+            hook = on_commit;
+        }
+        if (hook) return hook(req);
+        return svc::CommitTradeResult{svc::CallStatus::Ok, false, {}};
+    }
+    svc::MailsResult load_mails(const std::string& character_id) override {
+        std::function<svc::MailsResult(const std::string&)> hook;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            hook = on_load_mails;
+        }
+        if (hook) return hook(character_id);
+        svc::MailsResult out;
+        out.status = svc::CallStatus::Ok;
+        return out;
+    }
+    svc::MailClaimResult claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>&,
+                                          std::vector<svc::InventoryItem>, std::vector<svc::WalletEntry>,
+                                          std::vector<svc::ProcessingJob>, std::vector<int64_t>,
+                                          std::vector<svc::WarehouseItem>) override {
+        std::function<svc::MailClaimResult(const std::string&)> hook;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            hook = on_claim_mail;
+        }
+        if (hook) return hook(character_id);
+        svc::MailClaimResult out;
+        out.status = svc::CallStatus::Ok;
+        out.claimed = 1;
+        return out;
+    }
+    size_t inv_count() const {
+        std::lock_guard<std::mutex> lk(mu);
+        return inventories.size();
+    }
+    size_t commit_count() const {
+        std::lock_guard<std::mutex> lk(mu);
+        return commits.size();
+    }
+    void clear_recorded() {
+        std::lock_guard<std::mutex> lk(mu);
+        positions.clear();
+        inventories.clear();
+        progress.clear();
+        commits.clear();
+    }
 };
 
 struct TradeMirror {
+    struct CurrencyCallout {
+        int64_t tier = 0;
+        int64_t delta = 0;
+    };
     bs::SessionGuids guids;
     const schema::ClassSchema* pc_class = nullptr;
     const schema::ClassSchema* info_class = nullptr;
@@ -207,8 +289,15 @@ struct TradeMirror {
     std::vector<repl::ClientTradeRequestResponse> responses;
     std::vector<repl::ClientTradeBegin>           begins;
     std::vector<repl::ClientTradeUpdate>          updates;
+    std::vector<repl::ClientTradeLock>            locks;
+    std::vector<repl::ClientTradeUnlock>          unlocks;
+    std::vector<repl::ClientTradeConfirm>         confirms;
     std::vector<repl::ClientTradeClose>           closes;
     std::vector<std::string>                      callouts;
+    std::vector<CurrencyCallout>                  currency_callouts;
+    size_t                                        storage_events = 0;
+    size_t                                        currencies_updates = 0;
+    std::vector<std::string>                      event_order;
     std::vector<bool>                             trade_in_progress_history;
     bool                                          trade_in_progress = false;
     size_t                                        unreadable = 0;
@@ -218,8 +307,15 @@ struct TradeMirror {
         responses.clear();
         begins.clear();
         updates.clear();
+        locks.clear();
+        unlocks.clear();
+        confirms.clear();
         closes.clear();
         callouts.clear();
+        currency_callouts.clear();
+        storage_events = 0;
+        currencies_updates = 0;
+        event_order.clear();
         trade_in_progress_history.clear();
     }
 
@@ -252,11 +348,50 @@ struct TradeMirror {
                                 if (const auto r = repl::parse_client_begin_trade(c)) begins.push_back(*r);
                                 else ++unreadable;
                             } else if (n == "ClientUpdateTrade") {
-                                if (const auto r = repl::parse_client_update_trade(c)) updates.push_back(*r);
-                                else ++unreadable;
+                                if (const auto r = repl::parse_client_update_trade(c)) {
+                                    updates.push_back(*r);
+                                    event_order.push_back("Update");
+                                } else {
+                                    ++unreadable;
+                                }
+                            } else if (n == "ClientLockTrade") {
+                                if (const auto r = repl::parse_client_lock_trade(c)) {
+                                    locks.push_back(*r);
+                                    event_order.push_back("Lock");
+                                } else {
+                                    ++unreadable;
+                                }
+                            } else if (n == "ClientUnlockTrade") {
+                                if (const auto r = repl::parse_client_unlock_trade(c)) {
+                                    unlocks.push_back(*r);
+                                    event_order.push_back("Unlock");
+                                } else {
+                                    ++unreadable;
+                                }
+                            } else if (n == "ClientTradeConfirmed") {
+                                if (const auto r = repl::parse_client_trade_confirmed(c)) {
+                                    confirms.push_back(*r);
+                                    event_order.push_back("Confirm");
+                                } else {
+                                    ++unreadable;
+                                }
                             } else if (n == "ClientCloseTrade") {
-                                if (const auto r = repl::parse_client_close_trade(c)) closes.push_back(*r);
-                                else ++unreadable;
+                                if (const auto r = repl::parse_client_close_trade(c)) {
+                                    closes.push_back(*r);
+                                    event_order.push_back(r->status == 1 ? "CloseTrade(1)" : "CloseTrade(0)");
+                                } else {
+                                    ++unreadable;
+                                }
+                            } else if (n == "ClientReceiveStorageEvent" || n == "ClientRecieveBatchedStorageEvents") {
+                                ++storage_events;
+                                event_order.push_back("StorageEvent");
+                            } else if (n == "ClientShowCurrencyCallout") {
+                                const auto tier = repl::rpcf::int_or(repl::rpcf::value_of(*c.rpc, c.params, "CurrencyTierDefGuid"), 0);
+                                const auto delta = repl::rpcf::int_or(repl::rpcf::value_of(*c.rpc, c.params, "Delta"), 0);
+                                if (tier && delta) {
+                                    currency_callouts.push_back({*tier, *delta});
+                                    event_order.push_back("CurrencyCallout");
+                                }
                             }
                         }
                     } else {
@@ -275,6 +410,9 @@ struct TradeMirror {
                         }
                     }
                 }
+            } else if (d.channel == pawn_ch && !v.header.is_actor && v.header.object == guids.owner_info) {
+                ++currencies_updates;
+                event_order.push_back("Currencies");
             } else if (d.channel == pawn_ch && !v.header.is_actor && v.header.object == guids.base_character_info && info_class) {
                 if (v.header.has_rep_layout) {
                     const auto st = repl::read_rep_block(*info_class, d.content.data(), end, p);
@@ -439,9 +577,17 @@ struct TradeWorldFixture {
         for (TradeClient* c : clients) c->phase_in(t);
         settle(clients, 20);
         for (TradeClient* c : clients) c->mirror.clear_events();
-        sink.inventories.clear();
-        sink.positions.clear();
-        sink.progress.clear();
+        sink.clear_recorded();
+    }
+
+    bool wait_until(const std::function<bool()>& pred, std::initializer_list<TradeClient*> clients, int max_ms = 2000) {
+        const auto deadline = std::chrono::steady_clock::now() + milliseconds(max_ms);
+        while (std::chrono::steady_clock::now() < deadline) {
+            step(clients, milliseconds(10));
+            if (pred()) return true;
+            std::this_thread::sleep_for(milliseconds(5));
+        }
+        return pred();
     }
 
     bool observer_trade_in_progress(const TradeClient& c) const {
@@ -561,6 +707,21 @@ static void trade_wire_codecs() {
         const auto c3 = p3 ? roundtrip("ClientBeginTrade", *p3) : std::nullopt;
         const auto r3 = c3 ? repl::parse_client_begin_trade(*c3) : std::nullopt;
         CHECK(r3 && r3->trade_request_guid == gT && r3->target_guid == gB, "ClientBeginTrade round-trips");
+
+        const auto pLock = repl::client_lock_trade_params(*pc.rpc("ClientLockTrade"), gA);
+        const auto cLock = pLock ? roundtrip("ClientLockTrade", *pLock) : std::nullopt;
+        const auto rLock = cLock ? repl::parse_client_lock_trade(*cLock) : std::nullopt;
+        CHECK(rLock && rLock->character_guid == gA, "ClientLockTrade round-trips");
+
+        const auto pUnlock = repl::client_unlock_trade_params(*pc.rpc("ClientUnlockTrade"), gB);
+        const auto cUnlock = pUnlock ? roundtrip("ClientUnlockTrade", *pUnlock) : std::nullopt;
+        const auto rUnlock = cUnlock ? repl::parse_client_unlock_trade(*cUnlock) : std::nullopt;
+        CHECK(rUnlock && rUnlock->character_guid == gB, "ClientUnlockTrade round-trips");
+
+        const auto pConf = repl::client_trade_confirmed_params(*pc.rpc("ClientTradeConfirmed"), gA);
+        const auto cConf = pConf ? roundtrip("ClientTradeConfirmed", *pConf) : std::nullopt;
+        const auto rConf = cConf ? repl::parse_client_trade_confirmed(*cConf) : std::nullopt;
+        CHECK(rConf && rConf->character_guid == gA, "ClientTradeConfirmed round-trips");
 
         bool close_ok = true;
         for (uint8_t st : {uint8_t{0}, uint8_t{1}}) {
@@ -1474,20 +1635,34 @@ static void trade_mid_trade_inventory_and_wallet_drift() {
 AOC_REGISTER_TEST(trade_mid_trade_inventory_and_wallet_drift);
 
 // ============================================================================
-//  9. Lock/swap stub boundary (LOCK/UNLOCK/FINALIZE) + RequestBudget flood
+//  9. RequestBudget flood + low-severity review fixes (slot drift, pawn-guarded
+//     interrupt, direct 60 s expiry in respond, rapid bTradeInProgress toggle)
 // ============================================================================
-static void trade_lock_stub_boundary_and_flood() {
-    std::printf("9. lock/swap stub boundary (LOCK/UNLOCK/FINALIZE, zero DB writes) + RequestBudget flood\n");
+static void trade_budget_flood_and_review_fixes() {
+    std::printf("9. RequestBudget flood + slot drift, pawn-guarded interrupt, direct 60 s expiry & rapid toggle\n");
     TradeWorldFixture fx;
     TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 12345, default_trader_items(100)), fx.t, fx.now_sec(), 0);
     TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 67890, default_trader_items(200)), fx.t, fx.now_sec(), 1);
     fx.settle_join_and_phase_in({&a, &b});
 
-    const auto a_inv_before = a.s->inventory().items();
-    const auto b_inv_before = b.s->inventory().items();
-    const int64_t a_copper_before = a.s->wallet().copper();
-    const int64_t b_copper_before = b.s->wallet().copper();
+    // 9a. Direct 60 s expiry in TradeBook::respond before tick() runs
+    a.send_request_trade(b.guid(), fx.t);
+    fx.settle({&a, &b}, 4);
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    fx.t += seconds(61);
+    // Do NOT call tick_world before respond: Bob sends Accept directly past 60 s
+    b.send_trade_response(a.guid(), static_cast<uint8_t>(repl::TradeRequestResponse::Accept), fx.t);
+    a.tick(fx.t);
+    b.tick(fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.begins.empty() && b.mirror.begins.empty() &&
+              a.mirror.responses.size() == 1 && a.mirror.responses[0].response == static_cast<uint8_t>(repl::TradeRequestResponse::Timeout),
+          "late Accept past 60 s before tick() expires directly with 3=TIMEOUT");
 
+    // Open active trade for flood + slot-drift + pawn-guard checks
+    a.mirror.clear_events();
+    b.mirror.clear_events();
     a.send_request_trade(b.guid(), fx.t);
     fx.settle({&a, &b}, 4);
     b.send_trade_response(a.guid(), 0, fx.t);
@@ -1498,43 +1673,9 @@ static void trade_lock_stub_boundary_and_flood() {
     }
     const repl::GuidValue tg = a.mirror.begins[0].trade_request_guid;
 
-    // Both offer items and copper
-    {
-        repl::TradeOffer oa;
-        oa.items.push_back(items::to_instance(*a.s->inventory().at(ItemContainer::Backpack, 0)));
-        oa.money = repl::trade_money_container(5000);
-        oa.version = 1;
-        a.send_update_items(tg, oa, fx.t);
-
-        repl::TradeOffer ob;
-        ob.items.push_back(items::to_instance(*b.s->inventory().at(ItemContainer::Backpack, 0)));
-        ob.money = repl::trade_money_container(10000);
-        ob.version = 1;
-        b.send_update_items(tg, ob, fx.t);
-        fx.settle({&a, &b}, 5);
-    }
-
-    // Send LOCK_TRADE (2), UNLOCK_TRADE (3), FINALIZE_TRADE (4)
-    a.mirror.clear_events();
-    b.mirror.clear_events();
-    for (uint8_t req : {uint8_t{2}, uint8_t{3}, uint8_t{4}}) {
-        a.send_transaction(b.guid(), tg, req, fx.t);
-    }
-    fx.settle({&a, &b}, 6);
-    const bool got_callout = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
-                                         [](const std::string& s) { return s == "Trade lock and swap are not enabled yet."; });
-    CHECK(got_callout, "LOCK/UNLOCK/FINALIZE emits lock-disabled callout");
-    CHECK(a.mirror.closes.empty() && b.mirror.closes.empty() && fx.world->trade_book()->in_trade(a.guid_words()),
-          "LOCK/UNLOCK/FINALIZE does not close or mutate trade state");
-    CHECK(a.s->inventory().items() == a_inv_before && b.s->inventory().items() == b_inv_before &&
-              a.s->wallet().copper() == a_copper_before && b.s->wallet().copper() == b_copper_before,
-          "LOCK/UNLOCK/FINALIZE leaves both inventories and wallets untouched");
-    CHECK(fx.sink.inventories.empty(), "zero save_inventory DB writes across trade window & LOCK/UNLOCK/FINALIZE");
-
-    // Flood test: send 30 ServerUpdateTradeItems at the same timestamp -> burst 16 processed, 14 dropped cleanly
+    // 9b. Flood test: send 30 ServerUpdateTradeItems at the same timestamp -> burst 16 processed, 14 dropped cleanly
     const size_t dropped_before = a.s->requests_dropped();
     const size_t calls_before = a.s->trade_calls();
-    // Advance clock 2 s so budget refills to full burst of 16
     fx.t += seconds(2);
     std::vector<fake::Bunch> flood;
     const schema::RpcSchema* upd_rpc = class_named("AoCPlayerControllerBP_C").rpc("ServerUpdateTradeItems");
@@ -1551,8 +1692,1139 @@ static void trade_lock_stub_boundary_and_flood() {
     CHECK(a.s->trade_calls() - calls_before == 16 && a.s->requests_dropped() - dropped_before == 14 &&
               !a.s->failed() && fx.world->trade_book()->in_trade(a.guid_words()),
           "30-call trade flood capped at burst 16 (14 dropped) without failing session or corrupting trade");
+
+    // 9c. Pawn-guarded interrupt: wrong pawn ignored, matching pawn cancels
+    const uint64_t real_pawn = a.s->bootstrap().setup().guids.pawn.ObjectId;
+    CHECK(!fx.world->trade_book()->interrupt(a.guid_words(), "stale session", real_pawn + 999) &&
+              fx.world->trade_book()->in_trade(a.guid_words()),
+          "TradeBook::interrupt ignores mismatched pawn id");
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    CHECK(fx.world->trade_book()->interrupt(a.guid_words(), "matching pawn", real_pawn),
+          "TradeBook::interrupt cancels with matching pawn id");
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.closes.size() == 1 && !a.mirror.trade_in_progress, "trade closed after matching-pawn interrupt");
+
+    // 9d. Rapid bTradeInProgress open/close toggle + slot drift auto-cancel (moving offered stack to another backpack slot)
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_request_trade(b.guid(), fx.t);
+    fx.settle({&a, &b}, 2);
+    b.send_trade_response(a.guid(), 0, fx.t);
+    fx.settle({&a, &b}, 2);
+    CHECK(a.mirror.begins.size() == 1, "(reopened trade for slot drift)");
+    if (!a.mirror.begins.empty()) {
+        const repl::GuidValue tg2 = a.mirror.begins[0].trade_request_guid;
+        const svc::InventoryItem* stack = a.s->inventory().at(ItemContainer::Backpack, 0);
+        repl::TradeOffer o;
+        o.items.push_back(items::to_instance(*stack));
+        o.money = repl::trade_money_container(0);
+        o.version = 1;
+        a.send_update_items(tg2, o, fx.t);
+        fx.settle({&a, &b}, 4);
+        a.mirror.clear_events();
+        b.mirror.clear_events();
+
+        // Move whole stack from Backpack slot 0 to empty Backpack slot 15 (same GUID & qty, slot drifted)
+        const schema::RpcSchema* mv_rpc = class_named("AoCPlayerControllerBP_C").rpc("ServerRequestStorageEvent");
+        repl::ItemStorageEvent ev;
+        ev.type = static_cast<uint8_t>(repl::StorageEventType::Move);
+        ev.move_source.object = a.s->bootstrap().setup().guids.backpack;
+        ev.move_source.slots.push_back(repl::StorageEventSlot{0, stack->quantity, *items::guid_of(stack->instance_guid)});
+        repl::StorageEventContainer dst;
+        dst.object = a.s->bootstrap().setup().guids.backpack;
+        dst.slots.push_back(repl::StorageEventSlot{15, 0, {}});
+        ev.targets.push_back(std::move(dst));
+        ev.item = items::to_instance(*stack);
+        const auto mp = repl::storage_event_params(*mv_rpc, ev);
+        if (mp) a.send_pc("ServerRequestStorageEvent", *mp, fx.t);
+        fx.settle({&a, &b}, 6);
+        CHECK(a.mirror.closes.size() == 1 && b.mirror.closes.size() == 1 && !a.s->failed() && !a.mirror.trade_in_progress,
+              "moving offered stack to another backpack slot auto-cancels trade cleanly");
+    }
 }
-AOC_REGISTER_TEST(trade_lock_stub_boundary_and_flood);
+AOC_REGISTER_TEST(trade_budget_flood_and_review_fixes);
+
+// Helper: open a trade between `a` and `b` and return its TradeGuid.
+static std::optional<repl::GuidValue> open_active_trade(TradeWorldFixture& fx, TradeClient& a, TradeClient& b) {
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_request_trade(b.guid(), fx.t);
+    fx.settle({&a, &b}, 4);
+    b.send_trade_response(a.guid(), 0, fx.t);
+    fx.settle({&a, &b}, 4);
+    if (a.mirror.begins.empty()) return std::nullopt;
+    const repl::GuidValue tg = a.mirror.begins[0].trade_request_guid;
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    return tg;
+}
+
+// ============================================================================
+//  10. Happy path 2-session swap (backpack + material + mount metadata + copper + wire order)
+// ============================================================================
+static void trade_happy_path_swap_metadata_and_wire_order() {
+    std::printf("10. happy path 2-session swap: items + materials + metadata + copper + exact S>C wire order\n");
+    std::vector<svc::InventoryItem> alice_items = default_trader_items(100);
+    // Add a tradeable item with custom durability, created_at_ms, persisted health/mana, and lock_expiration
+    svc::InventoryItem meta = make_item(ItemContainer::Backpack, 5, kRecTradeableAlt1, 199, 1, 4);
+    meta.durability = 77.5f;
+    meta.created_at_ms = 1'771'299'111'000ll;
+    meta.persisted_health = 512.5f;
+    meta.persisted_mana = 88.25f;
+    meta.lock_expiration = 1'800'000'123ll;
+    alice_items.push_back(meta);
+
+    TradeWorldFixture fx;
+    TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, alice_items), fx.t, fx.now_sec(), 0);
+    TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 2000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+    fx.settle_join_and_phase_in({&a, &b});
+
+    const auto tg = open_active_trade(fx, a, b);
+    CHECK(tg.has_value(), "(happy path trade opened)");
+    if (!tg) return;
+
+    const svc::InventoryItem a_bp = *a.s->inventory().at(ItemContainer::Backpack, 0);
+    const svc::InventoryItem a_res = *a.s->inventory().at(ItemContainer::Resource0, 0);
+    const svc::InventoryItem a_meta = *a.s->inventory().find_guid(meta.instance_guid);
+    const svc::InventoryItem b_bp = *b.s->inventory().at(ItemContainer::Backpack, 0);
+
+    repl::TradeOffer oa;
+    oa.items.push_back(items::to_instance(a_bp));
+    oa.items.push_back(items::to_instance(a_res));
+    oa.items.push_back(items::to_instance(a_meta));
+    oa.money = repl::trade_money_container(1500);
+    oa.version = 1;
+    a.send_update_items(*tg, oa, fx.t);
+
+    repl::TradeOffer ob;
+    ob.items.push_back(items::to_instance(b_bp));
+    ob.money = repl::trade_money_container(300);
+    ob.version = 1;
+    b.send_update_items(*tg, ob, fx.t);
+    fx.settle({&a, &b}, 4);
+
+    // Lock both sides
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.locks.size() == 2 && b.mirror.locks.size() == 2, "both sides received ClientLockTrade for A and B");
+
+    // Wait past 2 s server confirm guard and confirm both
+    fx.t += milliseconds(2500);
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+    b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+
+    const bool settled = fx.wait_until([&] { return !a.mirror.closes.empty() && !b.mirror.closes.empty(); }, {&a, &b});
+    CHECK(settled, "atomic swap committed and settled for both sessions");
+    CHECK(fx.sink.commit_count() == 1, "exactly ONE CommitPlayerTrade RPC sent");
+    if (fx.sink.commit_count() == 1) {
+        std::lock_guard<std::mutex> lk(fx.sink.mu);
+        const auto& c = fx.sink.commits[0];
+        CHECK(c.copper_a_to_b == 1500 && c.copper_b_to_a == 300 && c.items_a_to_b == 3 && c.items_b_to_a == 1,
+              "CommitPlayerTrade carries exact copper and item counts");
+    }
+
+    // Verify swapped inventories, wallets, and preserved metadata
+    CHECK(a.s->wallet().copper() == 3800 && b.s->wallet().copper() == 3200, "wallets updated atomically (3800 / 3200)");
+    CHECK(a.s->inventory().find_guid(a_bp.instance_guid) == nullptr && a.s->inventory().find_guid(a_res.instance_guid) == nullptr &&
+              a.s->inventory().find_guid(a_meta.instance_guid) == nullptr && a.s->inventory().find_guid(b_bp.instance_guid) != nullptr,
+          "Alice lost sent stacks and received Bob's backpack stack");
+    const svc::InventoryItem* got_meta = b.s->inventory().find_guid(meta.instance_guid);
+    CHECK(got_meta != nullptr && got_meta->durability == 77.5f && got_meta->created_at_ms == 1'771'299'111'000ll &&
+              got_meta->persisted_health && *got_meta->persisted_health == 512.5f &&
+              got_meta->persisted_mana && *got_meta->persisted_mana == 88.25f &&
+              got_meta->lock_expiration == 1'800'000'123ll,
+          "transferred item preserves durability, created_at_ms, persisted health/mana, and lock_expiration");
+    const svc::InventoryItem* b_res_after = b.s->inventory().at(ItemContainer::Resource0, 0);
+    CHECK(b.s->inventory().find_guid(a_bp.instance_guid) != nullptr &&
+              b_res_after != nullptr && b_res_after->item_record_id == kRecTradeableResource && b_res_after->quantity == 20,
+          "Bob received both backpack stack and stack-joined material-bag items (10 + 10 = 20)");
+
+    // Verify exact S>C completion wire order: StorageEvent -> Currencies -> CurrencyCallout -> CloseTrade(1)
+    const auto check_order = [](const TradeMirror& m) {
+        auto pos = [&](const char* tag) -> size_t {
+            for (size_t i = 0; i < m.event_order.size(); ++i) {
+                if (m.event_order[i] == tag) return i;
+            }
+            return std::string::npos;
+        };
+        const size_t p_st = pos("StorageEvent");
+        const size_t p_cur = pos("Currencies");
+        const size_t p_cc = pos("CurrencyCallout");
+        const size_t p_cl = pos("CloseTrade(1)");
+        return p_st != std::string::npos && p_cur != std::string::npos && p_cc != std::string::npos && p_cl != std::string::npos &&
+               p_st < p_cur && p_cur < p_cc && p_cc < p_cl;
+    };
+    CHECK(check_order(a.mirror) && check_order(b.mirror),
+          "exact S>C completion order on both clients: StorageEvent -> Currencies -> CurrencyCallout -> CloseTrade(1)");
+    CHECK(a.mirror.currency_callouts.size() == 1 && a.mirror.currency_callouts[0].delta == -1200 &&
+              b.mirror.currency_callouts.size() == 1 && b.mirror.currency_callouts[0].delta == 1200,
+          "ClientShowCurrencyCallout emits exact signed net copper deltas (-1200 / +1200)");
+    CHECK(!a.mirror.trade_in_progress && !b.mirror.trade_in_progress, "bTradeInProgress cleared to false on both");
+
+    // Clean logout after trade -> zero stale SaveInventory calls
+    a.s->finish("logout after swap");
+    b.s->finish("logout after swap");
+    CHECK(fx.sink.inv_count() == 0, "zero stale SaveInventory writes after clean swap and logout");
+}
+AOC_REGISTER_TEST(trade_happy_path_swap_metadata_and_wire_order);
+
+// ============================================================================
+//  11. One-sided gifts (copper-only, item-only leaving 0 items) & 0-for-0 empty rejection
+// ============================================================================
+static void trade_one_sided_gifts_last_item_and_empty_rejection() {
+    std::printf("11. one-sided gifts (copper-only, last-item leaving 0 items) & 0-for-0 rejection\n");
+    // Alice has ONLY ONE item in her entire inventory!
+    std::vector<svc::InventoryItem> lone_item = {make_item(ItemContainer::Backpack, 0, kRecTradeableAlt1, 310, 1, 1)};
+
+    TradeWorldFixture fx;
+    TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 1000, lone_item), fx.t, fx.now_sec(), 0);
+    TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 1000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+    fx.settle_join_and_phase_in({&a, &b});
+
+    // 11a. 0-for-0 empty trade rejected at LOCK_TRADE, then copper-only one-sided gift succeeds with NO StorageEvent
+    const auto tg1 = open_active_trade(fx, a, b);
+    CHECK(tg1.has_value(), "(copper gift trade opened)");
+    if (tg1) {
+        a.send_transaction(b.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+        fx.settle({&a, &b}, 4);
+        const bool empty_msg = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
+                                           [](const std::string& s) { return s == "Cannot lock an empty trade."; });
+        CHECK(empty_msg && a.mirror.locks.empty(), "0-for-0 empty trade rejected at Lock with callout");
+
+        repl::TradeOffer oa;
+        oa.money = repl::trade_money_container(750);
+        oa.version = 1;
+        a.send_update_items(*tg1, oa, fx.t);
+        fx.settle({&a, &b}, 4);
+        a.send_transaction(b.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+        b.send_transaction(a.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+        fx.settle({&a, &b}, 4);
+        fx.t += milliseconds(2500);
+        a.mirror.clear_events();
+        b.mirror.clear_events();
+        a.send_transaction(b.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+        b.send_transaction(a.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+        const bool done = fx.wait_until([&] { return !a.mirror.closes.empty() && !b.mirror.closes.empty(); }, {&a, &b});
+        CHECK(done && a.s->wallet().copper() == 250 && b.s->wallet().copper() == 1750, "copper-only one-sided gift succeeds");
+        CHECK(a.mirror.storage_events == 0 && b.mirror.storage_events == 0 &&
+                  a.mirror.currency_callouts.size() == 1 && b.mirror.currency_callouts.size() == 1,
+              "copper-only trade omits ClientReceiveStorageEvent and emits CurrencyCallout");
+    }
+
+    // 11b. One-sided gift of Alice's very last item leaving Alice with 0 items
+    fx.sink.clear_recorded();
+    const auto tg2 = open_active_trade(fx, a, b);
+    CHECK(tg2.has_value(), "(last-item gift trade opened)");
+    if (tg2) {
+        repl::TradeOffer oa;
+        oa.items.push_back(items::to_instance(lone_item[0]));
+        oa.money = repl::trade_money_container(0);
+        oa.version = 1;
+        a.send_update_items(*tg2, oa, fx.t);
+        fx.settle({&a, &b}, 4);
+        a.send_transaction(b.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+        b.send_transaction(a.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+        fx.settle({&a, &b}, 4);
+        fx.t += milliseconds(2500);
+        a.mirror.clear_events();
+        b.mirror.clear_events();
+        a.send_transaction(b.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+        b.send_transaction(a.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+        const bool done = fx.wait_until([&] { return !a.mirror.closes.empty() && !b.mirror.closes.empty(); }, {&a, &b});
+        CHECK(done && a.s->inventory().size() == 0 && b.s->inventory().find_guid(lone_item[0].instance_guid) != nullptr,
+              "gifting very last item leaves sender with 0 items and grants receiver");
+        CHECK(a.mirror.currency_callouts.empty() && b.mirror.currency_callouts.empty(),
+              "item-only trade omits ClientShowCurrencyCallout");
+    }
+}
+AOC_REGISTER_TEST(trade_one_sided_gifts_last_item_and_empty_rejection);
+
+// ============================================================================
+//  12. Anti-bait-and-switch, dual-unlock, cooldowns & edit-while-locked revert
+// ============================================================================
+static void trade_anti_bait_and_switch_dual_unlock_and_cooldowns() {
+    std::printf("12. anti-bait-and-switch, dual-unlock without cooldown, 2 s cooldowns & edit-while-locked revert\n");
+    TradeWorldFixture fx;
+    TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+    TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+    fx.settle_join_and_phase_in({&a, &b});
+
+    const auto tg = open_active_trade(fx, a, b);
+    CHECK(tg.has_value(), "(cooldown trade opened)");
+    if (!tg) return;
+
+    // Alice offers 500 copper and locks
+    repl::TradeOffer oa;
+    oa.money = repl::trade_money_container(500);
+    oa.version = 1;
+    a.send_update_items(*tg, oa, fx.t);
+    fx.settle({&a, &b}, 4);
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.locks.size() == 1 && b.mirror.locks.size() == 1, "Alice locked");
+
+    // Bob sends valid edit while Alice is Locked -> Alice auto-unlocked (ClientUnlockTrade(Alice) to both!)
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    repl::TradeOffer ob;
+    ob.money = repl::trade_money_container(250);
+    ob.version = 1;
+    b.send_update_items(*tg, ob, fx.t);
+    fx.settle({&a, &b}, 4);
+    const auto unlock_before_update = [](const TradeMirror& m) {
+        size_t pu = std::string::npos, po = std::string::npos;
+        for (size_t i = 0; i < m.event_order.size(); ++i) {
+            if (m.event_order[i] == "Unlock" && pu == std::string::npos) pu = i;
+            if (m.event_order[i] == "Update" && po == std::string::npos) po = i;
+        }
+        return pu != std::string::npos && po != std::string::npos && pu < po;
+    };
+    CHECK(a.mirror.unlocks.size() == 1 && a.mirror.unlocks[0].character_guid == a.guid() &&
+              b.mirror.unlocks.size() == 1 && b.mirror.unlocks[0].character_guid == a.guid() &&
+              unlock_before_update(a.mirror) && unlock_before_update(b.mirror),
+          "valid edit unlocks locked partner before ClientUpdateTrade on both clients");
+
+    // Advance 2.5 s so Alice can lock again, then Alice immediately unlocks (0 s -> NO cooldown on UNLOCK_TRADE!),
+    // then tries to re-lock within 2 s -> rejected by cooldown!
+    fx.t += milliseconds(2500);
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.locks.size() == 1, "Alice re-locked after cooldown");
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::UnlockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.unlocks.size() == 1 && a.mirror.unlocks[0].character_guid == a.guid(),
+          "UNLOCK_TRADE bypasses cooldown immediately");
+    a.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    const bool lock_cd = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
+                                     [](const std::string& s) { return s == "Trade action is on cooldown."; });
+    CHECK(lock_cd && a.mirror.locks.empty(), "LOCK_TRADE within 2 s cooldown rejected");
+
+    // Advance 2.5 s, lock BOTH sides, test edit-while-locked revert at V+1 and premature FINALIZE_TRADE
+    fx.t += milliseconds(2500);
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+
+    // Edit while Locked rejected + reverted at V+1 (partner sees no update)
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    repl::TradeOffer bad_edit;
+    bad_edit.money = repl::trade_money_container(1);
+    bad_edit.version = 2;
+    a.send_update_items(*tg, bad_edit, fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.updates.size() == 1 && a.mirror.updates[0].offer.version == 3 &&
+              a.mirror.updates[0].offer.money == repl::trade_money_container(500) && b.mirror.updates.empty(),
+          "edit while Locked rejected & reverted at V+1 (partner unchanged)");
+
+    // Premature FINALIZE_TRADE (< 2 s after both locked) rejected
+    fx.t += milliseconds(500);
+    a.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    const bool fin_cd = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
+                                    [](const std::string& s) { return s == "Trade action is on cooldown."; });
+    CHECK(fin_cd && a.mirror.confirms.empty(), "premature FINALIZE_TRADE within 2 s guard rejected");
+
+    // Advance 2.5 s -> Alice confirms -> Bob unlocks -> DUAL-UNLOCK transitions BOTH Bob and Alice back to Opened!
+    fx.t += milliseconds(2500);
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.confirms.size() == 1 && b.mirror.confirms.size() == 1, "Alice confirmed");
+
+    a.mirror.clear_events();
+    b.mirror.clear_events();
+    b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::UnlockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.unlocks.size() == 2 && b.mirror.unlocks.size() == 2,
+          "UNLOCK_TRADE dual-unlocks BOTH locked/confirmed sides and sends ClientUnlockTrade for both to both players");
+}
+AOC_REGISTER_TEST(trade_anti_bait_and_switch_dual_unlock_and_cooldowns);
+
+// ============================================================================
+//  13. Space, material-bag grid, net-zero full-backpack swap & currency cap checks
+// ============================================================================
+static void trade_space_material_grid_and_currency_cap_checks() {
+    std::printf("13. space, material-bag grid, net-zero full-backpack swap & currency cap checks\n");
+
+    // 13a & 13b: 70/70 full backpack rejection + net-zero 1-for-1 swap succeeds
+    {
+        std::vector<svc::InventoryItem> full_a, full_b;
+        for (int s = 0; s < items::kBackpackSlots; ++s) {
+            full_a.push_back(make_item(ItemContainer::Backpack, s, kRecTradeableAlt1, 1000 + static_cast<uint32_t>(s), 1, 1));
+            full_b.push_back(make_item(ItemContainer::Backpack, s, kRecTradeableAlt2, 2000 + static_cast<uint32_t>(s), 1, 1));
+        }
+        TradeWorldFixture fx;
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, full_a), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, full_b), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+        const auto tg = open_active_trade(fx, a, b);
+        CHECK(tg.has_value(), "(full-bag trade opened)");
+        if (tg) {
+            repl::TradeOffer oa;
+            oa.items.push_back(items::to_instance(full_a[0]));
+            oa.money = repl::trade_money_container(0);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            const bool space_err = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
+                                               [](const std::string& s) { return s == "Unable to Lock Trade. Check Inventory Space."; });
+            CHECK(space_err && a.mirror.locks.empty(), "1-for-0 gift into 70/70 full backpack rejected");
+
+            // Now Bob offers 1 backpack item too -> net-zero swap into full backpacks succeeds!
+            repl::TradeOffer ob;
+            ob.items.push_back(items::to_instance(full_b[0]));
+            ob.money = repl::trade_money_container(0);
+            ob.version = 1;
+            b.send_update_items(*tg, ob, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.mirror.clear_events();
+            b.mirror.clear_events();
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            fx.t += milliseconds(2500);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            const bool done = fx.wait_until([&] { return !a.mirror.closes.empty() && !b.mirror.closes.empty(); }, {&a, &b});
+            CHECK(done && a.s->inventory().find_guid(full_b[0].instance_guid) != nullptr &&
+                      b.s->inventory().find_guid(full_a[0].instance_guid) != nullptr,
+                  "net-zero 1-for-1 swap between two 70/70 full backpacks succeeds");
+        }
+    }
+
+    // 13c & 13d: Missing resource bag rejects material transfer; currency cap check
+    {
+        std::vector<svc::InventoryItem> bob_no_resbag = {make_item(ItemContainer::Backpack, 0, kRecTradeableAlt1, 3001, 1, 1)};
+        TradeWorldFixture fx;
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, items::kMoneyCap - 500, bob_no_resbag), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+        const auto tg = open_active_trade(fx, a, b);
+        CHECK(tg.has_value(), "(resbag/cap trade opened)");
+        if (tg) {
+            // Material item to receiver without a worn resource bag -> rejected
+            repl::TradeOffer oa;
+            oa.items.push_back(items::to_instance(*a.s->inventory().at(ItemContainer::Resource0, 0)));
+            oa.money = repl::trade_money_container(0);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            const bool res_err = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
+                                             [](const std::string& s) { return s == "Unable to Lock Trade. Check Inventory Space."; });
+            CHECK(res_err && a.mirror.locks.empty(), "material transfer to player without resource bag rejected");
+
+            // Currency overflow: Bob has kMoneyCap - 500, Alice offers 600 -> rejected
+            a.mirror.clear_events();
+            repl::TradeOffer oa2;
+            oa2.money = repl::trade_money_container(600);
+            oa2.version = 2;
+            a.send_update_items(*tg, oa2, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            const bool cap_err = std::any_of(a.mirror.callouts.begin(), a.mirror.callouts.end(),
+                                             [](const std::string& s) { return s == "Unable to Lock Trade. Max Currency Reached."; });
+            CHECK(cap_err && a.mirror.locks.empty(), "wallet - mine + theirs > kMoneyCap rejected");
+
+            // Bob offers 500, Alice offers 600 -> Bob net +100 <= kMoneyCap -> succeeds!
+            repl::TradeOffer ob;
+            ob.money = repl::trade_money_container(500);
+            ob.version = 1;
+            b.send_update_items(*tg, ob, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            CHECK(a.mirror.locks.size() == 2, "currency swap staying at/under kMoneyCap locks cleanly");
+        }
+    }
+}
+AOC_REGISTER_TEST(trade_space_material_grid_and_currency_cap_checks);
+
+// ============================================================================
+//  14. Cross-subsystem serialization & commit-phase mutation guards
+// ============================================================================
+static void trade_cross_subsystem_serialization_and_commit_guards() {
+    std::printf("14. cross-subsystem serialization (login_pending) & mutation/save guards while Committing\n");
+    TradeWorldFixture fx;
+    TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+    TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+    fx.settle_join_and_phase_in({&a, &b});
+
+    const auto tg = open_active_trade(fx, a, b);
+    CHECK(tg.has_value(), "(guard trade opened)");
+    if (!tg) return;
+
+    repl::TradeOffer oa;
+    oa.money = repl::trade_money_container(500);
+    oa.version = 1;
+    a.send_update_items(*tg, oa, fx.t);
+    fx.settle({&a, &b}, 4);
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    fx.t += milliseconds(2500);
+
+    // 14a. login_pending blocks FINALIZE_TRADE from advancing/committing
+    fx.world->login_began(kAliceId, 777);
+    a.mirror.clear_events();
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.mirror.confirms.empty() && fx.sink.commit_count() == 0, "login_pending blocks FINALIZE_TRADE");
+    fx.world->login_ended(777);
+
+    // 14b. Gate CommitPlayerTrade so both sessions sit in Committing state; verify mutations & periodic saves are blocked/deferred
+    std::mutex gate_mu;
+    std::condition_variable gate_cv;
+    bool commit_entered = false;
+    bool commit_release = false;
+    fx.sink.on_commit = [&](const svc::CommitTradeRequest&) {
+        std::unique_lock<std::mutex> lk(gate_mu);
+        commit_entered = true;
+        gate_cv.notify_all();
+        gate_cv.wait(lk, [&] { return commit_release; });
+        return svc::CommitTradeResult{svc::CallStatus::Ok, false, {}};
+    };
+
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+    b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+    fx.settle({&a, &b}, 4);
+    {
+        std::unique_lock<std::mutex> lk(gate_mu);
+        gate_cv.wait_for(lk, seconds(2), [&] { return commit_entered; });
+    }
+    CHECK(commit_entered && a.s->trade_commit_pending() && b.s->trade_commit_pending(),
+          "trade entered Committing with async commit in flight");
+
+    // Attempt ServerItemUsed (equip helmet in Backpack slot 1) while Committing -> must be refused!
+    const svc::InventoryItem* helmet = a.s->inventory().at(ItemContainer::Backpack, 1);
+    CHECK(helmet != nullptr, "(helmet in backpack before guarded use)");
+    if (helmet) {
+        const schema::RpcSchema* use_rpc = class_named("PlayerPawn_C").rpc("ServerItemUsed");
+        repl::RpcParams p;
+        const auto g = *items::guid_of(helmet->instance_guid);
+        repl::set_rpc_param(*use_rpc, p, "Storage", repl::Value::u64(static_cast<uint64_t>(repl::ItemLocation::Backpack)));
+        repl::set_rpc_param(*use_rpc, p, "Slot", repl::Value::i64(1));
+        repl::set_rpc_param(*use_rpc, p, "ExpectedItem.A", repl::Value::i64(static_cast<int32_t>(g.a)));
+        repl::set_rpc_param(*use_rpc, p, "ExpectedItem.B", repl::Value::i64(static_cast<int32_t>(g.b)));
+        repl::set_rpc_param(*use_rpc, p, "ExpectedItem.C", repl::Value::i64(static_cast<int32_t>(g.c)));
+        repl::set_rpc_param(*use_rpc, p, "ExpectedItem.D", repl::Value::i64(static_cast<int32_t>(g.d)));
+        repl::set_rpc_param(*use_rpc, p, "RequestedEquipSlot", repl::Value::i64(static_cast<int32_t>(repl::kAnyEquipSlot)));
+        a.send_pawn("ServerItemUsed", p, fx.t);
+    }
+    // Attempt ServerRequestStorageEvent (move backpack slot 0 -> 15) while Committing -> must be refused!
+    const svc::InventoryItem* stack0 = a.s->inventory().at(ItemContainer::Backpack, 0);
+    if (stack0) {
+        const schema::RpcSchema* mv_rpc = class_named("AoCPlayerControllerBP_C").rpc("ServerRequestStorageEvent");
+        repl::ItemStorageEvent ev;
+        ev.type = static_cast<uint8_t>(repl::StorageEventType::Move);
+        ev.move_source.object = a.s->bootstrap().setup().guids.backpack;
+        ev.move_source.slots.push_back(repl::StorageEventSlot{0, stack0->quantity, *items::guid_of(stack0->instance_guid)});
+        repl::StorageEventContainer dst;
+        dst.object = a.s->bootstrap().setup().guids.backpack;
+        dst.slots.push_back(repl::StorageEventSlot{15, 0, {}});
+        ev.targets.push_back(std::move(dst));
+        ev.item = items::to_instance(*stack0);
+        if (const auto mp = repl::storage_event_params(*mv_rpc, ev)) a.send_pc("ServerRequestStorageEvent", *mp, fx.t);
+    }
+    // Attempt CANCEL_TRADE while Committing -> must be ignored!
+    a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::CancelTrade), fx.t);
+    // Advance 70 s past periodic save interval -> hand_over_inventory must be deferred!
+    fx.t += seconds(70);
+    fx.settle({&a, &b}, 4);
+    CHECK(a.s->inventory().at(ItemContainer::Backpack, 1) != nullptr &&
+              a.s->inventory().at(ItemContainer::Backpack, 0) != nullptr &&
+              fx.sink.inv_count() == 0 && a.s->trade_commit_pending(),
+          "ServerItemUsed, ServerRequestStorageEvent, CANCEL_TRADE and periodic saves are blocked/deferred during Committing");
+
+    {
+        std::lock_guard<std::mutex> lk(gate_mu);
+        commit_release = true;
+    }
+    gate_cv.notify_all();
+    const bool done = fx.wait_until([&] { return !a.mirror.closes.empty() && !b.mirror.closes.empty(); }, {&a, &b});
+    CHECK(done && a.s->wallet().copper() == 4500 && b.s->wallet().copper() == 5500, "gated commit completes cleanly after release");
+}
+AOC_REGISTER_TEST(trade_cross_subsystem_serialization_and_commit_guards);
+
+// ============================================================================
+//  15. Logout + immediate relog barrier during Committing (both Ok and Refused + orphan before save)
+// ============================================================================
+static void trade_logout_and_relog_barrier_ok_and_refused() {
+    std::printf("15. logout & relog barrier during Committing (Ok and Refused + orphan before save handoff)\n");
+
+    // 15a. Disconnect during Committing -> Ok
+    {
+        TradeWorldFixture fx;
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+        const auto tg = open_active_trade(fx, a, b);
+        if (tg) {
+            repl::TradeOffer oa;
+            oa.money = repl::trade_money_container(1000);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            fx.t += milliseconds(2500);
+
+            std::mutex mu;
+            std::condition_variable cv;
+            bool entered = false, release = false;
+            fx.sink.on_commit = [&](const svc::CommitTradeRequest&) {
+                std::unique_lock<std::mutex> lk(mu);
+                entered = true;
+                cv.notify_all();
+                cv.wait(lk, [&] { return release; });
+                return svc::CommitTradeResult{svc::CallStatus::Ok, false, {}};
+            };
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            {
+                std::unique_lock<std::mutex> lk(mu);
+                cv.wait_for(lk, seconds(2), [&] { return entered; });
+            }
+
+            // Alice disconnects mid-commit!
+            a.s->finish("disconnect during committing");
+            CHECK(fx.sink.inv_count() == 0, "disconnect during Committing writes ZERO pre-trade SaveInventory");
+            CHECK(fx.world->character_writes_pending(kAliceId) && fx.world->character_writes_pending(kBobId),
+                  "character_writes_pending stays true for both characters while commit is in flight");
+
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                release = true;
+            }
+            cv.notify_all();
+            const bool done = fx.wait_until([&] {
+                return !fx.world->character_writes_pending(kAliceId) && !fx.world->character_writes_pending(kBobId) && !b.mirror.closes.empty();
+            }, {&b});
+            CHECK(done && b.mirror.closes[0].status == 1 && b.s->wallet().copper() == 6000 && fx.sink.inv_count() == 0,
+                  "after Ok settles, online partner completes cleanly, relog barrier clears, and zero stale SaveInventory written");
+        }
+    }
+
+    // 15b. Disconnect during Committing -> Refused + orphan before-snapshot handoff to sink
+    {
+        TradeWorldFixture fx;
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+
+        // Dirty Alice's inventory BEFORE trading (move backpack slot 0 -> 15) so inventory_changed_ == true
+        const svc::InventoryItem* st0 = a.s->inventory().at(ItemContainer::Backpack, 0);
+        if (st0) {
+            const schema::RpcSchema* mv_rpc = class_named("AoCPlayerControllerBP_C").rpc("ServerRequestStorageEvent");
+            repl::ItemStorageEvent ev;
+            ev.type = static_cast<uint8_t>(repl::StorageEventType::Move);
+            ev.move_source.object = a.s->bootstrap().setup().guids.backpack;
+            ev.move_source.slots.push_back(repl::StorageEventSlot{0, st0->quantity, *items::guid_of(st0->instance_guid)});
+            repl::StorageEventContainer dst;
+            dst.object = a.s->bootstrap().setup().guids.backpack;
+            dst.slots.push_back(repl::StorageEventSlot{15, 0, {}});
+            ev.targets.push_back(std::move(dst));
+            ev.item = items::to_instance(*st0);
+            if (const auto mp = repl::storage_event_params(*mv_rpc, ev)) a.send_pc("ServerRequestStorageEvent", *mp, fx.t);
+            fx.settle({&a, &b}, 4);
+        }
+        fx.sink.clear_recorded();
+
+        const auto tg = open_active_trade(fx, a, b);
+        if (tg) {
+            repl::TradeOffer oa;
+            oa.money = repl::trade_money_container(1000);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            fx.t += milliseconds(2500);
+
+            std::mutex mu;
+            std::condition_variable cv;
+            bool entered = false, release = false;
+            fx.sink.on_commit = [&](const svc::CommitTradeRequest&) {
+                std::unique_lock<std::mutex> lk(mu);
+                entered = true;
+                cv.notify_all();
+                cv.wait(lk, [&] { return release; });
+                return svc::CommitTradeResult{svc::CallStatus::Refused, false, "simulated refusal"};
+            };
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            {
+                std::unique_lock<std::mutex> lk(mu);
+                cv.wait_for(lk, seconds(2), [&] { return entered; });
+            }
+
+            a.s->finish("disconnect before refused commit");
+            CHECK(fx.sink.inv_count() == 0 && fx.world->character_writes_pending(kAliceId),
+                  "disconnected dirty session defers save until refused commit settles");
+
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                release = true;
+            }
+            cv.notify_all();
+            const bool done = fx.wait_until([&] {
+                return !fx.world->character_writes_pending(kAliceId) && !fx.world->character_writes_pending(kBobId) && !b.mirror.closes.empty();
+            }, {&b});
+            bool saved_alice_before = false;
+            {
+                std::lock_guard<std::mutex> lk(fx.sink.mu);
+                for (const auto& s : fx.sink.inventories) {
+                    if (s.id == kAliceId) saved_alice_before = true;
+                }
+            }
+            CHECK(done && saved_alice_before && b.mirror.closes[0].status == 0 && b.s->wallet().copper() == 5000,
+                  "Refused commit hands disconnected dirty session's pre-trade snapshot to sink before releasing relog barrier and reverts online partner");
+        }
+    }
+}
+AOC_REGISTER_TEST(trade_logout_and_relog_barrier_ok_and_refused);
+
+// ============================================================================
+//  16. Retry, idempotent replay, non-HOL queue & retry-exhaustion fail-closed
+// ============================================================================
+static void trade_retry_idempotency_non_hol_and_fail_closed() {
+    std::printf("16. non-HOL retry, idempotent replayed=true settlement & retry-exhaustion fail-closed\n");
+
+    // 16a. Pair 1 hits Unavailable on attempt 1 (backs off 150 ms); Pair 2 commits immediately (non-HOL!);
+    //      Pair 1 retries exact same trade_id and gets Ok(replayed=true) -> settles cleanly!
+    {
+        TradeWorldFixture fx;
+        fx.world->set_trade_job_config(trade::TradeJobsConfig{4, milliseconds(150), milliseconds(300)});
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 100, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+        TradeClient c(*fx.world, make_trader(kCarolId, "Carol", 0, 100, 0, 5000, default_trader_items(300)), fx.t, fx.now_sec(), 2);
+        TradeClient d(*fx.world, make_trader(kDaveId, "Dave", 100, 100, 0, 5000, default_trader_items(400)), fx.t, fx.now_sec(), 3);
+        fx.settle_join_and_phase_in({&a, &b, &c, &d});
+
+        const auto tg1 = open_active_trade(fx, a, b);
+        const auto tg2 = open_active_trade(fx, c, d);
+        CHECK(tg1.has_value() && tg2.has_value(), "(both pairs opened trades)");
+        if (tg1 && tg2) {
+            repl::TradeOffer o;
+            o.money = repl::trade_money_container(400);
+            o.version = 1;
+            a.send_update_items(*tg1, o, fx.t);
+            c.send_update_items(*tg2, o, fx.t);
+            fx.settle({&a, &b, &c, &d}, 4);
+            a.send_transaction(b.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            c.send_transaction(d.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            d.send_transaction(c.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b, &c, &d}, 4);
+            fx.t += milliseconds(2500);
+
+            std::mutex om;
+            std::vector<std::string> sequence;
+            std::string pair1_id1, pair1_id2;
+            int pair1_attempts = 0;
+            fx.sink.on_commit = [&](const svc::CommitTradeRequest& req) {
+                std::lock_guard<std::mutex> lk(om);
+                const bool is_pair1 = (req.side_a.character_id == kAliceId || req.side_b.character_id == kAliceId);
+                if (is_pair1) {
+                    ++pair1_attempts;
+                    if (pair1_attempts == 1) {
+                        pair1_id1 = req.trade_id;
+                        sequence.push_back("pair1_unavail");
+                        return svc::CommitTradeResult{svc::CallStatus::Unavailable, false, "transient"};
+                    }
+                    pair1_id2 = req.trade_id;
+                    sequence.push_back("pair1_replayed");
+                    return svc::CommitTradeResult{svc::CallStatus::Ok, /*replayed=*/true, {}};
+                }
+                sequence.push_back("pair2_ok");
+                return svc::CommitTradeResult{svc::CallStatus::Ok, false, {}};
+            };
+
+            // Confirm Pair 1 first, wait for attempt 1 (Unavailable), then confirm Pair 2 immediately!
+            a.send_transaction(b.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg1, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            const bool got_first = fx.wait_until([&] {
+                std::lock_guard<std::mutex> lk(om);
+                return pair1_attempts == 1;
+            }, {&a, &b, &c, &d});
+            CHECK(got_first, "(pair 1 attempt 1 ran and backed off)");
+
+            c.send_transaction(d.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            d.send_transaction(c.guid(), *tg2, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+
+            const bool all_done = fx.wait_until([&] {
+                return !a.mirror.closes.empty() && !b.mirror.closes.empty() && !c.mirror.closes.empty() && !d.mirror.closes.empty();
+            }, {&a, &b, &c, &d}, 3000);
+            std::lock_guard<std::mutex> lk(om);
+            const bool non_hol = sequence.size() == 3 && sequence[0] == "pair1_unavail" && sequence[1] == "pair2_ok" && sequence[2] == "pair1_replayed";
+            CHECK(all_done && non_hol && !pair1_id1.empty() && pair1_id1 == pair1_id2 &&
+                      a.s->wallet().copper() == 4600 && b.s->wallet().copper() == 5400 &&
+                      c.s->wallet().copper() == 4600 && d.s->wallet().copper() == 5400,
+                  "non-HOL retry lets Pair 2 commit before Pair 1 retries exact trade_id with Ok(replayed=true)");
+        }
+    }
+
+    // 16b. Retry exhaustion fails closed without writing pre-trade bags to sink
+    {
+        TradeWorldFixture fx;
+        fx.world->set_trade_job_config(trade::TradeJobsConfig{2, milliseconds(10), milliseconds(20)});
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+        // Dirty Alice's inventory beforehand (move backpack slot 0 -> 15) so inventory_changed_ == true
+        // and we prove finish() NEVER writes pre-trade bags on undecided!
+        if (const svc::InventoryItem* st0 = a.s->inventory().at(ItemContainer::Backpack, 0)) {
+            const schema::RpcSchema* mv_rpc = class_named("AoCPlayerControllerBP_C").rpc("ServerRequestStorageEvent");
+            repl::ItemStorageEvent ev;
+            ev.type = static_cast<uint8_t>(repl::StorageEventType::Move);
+            ev.move_source.object = a.s->bootstrap().setup().guids.backpack;
+            ev.move_source.slots.push_back(repl::StorageEventSlot{0, st0->quantity, *items::guid_of(st0->instance_guid)});
+            repl::StorageEventContainer dst;
+            dst.object = a.s->bootstrap().setup().guids.backpack;
+            dst.slots.push_back(repl::StorageEventSlot{15, 0, {}});
+            ev.targets.push_back(std::move(dst));
+            ev.item = items::to_instance(*st0);
+            if (const auto mp = repl::storage_event_params(*mv_rpc, ev)) a.send_pc("ServerRequestStorageEvent", *mp, fx.t);
+            fx.settle({&a, &b}, 4);
+        }
+        fx.sink.clear_recorded();
+        fx.sink.on_commit = [](const svc::CommitTradeRequest&) {
+            return svc::CommitTradeResult{svc::CallStatus::Unavailable, false, "db unreachable"};
+        };
+
+        const auto tg = open_active_trade(fx, a, b);
+        if (tg) {
+            repl::TradeOffer oa;
+            oa.money = repl::trade_money_container(100);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            fx.t += milliseconds(2500);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+
+            const bool exhausted = fx.wait_until([&] {
+                return a.s->trade_undecided() && b.s->trade_undecided() && !fx.world->character_writes_pending(kAliceId);
+            }, {&a, &b}, 2000);
+            CHECK(exhausted && a.s->failed() && b.s->failed() && fx.sink.commit_count() == 2,
+                  "retry exhaustion marks both sessions undecided/failed after max_attempts");
+            a.s->finish("undecided disconnect");
+            b.s->finish("undecided disconnect");
+            CHECK(fx.sink.inv_count() == 0, "fail-closed undecided disconnect writes ZERO pre-trade SaveInventory");
+        }
+    }
+}
+AOC_REGISTER_TEST(trade_retry_idempotency_non_hol_and_fail_closed);
+
+// ============================================================================
+//  17. CSPRNG TradeGuid across restarts, death/GM gating during Committing,
+//      and real CharacterSaver pre-trade re-queue on Refused while online
+// ============================================================================
+struct FakeTradeCharacterApi : svc::CharacterApi {
+    mutable std::mutex mu;
+    std::condition_variable cv;
+    std::string block_save_id;
+    bool block_save_entered = false;
+    bool block_save_release = false;
+
+    struct SavedInv {
+        std::string id;
+        std::vector<svc::InventoryItem> items;
+        std::vector<svc::WalletEntry> wallet;
+    };
+    std::vector<SavedInv> saved_inventories;
+    std::vector<svc::CommitTradeRequest> commit_calls;
+    svc::CommitTradeResult commit_result{svc::CallStatus::Refused, false, "simulated refusal"};
+
+    svc::CharacterResult get_character(const std::string&) override { return {}; }
+    svc::CallStatus save_position(const std::string&, const svc::Position&) override { return svc::CallStatus::Ok; }
+
+    svc::CallStatus save_inventory(const std::string& id, const std::vector<svc::InventoryItem>& items) override {
+        return save_inventory(id, items, {}, {}, {}, {});
+    }
+
+    svc::CallStatus save_inventory(const std::string& id, const std::vector<svc::InventoryItem>& items,
+                                   const std::vector<svc::WalletEntry>& wallet, const std::vector<svc::ProcessingJob>&,
+                                   const std::vector<int64_t>&, const std::vector<svc::WarehouseItem>&) override {
+        {
+            std::unique_lock<std::mutex> lk(mu);
+            if (!block_save_id.empty() && id == block_save_id) {
+                block_save_entered = true;
+                cv.notify_all();
+                cv.wait(lk, [&] { return block_save_release; });
+            }
+            saved_inventories.push_back({id, items, wallet});
+        }
+        return svc::CallStatus::Ok;
+    }
+
+    svc::CommitTradeResult commit_player_trade(const svc::CommitTradeRequest& req) override {
+        std::lock_guard<std::mutex> lk(mu);
+        commit_calls.push_back(req);
+        return commit_result;
+    }
+};
+
+static void trade_csprng_guids_death_during_commit_and_saver_abort_requeue() {
+    std::printf("17. CSPRNG TradeGuids across restarts, death/GM gating during Committing & CharacterSaver abort re-queue\n");
+
+    // 17a. Two freshly constructed TradeBook instances mint distinct non-zero 128-bit TradeGuids (no deterministic restart collision).
+    {
+        auto mint_four = []() {
+            world::ActorRegistry reg;
+            trade::TradeBook book(&reg);
+            const trade::PlayerGuid ga{1u, 2u, 3u, 4u};
+            const trade::PlayerGuid gb{5u, 6u, 7u, 8u};
+            book.connect(ga, "Alice", 100);
+            book.connect(gb, "Bob", 101);
+            trade::PlayerStatus st;
+            st.phased_in = true;
+            book.update_status(ga, 100, st, 0.0);
+            book.update_status(gb, 101, st, 0.0);
+            book.update_position(ga, 100, 0.0, 0.0, 0.0);
+            book.update_position(gb, 101, 100.0, 0.0, 0.0);
+            std::vector<trade::TradeGuid> out;
+            for (int i = 0; i < 4; ++i) {
+                const double t = 10.0 * i;
+                book.request(ga, gb, t);
+                book.respond(gb, ga, static_cast<uint8_t>(repl::TradeRequestResponse::Accept), t + 0.1);
+                const trade::ActiveTrade* act = book.active_trade(ga);
+                if (act) {
+                    out.push_back(act->guid);
+                    book.cancel(ga, act->guid, false, "done");
+                }
+                (void)book.take_notices(ga);
+                (void)book.take_notices(gb);
+            }
+            return out;
+        };
+        const std::vector<trade::TradeGuid> g1 = mint_four();
+        const std::vector<trade::TradeGuid> g2 = mint_four();
+        std::set<trade::TradeGuid> uniq;
+        bool all_nonzero = (g1.size() == 4 && g2.size() == 4);
+        for (const auto& g : g1) {
+            if (trade::is_zero_guid(g)) all_nonzero = false;
+            uniq.insert(g);
+        }
+        for (const auto& g : g2) {
+            if (trade::is_zero_guid(g)) all_nonzero = false;
+            uniq.insert(g);
+        }
+        CHECK(all_nonzero && g1[0] != g2[0] && uniq.size() == 8,
+              "fresh TradeBook instances mint distinct non-zero 128-bit CSPRNG TradeGuids across restarts");
+    }
+
+    // 17b. Death (materials + corrupted gear) and GM inventory/money/recipe/job mutations are gated while Committing.
+    {
+        TradeWorldFixture fx;
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+        const auto tg = open_active_trade(fx, a, b);
+        CHECK(tg.has_value(), "(death-during-commit trade opened)");
+        if (tg) {
+            const svc::InventoryItem a_res = *a.s->inventory().at(ItemContainer::Resource0, 0);
+            repl::TradeOffer oa;
+            oa.items.push_back(items::to_instance(a_res));
+            oa.money = repl::trade_money_container(200);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            fx.t += milliseconds(2500);
+
+            std::mutex mu;
+            std::condition_variable cv;
+            bool entered = false, release = false;
+            fx.sink.on_commit = [&](const svc::CommitTradeRequest&) {
+                std::unique_lock<std::mutex> lk(mu);
+                entered = true;
+                cv.notify_all();
+                cv.wait(lk, [&] { return release; });
+                return svc::CommitTradeResult{svc::CallStatus::Ok, false, {}};
+            };
+            a.mirror.clear_events();
+            b.mirror.clear_events();
+            fx.sink.clear_recorded();
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            {
+                std::unique_lock<std::mutex> lk(mu);
+                cv.wait_for(lk, seconds(2), [&] { return entered; });
+            }
+            CHECK(entered && a.s->trade_commit_pending(), "(trade entered Committing)");
+
+            // While Committing: mark Alice corrupted and kill her -> death must NOT drop materials or worn helmet!
+            a.s->gm_pvp(a.conn, "corruption", 1000.0, fx.t, "test");
+            a.s->take_damage(a.conn, 1'000'000.0, fx.t);
+            fx.settle({&a, &b}, 4);
+            const svc::InventoryItem* res_mid = a.s->inventory().at(ItemContainer::Resource0, 0);
+            const svc::InventoryItem* helm_mid = a.s->inventory().at(ItemContainer::Equipment, items::equip::Helmet);
+            CHECK(a.s->dead() && res_mid != nullptr && res_mid->quantity == 10 && helm_mid != nullptr &&
+                      a.mirror.storage_events == 0 && fx.sink.inv_count() == 0,
+                  "death during Committing drops zero materials/worn gear and emits zero death bag saves");
+
+            // While Committing: GM item/money/recipe mutations are refused cleanly.
+            const auto gm_it = a.s->gm_give_item(a.conn, kRecTradeableAlt1, 1, fx.t, "test");
+            const auto gm_mo = a.s->gm_give_money(a.conn, 100, fx.t, "test");
+            CHECK(!gm_it.ok && gm_it.refusal == "a player trade commit is in progress" &&
+                      !gm_mo.ok && gm_mo.refusal == "a player trade commit is in progress" &&
+                      !a.s->gm_teach_recipe(a.conn, 8001, "test"),
+                  "GM item, money, and recipe mutations are refused while trade commit is in progress");
+
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                release = true;
+            }
+            cv.notify_all();
+            const bool done = fx.wait_until([&] { return !a.mirror.closes.empty() && !b.mirror.closes.empty(); }, {&a, &b});
+            const svc::InventoryItem* b_res_after = b.s->inventory().at(ItemContainer::Resource0, 0);
+            CHECK(done && a.s->inventory().at(ItemContainer::Resource0, 0) == nullptr &&
+                      a.s->inventory().at(ItemContainer::Equipment, items::equip::Helmet) != nullptr &&
+                      b_res_after != nullptr && b_res_after->quantity == 20 &&
+                      a.s->wallet().copper() == 4800 && b.s->wallet().copper() == 5200,
+                  "after death during Committing, committed swap settles with exact post-trade bags and zero duplication");
+        }
+    }
+
+    // 17c. Real CharacterSaver: pre-trade queued SaveInventory dropped by claim_two_inventory_writes is re-queued on Refused while online.
+    {
+        FakeTradeCharacterApi api;
+        api.block_save_id = kCarolId;
+        CharacterSaver::Config saver_cfg;
+        saver_cfg.max_queued = 64;
+        saver_cfg.max_attempts = 2;
+        saver_cfg.retry_delay = milliseconds(10);
+        saver_cfg.destructor_wait = milliseconds(2000);
+        CharacterSaver saver(api, saver_cfg);
+        TradeWorldFixture fx;
+        fx.world->set_position_sink(&saver);
+
+        TradeClient a(*fx.world, make_trader(kAliceId, "Alice", 0, 0, 0, 5000, default_trader_items(100)), fx.t, fx.now_sec(), 0);
+        TradeClient b(*fx.world, make_trader(kBobId, "Bob", 200, 0, 0, 5000, default_trader_items(200)), fx.t, fx.now_sec(), 1);
+        fx.settle_join_and_phase_in({&a, &b});
+
+        // Hold CharacterSaver's worker thread on an unrelated character so Alice's periodic save stays queued in entries_.
+        saver.save_inventory(kCarolId, {}, {}, {}, {}, {});
+        {
+            std::unique_lock<std::mutex> lk(api.mu);
+            api.cv.wait_for(lk, seconds(2), [&] { return api.block_save_entered; });
+        }
+        CHECK(api.block_save_entered, "(CharacterSaver worker held on unrelated save)");
+
+        // Alice moves Backpack slot 0 -> slot 15 and triggers periodic save (clears inventory_dirty_, leaves inventory_changed_ == true, queues in saver.entries_).
+        const svc::InventoryItem* st0 = a.s->inventory().at(ItemContainer::Backpack, 0);
+        const std::string moved_guid = st0 ? st0->instance_guid : std::string();
+        if (st0) {
+            const schema::RpcSchema* mv_rpc = class_named("AoCPlayerControllerBP_C").rpc("ServerRequestStorageEvent");
+            repl::ItemStorageEvent ev;
+            ev.type = static_cast<uint8_t>(repl::StorageEventType::Move);
+            ev.move_source.object = a.s->bootstrap().setup().guids.backpack;
+            ev.move_source.slots.push_back(repl::StorageEventSlot{0, st0->quantity, *items::guid_of(st0->instance_guid)});
+            repl::StorageEventContainer dst;
+            dst.object = a.s->bootstrap().setup().guids.backpack;
+            dst.slots.push_back(repl::StorageEventSlot{15, 0, {}});
+            ev.targets.push_back(std::move(dst));
+            ev.item = items::to_instance(*st0);
+            if (const auto mp = repl::storage_event_params(*mv_rpc, ev)) a.send_pc("ServerRequestStorageEvent", *mp, fx.t);
+            fx.settle({&a, &b}, 4);
+        }
+        // Advance past default 60 s periodic save interval so Alice hands off her dirty inventory to CharacterSaver::entries_.
+        fx.t += seconds(65);
+        a.tick(fx.t);
+        b.tick(fx.t);
+        fx.settle({&a, &b}, 2);
+        CHECK(saver.character_busy(kAliceId) && a.s->inventory().at(ItemContainer::Backpack, 15) != nullptr,
+              "Alice's pre-trade inventory save is queued in CharacterSaver with inventory_dirty_ cleared");
+
+        // Now Alice & Bob lock and confirm a trade whose CommitPlayerTrade returns Refused.
+        // claim_two_inventory_writes drops Alice's queued pre-trade entry before calling commit_player_trade.
+        const auto tg = open_active_trade(fx, a, b);
+        CHECK(tg.has_value(), "(CharacterSaver abort-requeue trade opened)");
+        if (tg) {
+            repl::TradeOffer oa;
+            oa.money = repl::trade_money_container(250);
+            oa.version = 1;
+            a.send_update_items(*tg, oa, fx.t);
+            fx.settle({&a, &b}, 4);
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::LockTrade), fx.t);
+            fx.settle({&a, &b}, 4);
+            fx.t += milliseconds(2500);
+
+            a.mirror.clear_events();
+            b.mirror.clear_events();
+            a.send_transaction(b.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+            b.send_transaction(a.guid(), *tg, static_cast<uint8_t>(repl::TradeTransactionRequest::FinalizeTrade), fx.t);
+
+            // Trade settles Refused while Alice is STILL ONLINE!
+            const bool closed = fx.wait_until([&] {
+                return !a.mirror.closes.empty() && !b.mirror.closes.empty() && !fx.world->trade_saving(kAliceId);
+            }, {&a, &b});
+            CHECK(closed && a.mirror.closes[0].status == 0 && !a.s->trade_commit_pending(),
+                  "Refused CommitPlayerTrade settled cleanly while Alice stayed online");
+
+            // Release the unrelated blocker and flush CharacterSaver BEFORE Alice disconnects!
+            {
+                std::lock_guard<std::mutex> lk(api.mu);
+                api.block_save_release = true;
+            }
+            api.cv.notify_all();
+            CHECK(saver.flush(seconds(3)), "(CharacterSaver flushed)");
+
+            bool saved_moved_slot15 = false;
+            {
+                std::lock_guard<std::mutex> lk(api.mu);
+                for (const auto& s : api.saved_inventories) {
+                    if (s.id != kAliceId) continue;
+                    for (const auto& it : s.items) {
+                        if (it.container == ItemContainer::Backpack && it.slot == 15 && it.instance_guid == moved_guid) {
+                            saved_moved_slot15 = true;
+                        }
+                    }
+                }
+            }
+            CHECK(saved_moved_slot15,
+                  "on_trade_commit_aborted re-queued and persisted Alice's dropped pre-trade SaveInventory while still online");
+        }
+        {
+            std::lock_guard<std::mutex> lk(api.mu);
+            api.block_save_release = true;
+        }
+        api.cv.notify_all();
+    }
+}
+AOC_REGISTER_TEST(trade_csprng_guids_death_during_commit_and_saver_abort_requeue);
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);

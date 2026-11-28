@@ -179,6 +179,7 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
         ++claims_refused_;
         spdlog::log(level_for(claim_refused_logged_, kClaimLogged), "[session] {}: a request at a station is refused (nothing is changed): {}", name(), why);
     };
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     if (req->type == crafting::kCancelled) return refuse("cancelling a job is not made yet: the job runs on");
     if (req->type != crafting::kClaimed) return refuse("a request of type " + std::to_string(req->type) + ": only a claim (type " + std::to_string(crafting::kClaimed) + ") is served");
     if (!registry_ || !view_ || !world_) return refuse("the world has no actors");
@@ -378,6 +379,7 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
 }
 
 size_t PlayerSession::gm_finish_jobs(Connection& conn, Clock::time_point now, const std::string& station_name, const std::string& by) {
+    if (trade_commit_pending()) return 0;
     const int64_t now_ms = wall_ms();
     size_t finished = 0;
     if (station_name.empty()) {

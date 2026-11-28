@@ -4804,6 +4804,154 @@ func (x *ExpireListingResponse) GetSellerMail() *Mail {
 	return nil
 }
 
+// Player trading (migration 0032): commits a two-character trade atomically in one transaction.
+// Locks both characters in canonical id order, checks trade_id idempotency, replaces both characters'
+// inventories (allowing an empty post-trade bag when a player gifts their last item), wallets,
+// processing jobs, known recipes and warehouses, and records the trade_id.
+type CommitPlayerTradeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TradeId       string                 `protobuf:"bytes,1,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`                      // 32 lowercase hex digits, not all zero: idempotency key
+	SideA         *SaveInventoryRequest  `protobuf:"bytes,2,opt,name=side_a,json=sideA,proto3" json:"side_a,omitempty"`                            // character A post-trade snapshot (id required)
+	SideB         *SaveInventoryRequest  `protobuf:"bytes,3,opt,name=side_b,json=sideB,proto3" json:"side_b,omitempty"`                            // character B post-trade snapshot (id required)
+	CopperAToB    int64                  `protobuf:"varint,4,opt,name=copper_a_to_b,json=copperAToB,proto3" json:"copper_a_to_b,omitempty"`        // copper transferred from A to B (0..10000000)
+	CopperBToA    int64                  `protobuf:"varint,5,opt,name=copper_b_to_a,json=copperBToA,proto3" json:"copper_b_to_a,omitempty"`        // copper transferred from B to A (0..10000000)
+	ItemsAToB     int32                  `protobuf:"varint,6,opt,name=items_a_to_b,json=itemsAToB,proto3" json:"items_a_to_b,omitempty"`           // item stacks transferred from A to B (>= 0)
+	ItemsBToA     int32                  `protobuf:"varint,7,opt,name=items_b_to_a,json=itemsBToA,proto3" json:"items_b_to_a,omitempty"`           // item stacks transferred from B to A (>= 0)
+	CommittedAtMs int64                  `protobuf:"varint,8,opt,name=committed_at_ms,json=committedAtMs,proto3" json:"committed_at_ms,omitempty"` // Unix milliseconds (> 0)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitPlayerTradeRequest) Reset() {
+	*x = CommitPlayerTradeRequest{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitPlayerTradeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitPlayerTradeRequest) ProtoMessage() {}
+
+func (x *CommitPlayerTradeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitPlayerTradeRequest.ProtoReflect.Descriptor instead.
+func (*CommitPlayerTradeRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *CommitPlayerTradeRequest) GetTradeId() string {
+	if x != nil {
+		return x.TradeId
+	}
+	return ""
+}
+
+func (x *CommitPlayerTradeRequest) GetSideA() *SaveInventoryRequest {
+	if x != nil {
+		return x.SideA
+	}
+	return nil
+}
+
+func (x *CommitPlayerTradeRequest) GetSideB() *SaveInventoryRequest {
+	if x != nil {
+		return x.SideB
+	}
+	return nil
+}
+
+func (x *CommitPlayerTradeRequest) GetCopperAToB() int64 {
+	if x != nil {
+		return x.CopperAToB
+	}
+	return 0
+}
+
+func (x *CommitPlayerTradeRequest) GetCopperBToA() int64 {
+	if x != nil {
+		return x.CopperBToA
+	}
+	return 0
+}
+
+func (x *CommitPlayerTradeRequest) GetItemsAToB() int32 {
+	if x != nil {
+		return x.ItemsAToB
+	}
+	return 0
+}
+
+func (x *CommitPlayerTradeRequest) GetItemsBToA() int32 {
+	if x != nil {
+		return x.ItemsBToA
+	}
+	return 0
+}
+
+func (x *CommitPlayerTradeRequest) GetCommittedAtMs() int64 {
+	if x != nil {
+		return x.CommittedAtMs
+	}
+	return 0
+}
+
+type CommitPlayerTradeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Replayed      bool                   `protobuf:"varint,1,opt,name=replayed,proto3" json:"replayed,omitempty"` // true: trade_id already committed for the same pair; nothing rewritten
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitPlayerTradeResponse) Reset() {
+	*x = CommitPlayerTradeResponse{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitPlayerTradeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitPlayerTradeResponse) ProtoMessage() {}
+
+func (x *CommitPlayerTradeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitPlayerTradeResponse.ProtoReflect.Descriptor instead.
+func (*CommitPlayerTradeResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *CommitPlayerTradeResponse) GetReplayed() bool {
+	if x != nil {
+		return x.Replayed
+	}
+	return false
+}
+
 var File_aoc_character_v1_character_proto protoreflect.FileDescriptor
 
 const file_aoc_character_v1_character_proto_rawDesc = "" +
@@ -5228,7 +5376,20 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\aoutcome\x18\x01 \x01(\x0e2\x1f.aoc.character.v1.MarketOutcomeR\aoutcome\x12\x1b\n" +
 	"\tseller_id\x18\x02 \x01(\tR\bsellerId\x127\n" +
 	"\vseller_mail\x18\x03 \x01(\v2\x16.aoc.character.v1.MailR\n" +
-	"sellerMail*\xde\x01\n" +
+	"sellerMail\"\xe3\x02\n" +
+	"\x18CommitPlayerTradeRequest\x12\x19\n" +
+	"\btrade_id\x18\x01 \x01(\tR\atradeId\x12=\n" +
+	"\x06side_a\x18\x02 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\x05sideA\x12=\n" +
+	"\x06side_b\x18\x03 \x01(\v2&.aoc.character.v1.SaveInventoryRequestR\x05sideB\x12!\n" +
+	"\rcopper_a_to_b\x18\x04 \x01(\x03R\n" +
+	"copperAToB\x12!\n" +
+	"\rcopper_b_to_a\x18\x05 \x01(\x03R\n" +
+	"copperBToA\x12\x1f\n" +
+	"\fitems_a_to_b\x18\x06 \x01(\x05R\titemsAToB\x12\x1f\n" +
+	"\fitems_b_to_a\x18\a \x01(\x05R\titemsBToA\x12&\n" +
+	"\x0fcommitted_at_ms\x18\b \x01(\x03R\rcommittedAtMs\"7\n" +
+	"\x19CommitPlayerTradeResponse\x12\x1a\n" +
+	"\breplayed\x18\x01 \x01(\bR\breplayed*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +
 	"\x1aITEM_CONTAINER_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ITEM_CONTAINER_BACKPACK\x10\x01\x12\x1c\n" +
@@ -5247,7 +5408,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x1cMARKET_OUTCOME_PRICE_CHANGED\x10\x06\x12\x1f\n" +
 	"\x1bMARKET_OUTCOME_RATE_CHANGED\x10\a\x12\x1e\n" +
 	"\x1aMARKET_OUTCOME_OWN_LISTING\x10\b\x12\x1e\n" +
-	"\x1aMARKET_OUTCOME_NOT_EXPIRED\x10\t2\xff\x0e\n" +
+	"\x1aMARKET_OUTCOME_NOT_EXPIRED\x10\t2\xed\x0f\n" +
 	"\x10CharacterService\x12f\n" +
 	"\x0fCreateCharacter\x12(.aoc.character.v1.CreateCharacterRequest\x1a).aoc.character.v1.CreateCharacterResponse\x12c\n" +
 	"\x0eListCharacters\x12'.aoc.character.v1.ListCharactersRequest\x1a(.aoc.character.v1.ListCharactersResponse\x12]\n" +
@@ -5269,7 +5430,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\n" +
 	"BuyListing\x12#.aoc.character.v1.BuyListingRequest\x1a$.aoc.character.v1.BuyListingResponse\x12`\n" +
 	"\rRemoveListing\x12&.aoc.character.v1.RemoveListingRequest\x1a'.aoc.character.v1.RemoveListingResponse\x12`\n" +
-	"\rExpireListing\x12&.aoc.character.v1.ExpireListingRequest\x1a'.aoc.character.v1.ExpireListingResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
+	"\rExpireListing\x12&.aoc.character.v1.ExpireListingRequest\x1a'.aoc.character.v1.ExpireListingResponse\x12l\n" +
+	"\x11CommitPlayerTrade\x12*.aoc.character.v1.CommitPlayerTradeRequest\x1a+.aoc.character.v1.CommitPlayerTradeResponseB2Z0aocrop/services/gen/aoc/character/v1;characterv1b\x06proto3"
 
 var (
 	file_aoc_character_v1_character_proto_rawDescOnce sync.Once
@@ -5284,7 +5446,7 @@ func file_aoc_character_v1_character_proto_rawDescGZIP() []byte {
 }
 
 var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
 var file_aoc_character_v1_character_proto_goTypes = []any{
 	(ItemContainer)(0),                      // 0: aoc.character.v1.ItemContainer
 	(MarketOutcome)(0),                      // 1: aoc.character.v1.MarketOutcome
@@ -5349,6 +5511,8 @@ var file_aoc_character_v1_character_proto_goTypes = []any{
 	(*RemoveListingResponse)(nil),           // 60: aoc.character.v1.RemoveListingResponse
 	(*ExpireListingRequest)(nil),            // 61: aoc.character.v1.ExpireListingRequest
 	(*ExpireListingResponse)(nil),           // 62: aoc.character.v1.ExpireListingResponse
+	(*CommitPlayerTradeRequest)(nil),        // 63: aoc.character.v1.CommitPlayerTradeRequest
+	(*CommitPlayerTradeResponse)(nil),       // 64: aoc.character.v1.CommitPlayerTradeResponse
 }
 var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	2,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
@@ -5410,49 +5574,53 @@ var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	1,  // 56: aoc.character.v1.RemoveListingResponse.outcome:type_name -> aoc.character.v1.MarketOutcome
 	1,  // 57: aoc.character.v1.ExpireListingResponse.outcome:type_name -> aoc.character.v1.MarketOutcome
 	41, // 58: aoc.character.v1.ExpireListingResponse.seller_mail:type_name -> aoc.character.v1.Mail
-	20, // 59: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
-	22, // 60: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
-	24, // 61: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
-	26, // 62: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
-	28, // 63: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
-	30, // 64: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
-	32, // 65: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
-	34, // 66: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
-	36, // 67: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
-	38, // 68: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
-	42, // 69: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
-	44, // 70: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
-	46, // 71: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
-	49, // 72: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
-	52, // 73: aoc.character.v1.CharacterService.SaveInventoryAndListing:input_type -> aoc.character.v1.SaveInventoryAndListingRequest
-	54, // 74: aoc.character.v1.CharacterService.ListMarketListings:input_type -> aoc.character.v1.ListMarketListingsRequest
-	57, // 75: aoc.character.v1.CharacterService.BuyListing:input_type -> aoc.character.v1.BuyListingRequest
-	59, // 76: aoc.character.v1.CharacterService.RemoveListing:input_type -> aoc.character.v1.RemoveListingRequest
-	61, // 77: aoc.character.v1.CharacterService.ExpireListing:input_type -> aoc.character.v1.ExpireListingRequest
-	21, // 78: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
-	23, // 79: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
-	25, // 80: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
-	27, // 81: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
-	29, // 82: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
-	31, // 83: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
-	33, // 84: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
-	35, // 85: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
-	37, // 86: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
-	39, // 87: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
-	43, // 88: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
-	45, // 89: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
-	47, // 90: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
-	50, // 91: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
-	53, // 92: aoc.character.v1.CharacterService.SaveInventoryAndListing:output_type -> aoc.character.v1.SaveInventoryAndListingResponse
-	55, // 93: aoc.character.v1.CharacterService.ListMarketListings:output_type -> aoc.character.v1.ListMarketListingsResponse
-	58, // 94: aoc.character.v1.CharacterService.BuyListing:output_type -> aoc.character.v1.BuyListingResponse
-	60, // 95: aoc.character.v1.CharacterService.RemoveListing:output_type -> aoc.character.v1.RemoveListingResponse
-	62, // 96: aoc.character.v1.CharacterService.ExpireListing:output_type -> aoc.character.v1.ExpireListingResponse
-	78, // [78:97] is the sub-list for method output_type
-	59, // [59:78] is the sub-list for method input_type
-	59, // [59:59] is the sub-list for extension type_name
-	59, // [59:59] is the sub-list for extension extendee
-	0,  // [0:59] is the sub-list for field type_name
+	32, // 59: aoc.character.v1.CommitPlayerTradeRequest.side_a:type_name -> aoc.character.v1.SaveInventoryRequest
+	32, // 60: aoc.character.v1.CommitPlayerTradeRequest.side_b:type_name -> aoc.character.v1.SaveInventoryRequest
+	20, // 61: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
+	22, // 62: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
+	24, // 63: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
+	26, // 64: aoc.character.v1.CharacterService.GetCharacterByName:input_type -> aoc.character.v1.GetCharacterByNameRequest
+	28, // 65: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
+	30, // 66: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
+	32, // 67: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
+	34, // 68: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
+	36, // 69: aoc.character.v1.CharacterService.SaveGuild:input_type -> aoc.character.v1.SaveGuildRequest
+	38, // 70: aoc.character.v1.CharacterService.SaveGuildCooldown:input_type -> aoc.character.v1.SaveGuildCooldownRequest
+	42, // 71: aoc.character.v1.CharacterService.GetMails:input_type -> aoc.character.v1.GetMailsRequest
+	44, // 72: aoc.character.v1.CharacterService.SaveMail:input_type -> aoc.character.v1.SaveMailRequest
+	46, // 73: aoc.character.v1.CharacterService.CreateMail:input_type -> aoc.character.v1.CreateMailRequest
+	49, // 74: aoc.character.v1.CharacterService.ClaimMailItems:input_type -> aoc.character.v1.ClaimMailItemsRequest
+	52, // 75: aoc.character.v1.CharacterService.SaveInventoryAndListing:input_type -> aoc.character.v1.SaveInventoryAndListingRequest
+	54, // 76: aoc.character.v1.CharacterService.ListMarketListings:input_type -> aoc.character.v1.ListMarketListingsRequest
+	57, // 77: aoc.character.v1.CharacterService.BuyListing:input_type -> aoc.character.v1.BuyListingRequest
+	59, // 78: aoc.character.v1.CharacterService.RemoveListing:input_type -> aoc.character.v1.RemoveListingRequest
+	61, // 79: aoc.character.v1.CharacterService.ExpireListing:input_type -> aoc.character.v1.ExpireListingRequest
+	63, // 80: aoc.character.v1.CharacterService.CommitPlayerTrade:input_type -> aoc.character.v1.CommitPlayerTradeRequest
+	21, // 81: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
+	23, // 82: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
+	25, // 83: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
+	27, // 84: aoc.character.v1.CharacterService.GetCharacterByName:output_type -> aoc.character.v1.GetCharacterByNameResponse
+	29, // 85: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
+	31, // 86: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
+	33, // 87: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
+	35, // 88: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
+	37, // 89: aoc.character.v1.CharacterService.SaveGuild:output_type -> aoc.character.v1.SaveGuildResponse
+	39, // 90: aoc.character.v1.CharacterService.SaveGuildCooldown:output_type -> aoc.character.v1.SaveGuildCooldownResponse
+	43, // 91: aoc.character.v1.CharacterService.GetMails:output_type -> aoc.character.v1.GetMailsResponse
+	45, // 92: aoc.character.v1.CharacterService.SaveMail:output_type -> aoc.character.v1.SaveMailResponse
+	47, // 93: aoc.character.v1.CharacterService.CreateMail:output_type -> aoc.character.v1.CreateMailResponse
+	50, // 94: aoc.character.v1.CharacterService.ClaimMailItems:output_type -> aoc.character.v1.ClaimMailItemsResponse
+	53, // 95: aoc.character.v1.CharacterService.SaveInventoryAndListing:output_type -> aoc.character.v1.SaveInventoryAndListingResponse
+	55, // 96: aoc.character.v1.CharacterService.ListMarketListings:output_type -> aoc.character.v1.ListMarketListingsResponse
+	58, // 97: aoc.character.v1.CharacterService.BuyListing:output_type -> aoc.character.v1.BuyListingResponse
+	60, // 98: aoc.character.v1.CharacterService.RemoveListing:output_type -> aoc.character.v1.RemoveListingResponse
+	62, // 99: aoc.character.v1.CharacterService.ExpireListing:output_type -> aoc.character.v1.ExpireListingResponse
+	64, // 100: aoc.character.v1.CharacterService.CommitPlayerTrade:output_type -> aoc.character.v1.CommitPlayerTradeResponse
+	81, // [81:101] is the sub-list for method output_type
+	61, // [61:81] is the sub-list for method input_type
+	61, // [61:61] is the sub-list for extension type_name
+	61, // [61:61] is the sub-list for extension extendee
+	0,  // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_aoc_character_v1_character_proto_init() }
@@ -5469,7 +5637,7 @@ func file_aoc_character_v1_character_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_character_v1_character_proto_rawDesc), len(file_aoc_character_v1_character_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   61,
+			NumMessages:   63,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

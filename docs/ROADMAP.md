@@ -84,6 +84,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The mobs' target-scoring choices and their checks on the target: a move plays at the actor its tree's selector scores (the players a creature hates, a heal's most hurt ally) from as far away as the selector reaches, and a target-effect check such as the Raptor's Smell of Blood reads the effects its target holds.
 - Raids: a party becomes a raid of 2 to 40 players in up to 10 squads of 8, by the group window's Convert to Raid button or a yes to the 9th invitation's ask; the raid leader moves members between squads and sets each squad's leader; a raid of 8 or fewer turns back into a party.
 - Quest speech bubbles: some of the people your active quest objectives point you to show a speech bubble over their heads, where the game's data gives the objective one (Bronsen's "Over here!" in Welcome to Verra among them).
+- Social: player trading (requests, live offers of bag items, materials and copper, locking, the countdown, confirming, and the swap of both players' items and copper in one save that a log-out does not lose).
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -93,7 +94,6 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Seeing other players (first seven parts): players within 150 m of each other are shown to each other as their characters, standing, walking, stopping, and riding their mounts, with the gear they wear, the weapons in their hands, their level, their live Health and Mana and their corruption kept current; a dead player is shown dead and a Cleric's Resurrection revives him in place; a player's combat stance follows his (the draw, the fight, the PvP combat, the PvP key and the name colour of his flag), one player's heals, buffs, cleanses and Resurrect reach another, the rules between players decide a harmful ability (the PvP key, the combatant flag, corruption and duels), and a party's window shows its members' live health, mana, level, alive state, place and heading. Still to come: suppression areas, guards and pets, guild and node wars, and other players' abilities shown to the players who see them.
 - The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
 - Stealth: the full-bag pile on the ground, the client's own Camouflage look pinned on the wire, and creatures that detect a stealthed player by the game's rule.
-- Social: player trading (window, live offer updates for backpack items, materials and currency, and cancellation; lock and swap next).
 
 ### Left
 - Quests: objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.

@@ -145,6 +145,24 @@ struct ClientTradeClose {
     bool operator==(const ClientTradeClose&) const = default;
 };
 
+/// ClientLockTrade(CharacterGuid).
+struct ClientTradeLock {
+    GuidValue character_guid;
+    bool operator==(const ClientTradeLock&) const = default;
+};
+
+/// ClientUnlockTrade(CharacterGuid).
+struct ClientTradeUnlock {
+    GuidValue character_guid;
+    bool operator==(const ClientTradeUnlock&) const = default;
+};
+
+/// ClientTradeConfirmed(CharacterGuid).
+struct ClientTradeConfirm {
+    GuidValue character_guid;
+    bool operator==(const ClientTradeConfirm&) const = default;
+};
+
 namespace trade_rpc_detail {
 
 inline bool put_guid(const schema::RpcSchema& rpc, RpcParams& params, std::string_view prefix, const GuidValue& g) {
@@ -297,6 +315,27 @@ inline std::optional<ClientTradeClose> parse_client_close_trade(const RpcCall& c
     return ClientTradeClose{static_cast<uint8_t>(*status)};
 }
 
+inline std::optional<ClientTradeLock> parse_client_lock_trade(const RpcCall& call) {
+    if (!call.decoded || !call.rpc || std::string_view(call.rpc->name) != "ClientLockTrade") return std::nullopt;
+    const auto guid = trade_rpc_detail::read_guid(*call.rpc, call.params, "CharacterGuid");
+    if (!guid) return std::nullopt;
+    return ClientTradeLock{*guid};
+}
+
+inline std::optional<ClientTradeUnlock> parse_client_unlock_trade(const RpcCall& call) {
+    if (!call.decoded || !call.rpc || std::string_view(call.rpc->name) != "ClientUnlockTrade") return std::nullopt;
+    const auto guid = trade_rpc_detail::read_guid(*call.rpc, call.params, "CharacterGuid");
+    if (!guid) return std::nullopt;
+    return ClientTradeUnlock{*guid};
+}
+
+inline std::optional<ClientTradeConfirm> parse_client_trade_confirmed(const RpcCall& call) {
+    if (!call.decoded || !call.rpc || std::string_view(call.rpc->name) != "ClientTradeConfirmed") return std::nullopt;
+    const auto guid = trade_rpc_detail::read_guid(*call.rpc, call.params, "CharacterGuid");
+    if (!guid) return std::nullopt;
+    return ClientTradeConfirm{*guid};
+}
+
 // ---- S->C builders ----------------------------------------------------------
 
 inline std::optional<RpcParams> client_request_trade_params(const schema::RpcSchema& rpc, const GuidValue& from) {
@@ -335,6 +374,24 @@ inline std::optional<RpcParams> client_update_trade_params(const schema::RpcSche
 inline std::optional<RpcParams> client_close_trade_params(const schema::RpcSchema& rpc, uint8_t status) {
     RpcParams params;
     if (!set_rpc_param(rpc, params, "Status", Value::u64(status))) return std::nullopt;
+    return params;
+}
+
+inline std::optional<RpcParams> client_lock_trade_params(const schema::RpcSchema& rpc, const GuidValue& character) {
+    RpcParams params;
+    if (!trade_rpc_detail::put_guid(rpc, params, "CharacterGuid", character)) return std::nullopt;
+    return params;
+}
+
+inline std::optional<RpcParams> client_unlock_trade_params(const schema::RpcSchema& rpc, const GuidValue& character) {
+    RpcParams params;
+    if (!trade_rpc_detail::put_guid(rpc, params, "CharacterGuid", character)) return std::nullopt;
+    return params;
+}
+
+inline std::optional<RpcParams> client_trade_confirmed_params(const schema::RpcSchema& rpc, const GuidValue& character) {
+    RpcParams params;
+    if (!trade_rpc_detail::put_guid(rpc, params, "CharacterGuid", character)) return std::nullopt;
     return params;
 }
 

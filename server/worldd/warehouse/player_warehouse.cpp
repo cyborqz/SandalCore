@@ -332,6 +332,10 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
     const WhComponent* to_wh = event.targets.empty() ? nullptr : component_of(event.targets[0].object);
     if (!from_wh && !to_wh) return false;   // the bags' own
     const char* what = "ServerRequestStorageEvent";
+    if (trade_commit_pending()) {
+        refuse_warehouse_request(conn, what, "a player trade is committing", now);
+        return true;
+    }
     if (!wh_open_) {
         refuse_warehouse_request(conn, what, "no storage window is open", now);
         return true;

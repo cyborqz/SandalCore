@@ -324,6 +324,52 @@ void PlayerWorld::set_position_sink(PositionSink* sink) {
     market_listings_.set_login_check([this](const std::string& character_id) { return login_pending(character_id); });   // (a listing waits out a log-in of its seller: see submit_listing)
     market_listings_.set_mail_note([this](const std::string& character_id) { note_mail(character_id); });   // (a sale or an expiry mails the seller: see ServiceMarketStore::apply)
     market_listings_.attach(sink, content_, world_clock_);
+    if (sink_) {
+        trade::TradeJobs* tj = ensure_trade_jobs();
+        tj->set_login_check([this](const std::string& character_id) { return login_pending(character_id); });
+        if (trade_book_) trade_book_->attach_jobs(tj, sink_);
+    } else if (trade_book_) {
+        trade_book_->detach_jobs();
+    }
+}
+
+trade::TradeJobs* PlayerWorld::ensure_trade_jobs() const {
+    std::lock_guard<std::mutex> lock(trade_jobs_mu_);
+    if (!trade_jobs_) trade_jobs_ = std::make_unique<trade::TradeJobs>(trade_job_config_);
+    return trade_jobs_.get();
+}
+
+void PlayerWorld::set_trade_job_config(trade::TradeJobsConfig config) {
+    std::lock_guard<std::mutex> lock(trade_jobs_mu_);
+    trade_job_config_ = config;
+    if (trade_jobs_) trade_jobs_->set_config(config);
+}
+
+bool PlayerWorld::trade_saving(const std::string& character_id) const {
+    std::lock_guard<std::mutex> lock(trade_jobs_mu_);
+    return trade_jobs_ && trade_jobs_->saving(character_id);
+}
+
+void PlayerWorld::settle_trade(std::chrono::milliseconds max_wait) {
+    trade::TradeJobs* tj = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(trade_jobs_mu_);
+        tj = trade_jobs_.get();
+    }
+    if (!tj) return;
+    const auto deadline = std::chrono::steady_clock::now() + max_wait;
+    while (tj->has_open_commits()) {
+        if (trade_book_) trade_book_->tick(world_clock_);
+        if (!tj->has_open_commits()) break;
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
+        const auto remain = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+        tj->wait_for_progress(std::min(remain, std::chrono::milliseconds(50)));
+    }
+    if (trade_book_) trade_book_->tick(world_clock_);
+    if (tj->has_open_commits()) {
+        spdlog::warn("[trade] shutdown waited {} ms; unresolved trade commit(s) remain undecided (no pre-trade bags written)", max_wait.count());
+    }
 }
 
 void PlayerWorld::note_mail(const std::string& character_id) const {

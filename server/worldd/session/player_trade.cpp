@@ -5,8 +5,8 @@
 //  session/player_trade.cpp
 //
 //  PlayerSession side of player-to-player trading: request, response, window
-//  open, live validated offer updates, and cancel/interruption handling.
-//  Lock/swap is not yet enabled; no inventory, wallet, or DB mutations occur.
+//  open, live validated offer updates, lock/unlock/confirm, atomic two-character
+//  swap settlement, and logout/relog persistence barriers.
 // ============================================================================
 #include "session/player_session.h"
 
@@ -20,6 +20,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <limits>
 #include <set>
 #include <string>
@@ -36,7 +37,53 @@ bool allowed_trade_container(svc::ItemContainer c) {
     return c == svc::ItemContainer::Backpack || items::is_resource(c);
 }
 
+std::vector<bootstrap::ItemEvent> trade_wire_events(const std::vector<items::Event>& events) {
+    std::vector<bootstrap::ItemEvent> out;
+    out.reserve(events.size());
+    for (const items::Event& e : events) {
+        bootstrap::ItemEvent ev;
+        ev.type = e.type;
+        ev.storage = bootstrap::item_storage_of(e.container);
+        ev.slot = e.slot;
+        ev.item = items::to_instance(e.item);
+        ev.instigated = e.instigated;
+        ev.count = e.count;
+        out.push_back(std::move(ev));
+    }
+    return out;
+}
+
 }  // namespace
+
+class PlayerSession::TradePeerAdapter final : public trade::TradePeer {
+public:
+    explicit TradePeerAdapter(PlayerSession& session) : session_(session) {}
+
+    std::string character_id() const override { return session_.character_id_; }
+    bool        can_commit_trade() const override { return session_.can_commit_trade(); }
+    bool        collect_trade_offer(const trade::OfferSide& mine, std::vector<svc::InventoryItem>& out_offered) const override {
+        return session_.collect_trade_offer(mine, out_offered);
+    }
+    trade::PlanError plan_trade_side(const trade::OfferSide& mine, const std::vector<svc::InventoryItem>& incoming_items,
+                                     int64_t incoming_copper, trade::TradeSidePlan& out_plan) const override {
+        return session_.plan_trade_side(mine, incoming_items, incoming_copper, out_plan);
+    }
+    trade::TradeBeforeSnapshot capture_before_trade_snapshot() const override {
+        return session_.capture_before_trade_snapshot();
+    }
+    void apply_committed_trade(const trade::TradeSidePlan& plan) override {
+        session_.apply_committed_trade(plan);
+    }
+    void on_trade_commit_aborted() override {
+        session_.on_trade_commit_aborted();
+    }
+    void on_trade_commit_undecided() override {
+        session_.on_trade_commit_undecided();
+    }
+
+private:
+    PlayerSession& session_;
+};
 
 void PlayerSession::register_trade_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerRequestTrade",
@@ -49,20 +96,43 @@ void PlayerSession::register_trade_rpcs(RpcTable& t) {
           [](PlayerSession& s, const RpcContext& c) { s.on_trade_transaction(c.conn, c.rpc, c.now); });
 }
 
+bool PlayerSession::trade_commit_pending() const {
+    if (trade_commit_left_in_flight_ || trade_undecided_) return true;
+    return trade_book_ && trade_book_->is_committing(pb_.setup().character_guid, pb_.setup().guids.pawn.ObjectId);
+}
+
+bool PlayerSession::trade_defers_hand_over(const char* why, bool periodic) {
+    (void)why;
+    (void)periodic;
+    if (trade_undecided_) return true;
+    if (trade_commit_pending()) {
+        trade_bag_held_ = true;
+        inventory_dirty_ = true;
+        return true;
+    }
+    return false;
+}
+
 void PlayerSession::connect_trade(PlayerWorld& world) {
     trade_book_ = world.trade_book();
     if (!trade_book_) return;
-    trade_book_->connect(pb_.setup().character_guid, name(), pb_.setup().guids.pawn.ObjectId);
+    if (!trade_peer_) trade_peer_ = std::make_unique<TradePeerAdapter>(*this);
+    trade_book_->connect(pb_.setup().character_guid, name(), pb_.setup().guids.pawn.ObjectId, trade_peer_.get());
     const GoodPosition g = checker_.good();
     trade_book_->update_position(pb_.setup().character_guid, pb_.setup().guids.pawn.ObjectId, g.x, g.y, g.z);
 }
 
 void PlayerSession::leave_trade(Clock::time_point now) {
     if (trade_book_) {
+        const uint64_t pawn = pb_.setup().guids.pawn.ObjectId;
+        if (trade_book_->is_committing(pb_.setup().character_guid, pawn)) {
+            trade_commit_left_in_flight_ = true;
+        }
         const double world_now = pb_.setup().world_time + session_seconds(now);
-        trade_book_->disconnect(pb_.setup().character_guid, world_now, pb_.setup().guids.pawn.ObjectId);
+        trade_book_->disconnect(pb_.setup().character_guid, world_now, pawn);
     }
     trade_book_.reset();
+    trade_peer_.reset();
     trade_in_progress_ = false;
 }
 
@@ -83,7 +153,7 @@ void PlayerSession::sync_trade_status(Clock::time_point now) {
 void PlayerSession::trade_interrupted(Clock::time_point now, const char* why) {
     if (!trade_book_) return;
     sync_trade_status(now);
-    trade_book_->interrupt(pb_.setup().character_guid, why);
+    trade_book_->interrupt(pb_.setup().character_guid, why, pb_.setup().guids.pawn.ObjectId);
 }
 
 void PlayerSession::reserve_item_for_test(int32_t cast_id, const std::string& instance_guid) {
@@ -203,6 +273,7 @@ bool PlayerSession::verify_active_trade_offer(const trade::OfferSide& side) cons
         const svc::InventoryItem* held = inventory_.find_guid(snap.instance_guid);
         if (!held) return false;
         if (!allowed_trade_container(held->container)) return false;
+        if (held->container != snap.container || held->slot != snap.slot) return false;
         if (held->item_record_id != snap.record_id ||
             held->quantity != snap.quantity ||
             held->quality != snap.quality) {
@@ -213,6 +284,108 @@ bool PlayerSession::verify_active_trade_offer(const trade::OfferSide& side) cons
         if (!info || !info->tradeable || info->quest || info->cargo_crate()) return false;
     }
     return true;
+}
+
+bool PlayerSession::can_commit_trade() const {
+    if (finished_ || failed_ || !phase_in_done_ || dead_ || combat_flag_ || pvp_combat_ || corruption_ > 0.0) return false;
+    if (trade_undecided_ || trade_commit_pending()) return false;
+    if (!mail_claim_in_flight_.empty()) return false;
+    if (!market_pending_.empty() || !market_queue_.empty()) return false;
+    if (!world_) return false;
+    if (world_->mail_claim_open(character_id_)) return false;
+    if (world_->login_pending(character_id_)) return false;
+    if (world_->market_saving(character_id_)) return false;
+    if (world_->trade_saving(character_id_)) return false;
+    return true;
+}
+
+bool PlayerSession::collect_trade_offer(const trade::OfferSide& mine, std::vector<svc::InventoryItem>& out_offered) const {
+    out_offered.clear();
+    if (!verify_active_trade_offer(mine)) return false;
+    out_offered.reserve(mine.snapshots.size());
+    for (const trade::OfferedItemSnapshot& snap : mine.snapshots) {
+        const svc::InventoryItem* held = inventory_.find_guid(snap.instance_guid);
+        if (!held) return false;
+        out_offered.push_back(*held);
+    }
+    return true;
+}
+
+trade::PlanError PlayerSession::plan_trade_side(const trade::OfferSide& mine,
+                                                const std::vector<svc::InventoryItem>& incoming_items,
+                                                int64_t incoming_copper,
+                                                trade::TradeSidePlan& out_plan) const {
+    out_plan = {};
+    if (mine.copper < 0 || incoming_copper < 0 || mine.copper > items::kMoneyCap || incoming_copper > items::kMoneyCap) {
+        return trade::PlanError::Drifted;
+    }
+
+    items::Wallet after_wallet = wallet_;
+    if (!after_wallet.pay(mine.copper)) return trade::PlanError::Drifted;
+    if (after_wallet.copper() + incoming_copper > items::kMoneyCap) return trade::PlanError::MaxCurrency;
+    if (incoming_copper > 0) after_wallet.give(incoming_copper);
+
+    items::Inventory after_inv = inventory_;
+    for (const trade::OfferedItemSnapshot& snap : mine.snapshots) {
+        const items::Outcome o = after_inv.consume(snap.container, snap.slot, snap.instance_guid, snap.quantity);
+        if (!o.ok) return trade::PlanError::Drifted;
+        out_plan.removed_events.insert(out_plan.removed_events.end(), o.events.begin(), o.events.end());
+    }
+
+    if (!incoming_items.empty()) {
+        const items::Outcome g = after_inv.grant(incoming_items, item_catalog());
+        if (!g.ok) return trade::PlanError::InventorySpace;
+        out_plan.added_events.insert(out_plan.added_events.end(), g.events.begin(), g.events.end());
+    }
+
+    out_plan.after_inventory = std::move(after_inv);
+    out_plan.after_wallet = std::move(after_wallet);
+    out_plan.copper_before = wallet_.copper();
+    out_plan.copper_after = out_plan.after_wallet.copper();
+    out_plan.net_copper_delta = incoming_copper - mine.copper;
+
+    out_plan.persist.character_id = character_id_;
+    out_plan.persist.items = out_plan.after_inventory.items();
+    out_plan.persist.wallet = out_plan.after_wallet.entries();
+    out_plan.persist.jobs = jobs_;
+    out_plan.persist.known_recipes = taught_;
+    out_plan.persist.warehouse = wh_storage_.rows();
+    return trade::PlanError::None;
+}
+
+trade::TradeBeforeSnapshot PlayerSession::capture_before_trade_snapshot() const {
+    trade::TradeBeforeSnapshot snap;
+    snap.character_id = character_id_;
+    snap.inventory_changed = inventory_changed_ || inventory_dirty_ || trade_bag_held_;
+    snap.items = inventory_.items();
+    snap.wallet = wallet_.entries();
+    snap.jobs = jobs_;
+    snap.known_recipes = taught_;
+    snap.warehouse = wh_storage_.rows();
+    return snap;
+}
+
+void PlayerSession::apply_committed_trade(const trade::TradeSidePlan& plan) {
+    inventory_ = plan.after_inventory;
+    wallet_ = plan.after_wallet;
+    inventory_dirty_ = false;
+    inventory_changed_ = false;
+    trade_bag_held_ = false;
+    ++items_applied_;
+}
+
+void PlayerSession::on_trade_commit_aborted() {
+    const bool need_save = trade_bag_held_ || inventory_dirty_ || inventory_changed_;
+    trade_bag_held_ = false;
+    if (need_save) {
+        hand_over_inventory("player trade commit aborted", /*periodic=*/false);
+    }
+}
+
+void PlayerSession::on_trade_commit_undecided() {
+    trade_undecided_ = true;
+    trade_bag_held_ = false;
+    fail("player trade commit status is undecided");
 }
 
 void PlayerSession::on_trade_request(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
@@ -270,12 +443,22 @@ void PlayerSession::on_trade_update_items(Connection& conn, const repl::ClientRp
         spdlog::log(level_for(trade_refused_logged_, 20), "[trade] {}: ServerUpdateTradeItems for inactive/wrong trade dropped", name());
         return;
     }
+    if (active->committing) return;
+
     const trade::OfferSide& side = active->side_of(pb_.setup().character_guid);
     if (parsed->offer.version <= side.last_version ||
         parsed->offer.version >= std::numeric_limits<int32_t>::max()) {
         spdlog::log(level_for(trade_refused_logged_, 20),
                     "[trade] {}: out-of-range/stale ServerUpdateTradeItems version {} (last={}) dropped",
                     name(), parsed->offer.version, side.last_version);
+        return;
+    }
+
+    if (side.state != trade::SideState::Opened) {
+        spdlog::log(level_for(trade_refused_logged_, 20),
+                    "[trade] {}: ServerUpdateTradeItems rejected while locked; reverting UI at version {}",
+                    name(), parsed->offer.version + 1);
+        trade_book_->apply_offer(pb_.setup().character_guid, tg, parsed->offer.version, /*valid=*/false, {}, {}, 0);
         return;
     }
 
@@ -294,6 +477,7 @@ void PlayerSession::on_trade_update_items(Connection& conn, const repl::ClientRp
 }
 
 void PlayerSession::on_trade_transaction(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    (void)conn;
     if (!trade_book_) return;
     if (!within_budget(trade_budget_, "ServerUpdateTradeTransaction", now)) return;
     ++trade_calls_;
@@ -303,6 +487,7 @@ void PlayerSession::on_trade_transaction(Connection& conn, const repl::ClientRpc
         return;
     }
     const trade::TradeGuid tg = trade::from_guid_value(parsed->trade_guid);
+    const double world_now = pb_.setup().world_time + session_seconds(now);
     switch (static_cast<repl::TradeTransactionRequest>(parsed->request)) {
         case repl::TradeTransactionRequest::OpenTrade:
             break;
@@ -313,16 +498,25 @@ void PlayerSession::on_trade_transaction(Connection& conn, const repl::ClientRpc
             }
             break;
         }
-        case repl::TradeTransactionRequest::LockTrade:
-        case repl::TradeTransactionRequest::UnlockTrade:
-        case repl::TradeTransactionRequest::FinalizeTrade: {
-            const trade::ActiveTrade* active = trade_book_->active_trade(pb_.setup().character_guid);
-            if (!active || active->guid != tg) {
-                spdlog::log(level_for(trade_refused_logged_, 20), "[trade] {}: transaction request {} for inactive/wrong trade dropped",
-                            name(), parsed->request);
-                return;
+        case repl::TradeTransactionRequest::LockTrade: {
+            sync_trade_status(now);
+            if (!trade_book_->lock_trade(pb_.setup().character_guid, tg, world_now)) {
+                spdlog::log(level_for(trade_refused_logged_, 20), "[trade] {}: LOCK_TRADE ignored for inactive/locked trade", name());
             }
-            say(conn, "Trade lock and swap are not enabled yet.", now);
+            break;
+        }
+        case repl::TradeTransactionRequest::UnlockTrade: {
+            sync_trade_status(now);
+            if (!trade_book_->unlock_trade(pb_.setup().character_guid, tg, world_now)) {
+                spdlog::log(level_for(trade_refused_logged_, 20), "[trade] {}: UNLOCK_TRADE ignored for inactive/unlocked trade", name());
+            }
+            break;
+        }
+        case repl::TradeTransactionRequest::FinalizeTrade: {
+            sync_trade_status(now);
+            if (!trade_book_->confirm_trade(pb_.setup().character_guid, tg, world_now)) {
+                spdlog::log(level_for(trade_refused_logged_, 20), "[trade] {}: FINALIZE_TRADE ignored for inactive/unready trade", name());
+            }
             break;
         }
         default:
@@ -337,9 +531,9 @@ void PlayerSession::run_trade(Connection& conn, Clock::time_point now) {
     sync_trade_status(now);
 
     if (const trade::ActiveTrade* active = trade_book_->active_trade(pb_.setup().character_guid)) {
-        if (!verify_active_trade_offer(active->side_of(pb_.setup().character_guid))) {
+        if (!active->committing && !verify_active_trade_offer(active->side_of(pb_.setup().character_guid))) {
             spdlog::log(level_for(trade_refused_logged_, 20), "[trade] {}: offered item or copper drifted mid-trade; auto-cancelling", name());
-            trade_book_->interrupt(pb_.setup().character_guid, "offered inventory or currency changed");
+            trade_book_->interrupt(pb_.setup().character_guid, "offered inventory or currency changed", pb_.setup().guids.pawn.ObjectId);
         }
     }
 
@@ -374,9 +568,67 @@ void PlayerSession::run_trade(Connection& conn, Clock::time_point now) {
                       conn, /*must_build=*/true);
                 break;
             }
+            case trade::TradeNotice::Kind::TradeLocked: {
+                const repl::GuidValue who = trade::to_guid_value(n.other_guid);
+                queue("ClientLockTrade", [who](bootstrap::PlayerBootstrap& pb) { return pb.trade_lock(who); }, conn, /*must_build=*/true);
+                break;
+            }
+            case trade::TradeNotice::Kind::TradeUnlocked: {
+                const repl::GuidValue who = trade::to_guid_value(n.other_guid);
+                queue("ClientUnlockTrade", [who](bootstrap::PlayerBootstrap& pb) { return pb.trade_unlock(who); }, conn, /*must_build=*/true);
+                break;
+            }
+            case trade::TradeNotice::Kind::TradeConfirmed: {
+                const repl::GuidValue who = trade::to_guid_value(n.other_guid);
+                queue("ClientTradeConfirmed", [who](bootstrap::PlayerBootstrap& pb) { return pb.trade_confirmed(who); }, conn, /*must_build=*/true);
+                break;
+            }
+            case trade::TradeNotice::Kind::CommitSucceeded: {
+                // Exact completion order:
+                //   1. ClientReceiveStorageEvent (only if items moved for this player; Add toasts + actionbar link updates)
+                //   2. OwnerInfo.Currencies update (if copper changed)
+                //   3. ClientShowCurrencyCallout (if net copper delta != 0)
+                //   4. ClientCloseTrade(1 = Success) LAST
+                if (!n.commit_wire.removed_events.empty() || !n.commit_wire.added_events.empty()) {
+                    std::vector<bootstrap::ItemEvent> removed = trade_wire_events(n.commit_wire.removed_events);
+                    std::vector<bootstrap::ItemEvent> added = trade_wire_events(n.commit_wire.added_events);
+                    add_item_toasts(added, /*removals=*/false);
+                    std::vector<bootstrap::ItemEvent> all;
+                    all.reserve(removed.size() + added.size());
+                    all.insert(all.end(), std::make_move_iterator(removed.begin()), std::make_move_iterator(removed.end()));
+                    all.insert(all.end(), std::make_move_iterator(added.begin()), std::make_move_iterator(added.end()));
+                    for (size_t offset = 0; offset < all.size(); offset += bootstrap::kMaxEventsPerChain) {
+                        const size_t end = std::min(all.size(), offset + bootstrap::kMaxEventsPerChain);
+                        std::vector<bootstrap::ItemEvent> part(all.begin() + static_cast<std::ptrdiff_t>(offset),
+                                                               all.begin() + static_cast<std::ptrdiff_t>(end));
+                        queue("ClientReceiveStorageEvent",
+                              [part = std::move(part)](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); },
+                              conn, /*must_build=*/true);
+                    }
+                    follow_linked_stack(conn, all);
+                }
+                if (n.commit_wire.copper_changed) {
+                    pb_.set_currency(items::kCopperCurrency, n.commit_wire.copper_after);
+                    queue("OwnerInfo", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
+                }
+                if (n.commit_wire.net_copper_delta != 0) {
+                    const int64_t delta = n.commit_wire.net_copper_delta;
+                    queue("ClientShowCurrencyCallout",
+                          [delta](bootstrap::PlayerBootstrap& pb) { return pb.currency_callout(items::kMoneyTier, delta); },
+                          conn, /*must_build=*/true);
+                }
+                queue("ClientCloseTrade",
+                      [](bootstrap::PlayerBootstrap& pb) { return pb.trade_close(static_cast<uint8_t>(repl::TradeStatus::Success)); },
+                      conn, /*must_build=*/true);
+                break;
+            }
             case trade::TradeNotice::Kind::TradeClosed: {
                 const uint8_t status = n.status;
                 queue("ClientCloseTrade", [status](bootstrap::PlayerBootstrap& pb) { return pb.trade_close(status); }, conn, /*must_build=*/true);
+                break;
+            }
+            case trade::TradeNotice::Kind::Callout: {
+                say(conn, n.message.c_str(), now);
                 break;
             }
         }
@@ -386,7 +638,7 @@ void PlayerSession::run_trade(Connection& conn, Clock::time_point now) {
     if (want_in_trade != trade_in_progress_) {
         if (pb_.set_trade_in_progress(want_in_trade)) {
             trade_in_progress_ = want_in_trade;
-            queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("trade state"); }, conn, /*must_build=*/true);
+            queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("trade state"); }, conn, /*must_build=*/false);
         }
     }
 }

@@ -629,6 +629,33 @@ struct CharacterResult {
     Character character;
 };
 
+/// Player trading (migration 0032): one character's post-trade persisted state for CommitPlayerTrade.
+struct TradeSideSnapshot {
+    std::string                character_id;
+    std::vector<InventoryItem> items;
+    std::vector<WalletEntry>   wallet;
+    std::vector<ProcessingJob> jobs;
+    std::vector<int64_t>       known_recipes;
+    std::vector<WarehouseItem> warehouse;
+};
+
+struct CommitTradeRequest {
+    std::string       trade_id;
+    TradeSideSnapshot side_a;
+    TradeSideSnapshot side_b;
+    int64_t           copper_a_to_b = 0;
+    int64_t           copper_b_to_a = 0;
+    int32_t           items_a_to_b = 0;
+    int32_t           items_b_to_a = 0;
+    int64_t           committed_at_ms = 0;
+};
+
+struct CommitTradeResult {
+    CallStatus  status = CallStatus::Failed;
+    bool        replayed = false;
+    std::string reason;
+};
+
 struct RegisterResult {
     CallStatus status = CallStatus::Failed;
     uint32_t server_id = 0;
@@ -791,6 +818,11 @@ public:
                                        const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
                                        const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) {
         if (money_mails.empty()) return claim_mail_items(character_id, claims, items, wallet, jobs, known_recipes, warehouse);
+        return {};
+    }
+    /// Player trading (migration 0032): commits a two-character atomic swap in ONE database transaction.
+    virtual CommitTradeResult commit_player_trade(const CommitTradeRequest& request) {
+        (void)request;
         return {};
     }
 };

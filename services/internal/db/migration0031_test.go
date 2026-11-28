@@ -54,7 +54,7 @@ func before31(t *testing.T) *pgxpool.Pool {
 // schemaWithoutSales lists every column, constraint, index and table but the ones of 0031: what 0031 must not change.
 func schemaWithoutSales(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_mail_money', 'node_market_taxes', 'market_purchases')`
+	const skip = `('character_mail_money', 'node_market_taxes', 'market_purchases', 'character_trades')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

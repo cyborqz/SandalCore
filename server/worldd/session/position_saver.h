@@ -193,6 +193,15 @@ public:
         result.status = svc::CallStatus::Unavailable;
         return result;
     }
+    /// Player trading (migration 0032): commits a two-character atomic swap in ONE database transaction.
+    /// Waits for any in-flight inventory writes for either participant and drops queued older bags for both.
+    /// A sink that cannot ask answers Unavailable.
+    virtual svc::CommitTradeResult commit_player_trade_now(const svc::CommitTradeRequest& request) {
+        (void)request;
+        svc::CommitTradeResult result;
+        result.status = svc::CallStatus::Unavailable;
+        return result;
+    }
     /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
     /// keeps nothing (a test's) answers false.
     virtual bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
@@ -294,6 +303,7 @@ public:
     svc::MailClaimResult claim_mail(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::MoneyClaim>& money_mails,
                                     std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
                                     std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) override;
+    svc::CommitTradeResult commit_player_trade_now(const svc::CommitTradeRequest& request) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);
@@ -332,6 +342,8 @@ private:
     void run();
     /// Waits for an inventory write of this character that is running now and drops a queued older one: what the claim does first.  False when the saver is stopping.
     bool claim_the_inventory_write(const std::string& character_id);
+    /// Waits until neither `a` nor `b` has an in-flight inventory write and drops any queued older inventory writes for both.
+    bool claim_two_inventory_writes(const std::string& a, const std::string& b);
     void save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet,
                               std::optional<std::vector<svc::ProcessingJob>> jobs = std::nullopt, std::optional<std::vector<int64_t>> known_recipes = std::nullopt,
                               std::optional<std::vector<svc::WarehouseItem>> warehouse = std::nullopt);

@@ -198,6 +198,7 @@ void PlayerSession::on_vendor_purchase(Connection& conn, const repl::ClientRpc& 
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     const vendor::GmVendors* gm = world_ ? world_->gm_vendors() : nullptr;
     if (dead_) return refuse("the character is dead: the vendor window closed with the death");
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     std::string why;
     const world::WorldActor* a = open_vendor(why);
     if (!a) return refuse(why);
@@ -368,6 +369,7 @@ void PlayerSession::on_vendor_transaction(Connection& conn, const repl::ClientRp
         refuse_item_request(conn, what, why, now);
     };
     if (dead_) return refuse("the character is dead: the vendor window closed with the death");
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     std::string why;
     const world::WorldActor* a = open_vendor(why);
     if (!a) return refuse(why);
@@ -528,6 +530,10 @@ PlayerSession::GmMoneyResult PlayerSession::gm_give_money(Connection& conn, int6
     GmMoneyResult r;
     r.previous = wallet_.copper();
     r.balance = r.previous;
+    if (trade_commit_pending()) {
+        r.refusal = "a player trade commit is in progress";
+        return r;
+    }
     if (copper < 1) {
         r.refusal = "the amount must be at least 1 copper";
         return r;

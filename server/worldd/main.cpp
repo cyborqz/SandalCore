@@ -1079,6 +1079,7 @@ int main(int argc, char** argv) {
     // destroyed (2 s deadline): 10.5 s. The network thread is never in the saver's way: it only queues.
     endpoint.finish_players("worldd is stopping");
     players.settle_market(std::chrono::seconds(3));   // a listing's save a session left in flight, and the bags that session ends with, before the saver's flush
+    players.settle_trade(std::chrono::seconds(3));    // any atomic player trade commit left in flight before flushing the saver
     if (!saver.flush(std::chrono::seconds(5))) {
         spdlog::warn("stopping: {} position(s) were not saved in 5 s", saver.queued());
     }

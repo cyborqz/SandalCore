@@ -350,6 +350,51 @@ bool CharacterSaver::claim_the_inventory_write(const std::string& character_id) 
     return true;
 }
 
+bool CharacterSaver::claim_two_inventory_writes(const std::string& a, const std::string& b) {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (stop_ || abandon_) return false;
+    idle_cv_.wait(lock, [this, &a, &b] {
+        return stop_ || abandon_ ||
+               !(in_flight_ && in_flight_inventory_ && (in_flight_character_ == a || in_flight_character_ == b));
+    });
+    if (stop_ || abandon_) return false;
+    auto drop_queued = [this](const std::string& id) {
+        const auto it = entries_.find(id);
+        if (it == entries_.end()) return;
+        it->second.inventory.reset();
+        it->second.wallet.reset();
+        it->second.jobs.reset();
+        it->second.known_recipes.reset();
+        it->second.warehouse.reset();
+        it->second.inventory_attempts = 0;
+    };
+    drop_queued(a);
+    drop_queued(b);
+    return true;
+}
+
+svc::CommitTradeResult CharacterSaver::commit_player_trade_now(const svc::CommitTradeRequest& request) {
+    svc::CommitTradeResult result;
+    result.status = svc::CallStatus::Unavailable;
+    result.reason = "the saver is stopping";
+    if (!claim_two_inventory_writes(request.side_a.character_id, request.side_b.character_id)) return result;
+    try {
+        result = api_.commit_player_trade(request);
+        if (result.status == svc::CallStatus::Ok) {
+            std::lock_guard<std::mutex> lock(mu_);
+            inventories_saved_ += 2;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] player trade {} ({}, {}) threw {}", request.trade_id,
+                      request.side_a.character_id, request.side_b.character_id, e.what());
+        result = {};
+        result.status = svc::CallStatus::Unavailable;
+        result.reason = "the call threw";
+        return result;
+    }
+}
+
 svc::MailClaimResult CharacterSaver::claim_mail_items(const std::string& character_id, const std::vector<svc::MailClaim>& claims, std::vector<svc::InventoryItem> items,
                                                       std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs, std::vector<int64_t> known_recipes,
                                                       std::vector<svc::WarehouseItem> warehouse) {

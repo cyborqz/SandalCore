@@ -327,6 +327,7 @@ void PlayerSession::run_fishing(Connection& conn, Clock::time_point now) {
     }
     // a result waits for room in the reply queue, like a harvest's
     if (run.cast.result_due(sec)) {
+        if (trade_commit_pending()) return;
         gather::Gathering* g = npc_world_ ? npc_world_->gathering() : nullptr;
         const size_t grants = world_ ? world_->auto_grants().size() : 0;
         if (g && !room_for(14 + grants)) return;

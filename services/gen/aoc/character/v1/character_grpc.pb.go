@@ -42,6 +42,7 @@ const (
 	CharacterService_BuyListing_FullMethodName              = "/aoc.character.v1.CharacterService/BuyListing"
 	CharacterService_RemoveListing_FullMethodName           = "/aoc.character.v1.CharacterService/RemoveListing"
 	CharacterService_ExpireListing_FullMethodName           = "/aoc.character.v1.CharacterService/ExpireListing"
+	CharacterService_CommitPlayerTrade_FullMethodName       = "/aoc.character.v1.CharacterService/CommitPlayerTrade"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -123,6 +124,9 @@ type CharacterServiceClient interface {
 	BuyListing(ctx context.Context, in *BuyListingRequest, opts ...grpc.CallOption) (*BuyListingResponse, error)
 	RemoveListing(ctx context.Context, in *RemoveListingRequest, opts ...grpc.CallOption) (*RemoveListingResponse, error)
 	ExpireListing(ctx context.Context, in *ExpireListingRequest, opts ...grpc.CallOption) (*ExpireListingResponse, error)
+	// Player trading (migration 0032): commits a two-character trade in ONE transaction, writing both characters'
+	// inventories, wallets, processing jobs, known recipes and warehouses together with an idempotency record.
+	CommitPlayerTrade(ctx context.Context, in *CommitPlayerTradeRequest, opts ...grpc.CallOption) (*CommitPlayerTradeResponse, error)
 }
 
 type characterServiceClient struct {
@@ -323,6 +327,16 @@ func (c *characterServiceClient) ExpireListing(ctx context.Context, in *ExpireLi
 	return out, nil
 }
 
+func (c *characterServiceClient) CommitPlayerTrade(ctx context.Context, in *CommitPlayerTradeRequest, opts ...grpc.CallOption) (*CommitPlayerTradeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommitPlayerTradeResponse)
+	err := c.cc.Invoke(ctx, CharacterService_CommitPlayerTrade_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -402,6 +416,9 @@ type CharacterServiceServer interface {
 	BuyListing(context.Context, *BuyListingRequest) (*BuyListingResponse, error)
 	RemoveListing(context.Context, *RemoveListingRequest) (*RemoveListingResponse, error)
 	ExpireListing(context.Context, *ExpireListingRequest) (*ExpireListingResponse, error)
+	// Player trading (migration 0032): commits a two-character trade in ONE transaction, writing both characters'
+	// inventories, wallets, processing jobs, known recipes and warehouses together with an idempotency record.
+	CommitPlayerTrade(context.Context, *CommitPlayerTradeRequest) (*CommitPlayerTradeResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -468,6 +485,9 @@ func (UnimplementedCharacterServiceServer) RemoveListing(context.Context, *Remov
 }
 func (UnimplementedCharacterServiceServer) ExpireListing(context.Context, *ExpireListingRequest) (*ExpireListingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExpireListing not implemented")
+}
+func (UnimplementedCharacterServiceServer) CommitPlayerTrade(context.Context, *CommitPlayerTradeRequest) (*CommitPlayerTradeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CommitPlayerTrade not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -832,6 +852,24 @@ func _CharacterService_ExpireListing_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_CommitPlayerTrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitPlayerTradeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).CommitPlayerTrade(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_CommitPlayerTrade_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).CommitPlayerTrade(ctx, req.(*CommitPlayerTradeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -914,6 +952,10 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExpireListing",
 			Handler:    _CharacterService_ExpireListing_Handler,
+		},
+		{
+			MethodName: "CommitPlayerTrade",
+			Handler:    _CharacterService_CommitPlayerTrade_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

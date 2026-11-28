@@ -277,6 +277,7 @@ void PlayerSession::run_foliage(Connection& conn, Clock::time_point now) {
 }
 
 bool PlayerSession::complete_foliage(Connection& conn, Clock::time_point now) {
+    if (trade_commit_pending()) return false;   // defer foliage harvest completion until the in-flight trade commit settles
     foliage::Foliage* f = npc_world_ ? npc_world_->foliage() : nullptr;
     gather::Gathering* g = npc_world_ ? npc_world_->gathering() : nullptr;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;

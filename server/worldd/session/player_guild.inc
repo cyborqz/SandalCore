@@ -557,6 +557,10 @@ void PlayerSession::on_guild_create(Connection& conn, const repl::ClientRpc& rpc
         guild_reply(conn, false, kGuildCreateType, "You are already in a guild.");
         return;
     }
+    if (trade_commit_pending()) {
+        guild_reply(conn, false, kGuildCreateType, "Cannot create a guild while a trade is finalizing.");
+        return;
+    }
     if (guild_cooldown_until_ > wall_ms()) {
         guild_reply(conn, false, kGuildCreateType, "You may not join a guild for a while.");
         return;

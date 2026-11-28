@@ -314,6 +314,7 @@ void PlayerSession::run_cargo(Connection& conn, Clock::time_point now) {
 }
 
 void PlayerSession::drop_crate(Connection& conn, Clock::time_point now) {
+    if (trade_commit_pending()) return;
     const svc::InventoryItem* crate = inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold);
     if (!crate || dead_ || !room_for(8)) return;
     const GoodPosition at = checker_.good();
@@ -388,6 +389,7 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
         return;
     }
     if (!within_budget(item_budget_, "ServerItemUsed", now) || !room_for(8)) return;
+    if (trade_commit_pending()) return refuse_item_request(conn, "ServerItemUsed", "a player trade is committing", now);
     if (!catalog_) return refuse_item_request(conn, "ServerItemUsed", "worldd has no item catalog", now);
     const auto storage = container_of_location(use->storage);
     if (!storage) {
@@ -432,6 +434,7 @@ void PlayerSession::on_tier_up(Connection& conn, const repl::ItemUse& use, svc::
         ++uses_refused_;
         refuse_item_request(conn, what, why, now);
     };
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     const char* bag = items::container_name(container);
     const svc::InventoryItem* held = inventory_.at(container, use.slot);
     if (!held) return refuse(std::string("no item in ") + bag + " slot " + std::to_string(use.slot));
@@ -491,6 +494,7 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
     }
     if (warehouse_event(conn, *event, now)) return;   // storage clerks, step 0: a move that names a warehouse container is the warehouse's
     if (!within_budget(item_budget_, "ServerRequestStorageEvent", now) || !room_for(4)) return;
+    if (trade_commit_pending()) return refuse_item_request(conn, "ServerRequestStorageEvent", "a player trade is committing", now);
     const char* what = "ServerRequestStorageEvent";
     const bootstrap::SessionGuids& g = pb_.setup().guids;
     const auto container_of = [&](const protocol::emit::FIntrepidNetworkGUID& object) -> std::optional<svc::ItemContainer> {
@@ -629,6 +633,10 @@ PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_
                                                          int32_t quality) {
     (void)now;
     GmItemResult r;
+    if (trade_commit_pending()) {
+        r.refusal = "a player trade commit is in progress";
+        return r;
+    }
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     if (!db) {
         r.refusal = "worldd has no content.db to read the item from";

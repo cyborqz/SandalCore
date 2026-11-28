@@ -702,6 +702,7 @@ bool PlayerSession::item_casts_ability(int64_t record) const {
 }
 
 std::shared_ptr<const ItemCast> PlayerSession::consumable_cast(int64_t ability, int32_t slot, uint32_t location) {
+    if (trade_commit_pending()) return nullptr;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     const auto container = container_of_location(static_cast<uint8_t>(location));
     if (!db || !container || *container != svc::ItemContainer::Backpack || !stats_ || !stats_->started()) return nullptr;
@@ -732,6 +733,7 @@ void PlayerSession::take_consumable(const std::shared_ptr<const ItemCast>& cast,
 }
 
 bool PlayerSession::consumable_paid(int32_t client_instance_id) {
+    if (trade_commit_pending()) return false;
     const auto reserved = item_reserved_.find(client_instance_id);
     if (reserved == item_reserved_.end()) return false;   // (nothing is reserved for this cast: a hostile client's casts pushed it out)
     const std::shared_ptr<const ItemCast> cast = reserved->second;

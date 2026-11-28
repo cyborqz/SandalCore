@@ -255,7 +255,7 @@ void PlayerSession::pvp_npc_kill(Connection& conn, uint64_t npc, double base_xp)
 
 void PlayerSession::pvp_corrupted_death(Connection& conn, int tier, std::vector<combat::LootStack>& lost) {
     gear_dropped_last_ = 0;
-    if (tier > 0) {
+    if (tier > 0 && !trade_commit_pending()) {
         // CorruptedDeathNumItemsToDrop: RandIntRange(min, max) of the tier's curves; the worn armour, jewellery and weapons (not a shirt, a bag, a tool, a cosmetic or a crate)
         const int lo = pvp::item_drop_min(tier), hi = pvp::item_drop_max(tier);
         size_t n = static_cast<size_t>(lo + (hi > lo ? static_cast<int>(pvp_rng_.next() % static_cast<uint64_t>(hi - lo + 1)) : 0));

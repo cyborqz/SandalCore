@@ -167,6 +167,7 @@ void PlayerSession::on_market_registration(Connection& conn, const repl::ClientR
     // a mail claim writes the same bags on the mail worker, and a listing the seller left in flight when a session ended is still being finished: the later of two writes
     // of the bags would win from an older copy
     if (!mail_claim_in_flight_.empty()) return refuse(kErrorGeneric, "a mail claim is writing the bags");
+    if (trade_commit_pending()) return refuse(kRequestInProgress, "a player trade is committing");
     // a log-in of this character, redeemed and not applied yet, waits for the saves the world holds and then reads the bags: a listing made now would be saved under them, as a mail
     // claim would (mail_claims_held).  The store looks again when it takes the save (submit_listing), so a log-in that marks the character in between is seen too.
     if (world_->login_pending(character_id_)) return refuse(kRequestInProgress, "a log-in of this character is waiting");

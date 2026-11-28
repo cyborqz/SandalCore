@@ -221,6 +221,7 @@ bool PlayerSession::open_coffer(Connection& conn, const repl::ItemUse& use, cons
 }
 
 void PlayerSession::on_select_reward(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    if (trade_commit_pending()) return;
     if (!reward_selection_) {
         spdlog::debug("[chests] {}: ServerSelectReward with no window open: ignored", name());
         return;

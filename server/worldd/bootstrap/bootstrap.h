@@ -998,6 +998,9 @@ public:
     std::optional<Send> trade_request_response(const repl::GuidValue& target, uint8_t response);
     std::optional<Send> trade_begin(const repl::GuidValue& trade_guid, const repl::GuidValue& partner);
     std::optional<Send> trade_update(const repl::GuidValue& owner, const repl::TradeOffer& offer);
+    std::optional<Send> trade_lock(const repl::GuidValue& character);
+    std::optional<Send> trade_unlock(const repl::GuidValue& character);
+    std::optional<Send> trade_confirmed(const repl::GuidValue& character);
     std::optional<Send> trade_close(uint8_t status);
     bool                set_trade_in_progress(bool in_progress);
     bool                set_observer_trade_in_progress(repl::Actor& shown, bool in_progress);

@@ -33,7 +33,7 @@ func before16(t *testing.T) *pgxpool.Pool {
 // version that is not recorded): what 0016 must not change.
 func schemaWithoutQuests(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement', 'character_processing_jobs', 'character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases'`   // #23 (MrJambix)
+	const skip = `'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement', 'character_processing_jobs', 'character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases', 'character_trades'`   // #23 (MrJambix)
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

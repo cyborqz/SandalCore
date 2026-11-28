@@ -148,6 +148,7 @@ void PlayerSession::grant_quest_rewards(Connection& conn, const std::vector<int6
 }
 
 bool PlayerSession::deliver_quest_rewards(Connection& conn, const std::vector<int64_t>& tables, const char* why, Clock::time_point now, int64_t quest) {
+    if (trade_commit_pending()) return false;   // defer quest reward delivery until the in-flight trade commit settles
     const combat::RewardBook* book = world_ ? world_->rewards() : nullptr;
     if (!book) {
         if (quest_told_.insert("no reward tables").second) spdlog::warn("[session] {}: the reward tables of {} are not given: this world has no reward tables", name(), why);

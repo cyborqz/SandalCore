@@ -312,6 +312,8 @@ add_library(worldd_core STATIC
     spawns/spawn_util.h
     trade/trade_book.cpp
     trade/trade_book.h
+    trade/trade_jobs.cpp
+    trade/trade_jobs.h
     vendor/gm_vendor.cpp
     vendor/gm_vendor.h
     vendor/node_tax.cpp

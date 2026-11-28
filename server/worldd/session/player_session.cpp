@@ -659,8 +659,8 @@ void PlayerSession::finish(const char* why) {
     }
     saved_ = loaded_;
     if (handed_over_ > 0 || position_changed(/*with_yaw=*/true)) hand_over(why, /*periodic=*/false);
-    // the inventory, too, if it changed at all: what an earlier hand-over gave the saver may have been lost, and the latest wins; a mail claim still in flight is settled first
-    if (!mail_settle_on_finish() && inventory_changed_) hand_over_inventory(why, /*periodic=*/false);
+    // the inventory, too, if it changed at all: what an earlier hand-over gave the saver may have been lost, and the latest wins; a mail claim or player trade commit in flight is settled first
+    if (!trade_commit_pending() && !trade_undecided_ && !mail_settle_on_finish() && inventory_changed_) hand_over_inventory(why, /*periodic=*/false);
     // and the progress (plan D1): handed over at once when it changed, and once more here for the same reason
     if (progress_changed_) hand_over_progress(why);
     // a listing's save still in flight held the bag save above: the world finishes it and writes the bags this session ends with
@@ -724,6 +724,7 @@ void PlayerSession::hand_over_progress(const char* why) {
 }
 
 void PlayerSession::hand_over_inventory(const char* why, bool periodic) {
+    if (trade_defers_hand_over(why, periodic)) return;   // (a player trade commit in flight or undecided must never be overwritten by pre-trade bags)
     if (sink_ && market_hold_bag_save(why)) return;   // (a listing's save in flight writes these bags: the save waits for its answer and inventory_dirty_ stays set)
     if (mail_defers_hand_over(why, periodic)) return;   // (a claim in flight stores these bags: the save waits for its answer; otherwise this clears inventory_dirty_)
     if (!sink_) return;

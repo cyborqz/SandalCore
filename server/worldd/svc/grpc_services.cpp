@@ -957,6 +957,34 @@ ExpireResult GrpcServices::expire_listing(const std::string& listing_id, const s
     if (resp.has_seller_mail()) r.seller_mail = mail_of(resp.seller_mail());
     return r;
 }
+
+CommitTradeResult GrpcServices::commit_player_trade(const CommitTradeRequest& request) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::CommitPlayerTradeRequest req;
+    req.set_trade_id(request.trade_id);
+    auto fill_side = [](characterv1::SaveInventoryRequest& dst, const TradeSideSnapshot& src) {
+        dst.set_id(src.character_id);
+        fill_inventory_request(dst, src.items, src.wallet, /*with_wallet=*/true, &src.jobs, &src.known_recipes, &src.warehouse);
+    };
+    fill_side(*req.mutable_side_a(), request.side_a);
+    fill_side(*req.mutable_side_b(), request.side_b);
+    req.set_copper_a_to_b(request.copper_a_to_b);
+    req.set_copper_b_to_a(request.copper_b_to_a);
+    req.set_items_a_to_b(request.items_a_to_b);
+    req.set_items_b_to_a(request.items_b_to_a);
+    req.set_committed_at_ms(request.committed_at_ms);
+    characterv1::CommitPlayerTradeResponse resp;
+    const grpc::Status s = stubs_->character->CommitPlayerTrade(&ctx, req, &resp);
+    CommitTradeResult r;
+    r.status = (s.error_code() == grpc::StatusCode::FAILED_PRECONDITION) ? CallStatus::Refused : map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    r.replayed = resp.replayed();
+    return r;
+}
 // ~ Cyb - C O A ~
 
 RegisterResult GrpcServices::register_server(const std::string& address,

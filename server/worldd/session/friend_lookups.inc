@@ -102,6 +102,10 @@ bool PlayerWorld::take_friend_lookup(uint64_t ticket, svc::CharacterResult& out)
     return friend_lookups_ && friend_lookups_->take(ticket, out);
 }
 
-PlayerWorld::~PlayerWorld() = default;
+PlayerWorld::~PlayerWorld() {
+    if (trade_book_) trade_book_->detach_jobs();
+    std::lock_guard<std::mutex> lock(trade_jobs_mu_);
+    if (trade_jobs_) trade_jobs_->stop();
+}
 
 }}  // namespace aoc::worldd

@@ -122,6 +122,7 @@ void PlayerSession::on_item_delivery(Connection& conn, const repl::ClientRpc& rp
     const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
     if (!quests_on_ || !book || !qb) return refuse("quests are off");
     if (dead_) return refuse("the player is dead");
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     if (!talk_.open() || !talk_.sub() || talk_.sub()->type != 3) return refuse("no hand-in panel is open");
     if (!rpc.call.decoded || !rpc.call.rpc) return refuse("its parameters do not decode");
     if (!within_budget(dialogue_budget_, "ServerRequestItemDelivery", now)) return;

@@ -850,9 +850,9 @@ void PlayerSession::mail_claim_landed(Connection& conn, PendingMail job, const M
     if (world_) world_->close_mail_claim(job.ticket);   // (after the save the answer let go: a log-in never sees the gap)
 }
 
-/// Whether a claim may not start now: one is in flight (one at a time), or a log-in of this character is waiting to be applied.
+/// Whether a claim may not start now: one is in flight (one at a time), a player trade is committing, or a log-in of this character is waiting to be applied.
 bool PlayerSession::mail_claims_held() const {
-    return !mail_claim_in_flight_.empty() || (world_ && world_->login_pending(character_id_));
+    return !mail_claim_in_flight_.empty() || trade_commit_pending() || (world_ && world_->login_pending(character_id_));
 }
 
 /// What follows a claim's answer: the hand-over that waited for it, and the claims that waited behind it.

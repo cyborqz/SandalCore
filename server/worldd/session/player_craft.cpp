@@ -135,6 +135,7 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
         spdlog::log(level_for(craft_refused_logged_, kCraftLogged), "[session] {}: a start at a station is refused (nothing is taken, nothing is sent): {}", name(), why);
     };
     if (!registry_ || !view_ || !world_) return refuse("the world has no actors");
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     const world::WorldActor* a = registry_->find(req->station.ObjectId);
     if (!a || a->kind != world::ActorKind::Station) return refuse("the object named is no station of this world");
     quick = !a->station.processing;
@@ -270,6 +271,7 @@ void PlayerSession::on_quick_start(Connection& conn, const repl::StartCraft& req
         spdlog::log(level_for(quick_refused_logged_, kQuickLogged), "[session] {}: a craft is refused (nothing is taken): {}", name(), why);
         queue("ClientInterruptCraft", [](bootstrap::PlayerBootstrap& pb) { return pb.craft_interrupted(); }, conn, /*must_build=*/true);
     };
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     const content::CraftStationData* defs = world_->station_data();
     const content::CraftRecipeData* recipes = world_->craft_recipes();
     if (!defs || !recipes) return refuse("worldd has no station definitions or recipes (an older content.db)");
@@ -386,6 +388,7 @@ void PlayerSession::run_quick_make(Connection& conn, Clock::time_point now) {
         return;
     }
     if (now < quick_.ready) return;
+    if (trade_commit_pending()) return;   // defer completion until the in-flight trade commit settles
     if (!room_for(24)) return;   // the replies are full: the next tick tries again
     complete_quick_make(conn, now);   // (a craft that cannot be made now says why in the log and is over)
 }
@@ -793,6 +796,7 @@ void PlayerSession::say(Connection& conn, const char* text, Clock::time_point no
 }
 
 bool PlayerSession::gm_teach_recipe(Connection& conn, int64_t recipe, const std::string& by) {
+    if (trade_commit_pending()) return false;
     if (std::find(taught_.begin(), taught_.end(), recipe) != taught_.end()) return false;
     if (taught_.size() >= bootstrap::kMaxKnownRecipes) return false;
     taught_.push_back(recipe);
@@ -803,6 +807,7 @@ bool PlayerSession::gm_teach_recipe(Connection& conn, int64_t recipe, const std:
 }
 
 bool PlayerSession::gm_forget_recipe(Connection& conn, int64_t recipe, const std::string& by) {
+    if (trade_commit_pending()) return false;
     const auto it = std::find(taught_.begin(), taught_.end(), recipe);
     if (it == taught_.end()) return false;
     taught_.erase(it);

@@ -80,6 +80,7 @@
 #include "world/city_nodes.h"
 #include "world/duels.h"   // #23 (MrJambix)
 #include "trade/trade_book.h"
+#include "trade/trade_jobs.h"
 #include "world/node_control.h"
 #include "dialogue/requirement.h"
 #include "world/node_layout_data.h"
@@ -198,6 +199,14 @@ public:
     PositionSink* position_sink() const { return sink_; }
     /// When the world stops, after the sessions ended: waits up to `max_wait` for the listing saves those sessions left in flight, and writes their bags.
     void          settle_market(std::chrono::milliseconds max_wait);
+    /// When the world stops, after the sessions ended: waits up to `max_wait` for in-flight player trade commits to settle.
+    void          settle_trade(std::chrono::milliseconds max_wait);
+    /// Configures the player trade commit worker retry policy (takes effect immediately; used by tests for short backoffs).
+    void          set_trade_job_config(trade::TradeJobsConfig config);
+    /// Thread-safe: true while a player trade commit involving `character_id` has not yet settled.
+    bool          trade_saving(const std::string& character_id) const;
+    /// Thread-safe: true while a marketplace listing/sale write involving `character_id` is in flight.
+    bool          market_saving(const std::string& character_id) const { return market_listings_.saving(character_id); }
 
     /// Social, step 7: submits a friend call's character lookup (by name or by id) to the world's lookup worker, which asks the sink off the network thread;
     /// the ticket it returns is how the result comes back.  The session takes it on a later tick with take_friend_lookup.
@@ -218,6 +227,8 @@ public:
     bool orphan_mail_claim(OrphanClaim claim) const;
     /// The session applied the answer of a claim: it is closed.
     void close_mail_claim(uint64_t ticket) const;
+    /// Thread-safe: true while a mail claim involving `character_id` is open in the mail worker.
+    bool mail_claim_open(const std::string& character_id) const;
     /// Whether a write of the character's bags can still happen from here: a Marketplace listing's save without its answer (or the bags of an ended session that left one), a mail
     /// claim of it that is not closed, or a save queued or running in the sink.  The log-in waits for this to be false before it reads the character (login/login_service.h): one
     /// wait with one bound for all three, and it is safe to ask from the log-in's thread.
@@ -673,6 +684,10 @@ private:
     mutable std::atomic<size_t>            mail_notes_count_{0};    // mail_notes_.size(): a tick that has no note does not take the lock
     std::function<void()>                  mail_submit_hook_;   // a test's (see set_mail_submit_hook)
     MailJobs* mail_jobs(bool create) const;
+    mutable std::unique_ptr<trade::TradeJobs> trade_jobs_;
+    mutable std::mutex                        trade_jobs_mu_;
+    trade::TradeJobsConfig                    trade_job_config_;
+    trade::TradeJobs* ensure_trade_jobs() const;
     world::ActorRegistry                 registry_;
     std::shared_ptr<world::DuelBook>     duel_book_ = std::make_shared<world::DuelBook>(&registry_, [this] { return guids_.next(); });   // PvP: the duels (after the registry it names)   // #23 (MrJambix)
     std::shared_ptr<trade::TradeBook>    trade_book_ = std::make_shared<trade::TradeBook>(&registry_);

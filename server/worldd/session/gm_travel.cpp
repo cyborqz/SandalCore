@@ -242,6 +242,11 @@ GmFinishResult GmTravel::finish_jobs(const std::string& character, const std::st
         return out;
     }
     out.character = handle.player->name();
+    if (handle.player->trade_commit_pending()) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "a player trade commit is in progress";
+        return out;
+    }
     out.finished = static_cast<uint32_t>(handle.player->gm_finish_jobs(*handle.connection, now_(), log_text(station), by));
     if (out.finished == 0) {
         out.status = GmStatus::FailedPrecondition;
@@ -302,6 +307,11 @@ GmRecipeResult GmTravel::teach_recipe(const std::string& character, const std::s
         out.message = r->name + " needs no teaching: every character knows it";
         return out;
     }
+    if (handle.player->trade_commit_pending()) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "a player trade commit is in progress";
+        return out;
+    }
     if (!handle.player->gm_teach_recipe(*handle.connection, r->guid, by)) {
         out.status = GmStatus::FailedPrecondition;
         out.message = out.character + " was taught " + r->name + " already";
@@ -323,6 +333,11 @@ GmRecipeResult GmTravel::forget_recipe(const std::string& character, const std::
     if (!r) return out;
     out.recipe = r->name;
     out.recipe_guid = r->guid;
+    if (handle.player->trade_commit_pending()) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "a player trade commit is in progress";
+        return out;
+    }
     if (!handle.player->gm_forget_recipe(*handle.connection, r->guid, by)) {
         out.status = GmStatus::FailedPrecondition;
         out.message = out.character + " was not taught " + r->name;

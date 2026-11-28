@@ -66,6 +66,42 @@ std::optional<Send> PlayerBootstrap::trade_update(const repl::GuidValue& owner, 
     return rpcs(Role::PlayerController, "ClientUpdateTrade", std::span<const repl::RpcRequest>(&call, 1));
 }
 
+std::optional<Send> PlayerBootstrap::trade_lock(const repl::GuidValue& character) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema ? pc_.obj.schema->rpc("ClientLockTrade") : nullptr;
+    if (!rpc) return std::nullopt;
+    const auto params = repl::client_lock_trade_params(*rpc, character);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientLockTrade";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientLockTrade", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::trade_unlock(const repl::GuidValue& character) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema ? pc_.obj.schema->rpc("ClientUnlockTrade") : nullptr;
+    if (!rpc) return std::nullopt;
+    const auto params = repl::client_unlock_trade_params(*rpc, character);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientUnlockTrade";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientUnlockTrade", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::trade_confirmed(const repl::GuidValue& character) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema ? pc_.obj.schema->rpc("ClientTradeConfirmed") : nullptr;
+    if (!rpc) return std::nullopt;
+    const auto params = repl::client_trade_confirmed_params(*rpc, character);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientTradeConfirmed";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientTradeConfirmed", std::span<const repl::RpcRequest>(&call, 1));
+}
+
 std::optional<Send> PlayerBootstrap::trade_close(uint8_t status) {
     if (!ok_ || !second_state_added_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema ? pc_.obj.schema->rpc("ClientCloseTrade") : nullptr;

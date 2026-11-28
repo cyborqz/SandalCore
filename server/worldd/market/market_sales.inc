@@ -41,6 +41,7 @@ namespace repl = ::aoc::protocol::repl;
 uint8_t PlayerSession::market_step_blocked(const repl::GuidValue& listing) const {
     if (!market_pending_.empty()) return kRequestInProgress;                       // a step of this session is still being saved: both write the same bags
     if (!mail_claim_in_flight_.empty()) return kRequestInProgress;                 // a mail claim writes the same bags on the mail worker
+    if (trade_commit_pending()) return kRequestInProgress;                         // a player trade commit writes the same bags and purse
     if (world_->login_pending(character_id_)) return kRequestInProgress;           // a log-in of this character waits for the saves the world holds
     market::MarketStore* store = world_->market_listings();
     if (store->busy(character_guid(pb_.setup()))) return kRequestInProgress;       // a step of an earlier session of this character is still being finished

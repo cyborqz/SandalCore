@@ -328,7 +328,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     items::Outcome all;
     all.ok = true;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
-    const bool loss_on = !npc_world_ || npc_world_->aftermath_config().death_loss;
+    const bool loss_on = (!npc_world_ || npc_world_->aftermath_config().death_loss) && !trade_commit_pending();
     if (db && loss_on) {
         for (const svc::InventoryItem& it : inventory_.items()) {
             // Gathering stage 3: the materials are in the resource containers now (the Backpack holds them only for a bag that had no room at the login)
@@ -526,6 +526,7 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
         ++loot_refused_;
         spdlog::log(level_for(loot_logged_), "[session] {}: a loot request is refused: {}", name(), why);
     };
+    if (trade_commit_pending()) return refuse("a player trade is committing");
     combat::Aftermath* after = npc_world_ ? npc_world_->aftermath() : nullptr;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     if (!after || !db || !registry_) return refuse("the world has no loot");
