@@ -9,6 +9,7 @@
 //  test_repl_rep_block.cpp against the original server's blocks.
 // ============================================================================
 #include "protocol/repl/codecs.h"
+#include "protocol/repl/struct_codec_registry.h"
 
 #include "protocol/emit/net_serializers.h"
 #include "protocol/repl/hit_codec.h"
@@ -1181,10 +1182,19 @@ std::array<double, 4> quat_from_wire(const Quat& q) {
 
 // ---- NetSerialize structs ---------------------------------------------------
 
-bool is_known_struct(std::string_view struct_name) { return find_struct(struct_name) != S::Unknown; }
+bool is_builtin_struct(std::string_view struct_name) { return find_struct(struct_name) != S::Unknown; }
+
+bool is_known_struct(std::string_view struct_name) {
+    return find_struct(struct_name) != S::Unknown || find_registered_struct_codec(struct_name) != nullptr;
+}
 
 bool struct_accepts(std::string_view struct_name, const Value& v) {
-    switch (find_struct(struct_name)) {
+    const S s = find_struct(struct_name);
+    if (s == S::Unknown) {
+        const StructCodecOps* ops = find_registered_struct_codec(struct_name);
+        return ops != nullptr && ops->accepts(v);
+    }
+    switch (s) {
         case S::Vec3:        return v.get_if<Vec3d>() != nullptr;
         case S::Vec2:        return v.get_if<Vec2d>() != nullptr;
         case S::Ticks:       return v.get_if<Ticks>() != nullptr;
@@ -1311,7 +1321,12 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
 }
 
 std::optional<Value> zero_struct(std::string_view struct_name) {
-    switch (find_struct(struct_name)) {
+    const S s = find_struct(struct_name);
+    if (s == S::Unknown) {
+        const StructCodecOps* ops = find_registered_struct_codec(struct_name);
+        return (ops && ops->zero) ? ops->zero() : std::nullopt;
+    }
+    switch (s) {
         case S::Vec3:         return Value(Vec3d{});
         case S::Vec2:         return Value(Vec2d{});
         case S::Ticks:        return Value(Ticks{});
@@ -1332,7 +1347,15 @@ std::optional<Value> zero_struct(std::string_view struct_name) {
 // C Y B and CoA
 
 std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, const CodecOptions& opts) {
-    switch (find_struct(struct_name)) {
+    const S s = find_struct(struct_name);
+    if (s == S::Unknown) {
+        const StructCodecOps* ops = find_registered_struct_codec(struct_name);
+        if (!ops) return std::nullopt;
+        auto val = ops->read(r, opts);
+        if (!val || overran(r)) return std::nullopt;
+        return val;
+    }
+    switch (s) {
         case S::Vec3: {
             Vec3d v;
             v.x = read_double(r); v.y = read_double(r); v.z = read_double(r);
@@ -1534,8 +1557,13 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
 // C-O-A : C:Y:B
 
 bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out, const CodecOptions& opts) {
+    const S s = find_struct(struct_name);
+    if (s == S::Unknown) {
+        const StructCodecOps* ops = find_registered_struct_codec(struct_name);
+        return ops != nullptr && ops->accepts(v) && ops->write(v, out, opts);
+    }
     if (!struct_accepts(struct_name, v)) return false;
-    switch (find_struct(struct_name)) {
+    switch (s) {
         case S::Vec3: {
             const auto& a = *v.get_if<Vec3d>();
             write_double(out, a.x); write_double(out, a.y); write_double(out, a.z);

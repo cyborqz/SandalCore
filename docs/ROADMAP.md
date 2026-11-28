@@ -85,6 +85,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Raids: a party becomes a raid of 2 to 40 players in up to 10 squads of 8, by the group window's Convert to Raid button or a yes to the 9th invitation's ask; the raid leader moves members between squads and sets each squad's leader; a raid of 8 or fewer turns back into a party.
 - Quest speech bubbles: some of the people your active quest objectives point you to show a speech bubble over their heads, where the game's data gives the objective one (Bronsen's "Over here!" in Welcome to Verra among them).
 - Social: player trading (requests, live offers of bag items, materials and copper, locking, the countdown, confirming, and the swap of both players' items and copper in one save that a log-out does not lose).
+- Server code: each new replicated struct type is added in a file of its own under libs/aocnet/protocol/repl/codecs/ and registers itself, so adding one no longer edits the shared value and codec files.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

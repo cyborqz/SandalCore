@@ -30,13 +30,16 @@
 #include "protocol/emit/intrepid_netguid.h"
 
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <typeindex>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -888,11 +891,54 @@ enum class ValueKind : uint8_t {
     None, Bool, Int, UInt, Float, Double, String, Name, Text, Object, SoftObject, Struct, Array,
 };
 
+/// Type-erased immutable holder for self-registered NetSerialize struct values
+/// (protocol/repl/struct_codec_registry.h).  Copies share the immutable payload;
+/// equality compares runtime types and dispatches directly to T::operator==.
+struct CustomStruct {
+    std::type_index             type = typeid(void);
+    std::shared_ptr<const void> ptr;
+    bool (*equals)(const void*, const void*) = nullptr;
+
+    template <class T>
+    static CustomStruct make(T&& v) {
+        using D = std::remove_cvref_t<T>;
+        CustomStruct cs;
+        cs.type = std::type_index(typeid(D));
+        cs.ptr = std::make_shared<const D>(std::forward<T>(v));
+        cs.equals = [](const void* a, const void* b) -> bool {
+            return *static_cast<const D*>(a) == *static_cast<const D*>(b);
+        };
+        return cs;
+    }
+
+    bool operator==(const CustomStruct& o) const {
+        if (type != o.type) return false;
+        if (!ptr || !o.ptr) return ptr == o.ptr;
+        return equals != nullptr && equals(ptr.get(), o.ptr.get());
+    }
+};
+
+namespace detail {
+
+template <class T, class Variant>
+struct is_variant_alternative : std::false_type {};
+
+template <class T, class... Ts>
+struct is_variant_alternative<T, std::variant<Ts...>>
+    : std::bool_constant<(std::is_same_v<T, Ts> || ...)> {};
+
+template <class T, class Variant>
+inline constexpr bool kDirectStorage =
+    !std::is_same_v<T, CustomStruct> && is_variant_alternative<T, Variant>::value;
+
+}  // namespace detail
+
 class Value {
 public:
     using Storage = std::variant<
         std::monostate, bool, int64_t, uint64_t, float, double, std::string,
         NameValue, TextValue, emit::FIntrepidNetworkGUID, SoftObjectValue, ArrayValue,
+        CustomStruct,
         Vec3d, Vec2d, Rot, QuantVec, Normal16, RepMovement, LoadTracker, UniqueNetId, Ticks,
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
@@ -907,9 +953,25 @@ public:
     /// Any non-scalar alternative converts implicitly (a struct, name, text,
     /// object, soft object or array); scalars have named constructors.
     template <class T>
-        requires(!std::is_arithmetic_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>> &&
-                 !std::is_same_v<std::remove_cvref_t<T>, Value> && std::is_constructible_v<Storage, T &&>)
+        requires(!std::is_scalar_v<std::remove_cvref_t<T>> &&
+                 !std::is_same_v<std::remove_cvref_t<T>, Value> &&
+                 !std::is_same_v<std::remove_cvref_t<T>, CustomStruct> && std::is_constructible_v<Storage, T &&>)
     Value(T&& v) : v_(std::forward<T>(v)) {}
+
+    /// Any equality-comparable custom struct type not held directly in Storage
+    /// wraps into CustomStruct as an immutable shared value.
+    template <class T>
+        requires(std::is_class_v<std::remove_cvref_t<T>> &&
+                 !std::is_same_v<std::remove_cvref_t<T>, Value> &&
+                 !std::is_same_v<std::remove_cvref_t<T>, CustomStruct> &&
+                 !std::is_same_v<std::remove_cvref_t<T>, std::monostate> &&
+                 !std::is_same_v<std::remove_cvref_t<T>, std::string_view> &&
+                 !std::is_constructible_v<Storage, T &&> &&
+                 std::is_constructible_v<std::remove_cvref_t<T>, T &&> &&
+                 requires(const std::remove_cvref_t<T>& a, const std::remove_cvref_t<T>& b) {
+                     { a == b } -> std::convertible_to<bool>;
+                 })
+    Value(T&& v) : v_(CustomStruct::make(std::forward<T>(v))) {}
 
     static Value boolean(bool b)       { Value v; v.v_ = b; return v; }
     static Value i64(int64_t i)        { Value v; v.v_ = i; return v; }
@@ -921,17 +983,27 @@ public:
     ValueKind kind() const;
 
     template <class T> const T* get_if() const {
+        static_assert(!std::is_same_v<std::remove_cv_t<T>, CustomStruct>,
+                      "CustomStruct is internal storage; query the concrete struct type instead");
         if constexpr (std::is_same_v<T, ItemStorageEvent>) {
             const EventBox* b = std::get_if<EventBox>(&v_);
             return b ? b->get() : nullptr;
         } else if constexpr (std::is_same_v<T, MailPersistenceData>) {
             const MailPersistenceBox* b = std::get_if<MailPersistenceBox>(&v_);
             return b ? b->get() : nullptr;
-        } else {
+        } else if constexpr (detail::kDirectStorage<T, Storage>) {
             return std::get_if<T>(&v_);
+        } else {
+            const CustomStruct* cs = std::get_if<CustomStruct>(&v_);
+            return (cs && cs->ptr && cs->type == std::type_index(typeid(T)))
+                ? static_cast<const T*>(cs->ptr.get())
+                : nullptr;
         }
     }
-    template <class T> T* get_if() {
+    template <class T>
+        requires(std::is_same_v<T, ItemStorageEvent> || std::is_same_v<T, MailPersistenceData> ||
+                 detail::kDirectStorage<T, Storage>)
+    T* get_if() {
         if constexpr (std::is_same_v<T, ItemStorageEvent>) {
             EventBox* b = std::get_if<EventBox>(&v_);
             return b ? b->get() : nullptr;

@@ -38,6 +38,7 @@ foreach(t
     test_server_guid_allocator
     test_generated_schemas
     test_repl_codecs
+    test_repl_codec_registry
     test_repl_rep_block
     test_repl_fast_array
     test_repl_aoc_codecs
