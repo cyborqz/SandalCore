@@ -453,6 +453,7 @@ void PlayerSession::sell_to_town_shop(Connection& conn, const repl::VendorTransa
     queue("Currencies", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
     spdlog::log(level_for(vendor_logged_), "[session] {}: sold {} stack(s) to the shop for {} copper ({} -> {}): {} storage event(s)", name(), sold.size(), total, before, wallet_.copper(),
                 all.events.size());
+    for (const svc::InventoryItem& it : sold) quest_collected(conn, "Sell", it.item_record_id, it.quantity, now);   // quests: a Collect objective of the kind Sell
 }
 
 void PlayerSession::repair_at_town_shop(Connection& conn, const repl::VendorTransactionCart& cart, Clock::time_point now) {

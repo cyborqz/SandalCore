@@ -1108,6 +1108,8 @@ struct QuestLocation {
     int64_t id = 0;                        // QuestLocationId
 };
 
+struct TagQuery;   // (below)
+
 /// One objective of a quest, in the quest's own order.
 struct QuestObjectiveRow {
     int64_t     guid = 0;
@@ -1161,6 +1163,14 @@ struct QuestObjectiveRow {
     int64_t     recipe = 0;
     std::vector<int64_t> abilities;        // UseAbility
     DialogueRequirement rule;              // Custom: one criterion
+    // The Destiny window (quest_objective.detail "sq"): what a SubQuest objective starts.
+    int64_t     sub_quest = 0;             // the quest it starts (0: none)
+    std::string sub_kind;                  // ... how: AutoGrant, ...
+    bool        sub_wait = false;          // ... and whether the objective is done when that quest is
+    // The first tasks (quest_objective.detail "cmb", "tg", "gq"): what a UseAbility objective needs besides its abilities and what a Kill objective's tag query says.
+    bool        in_combat = false;         // UseAbility: only a use in a fight counts
+    std::vector<std::string> ability_tags; // ... the tags the counted abilities carry (the abilities themselves are in `abilities`)
+    std::shared_ptr<const TagQuery> kill_query;   // Kill: the creatures it counts, by tag (`tag_query` says the record has one); null: none
 };
 
 struct QuestRow {
@@ -1196,7 +1206,15 @@ struct QuestItemLink {
     std::string kind;
 };
 
+/// One track of the Destiny window (destiny_track): the quest the client names for it (its _02_Root), the track's own quest (the SubQuest its first objective starts: the quest the
+/// window keys its instance guid on), the skill tree and the milestone objectives.
+struct DestinyTrackRow {
+    int64_t              track_quest = 0, quest = 0, skill_tree = 0;
+    std::vector<int64_t> milestones;
+};
+
 struct QuestData {
+    std::vector<DestinyTrackRow>                  destiny_tracks;    // the Destiny window's tracks in the data's order (empty for a content.db without the table)
     std::map<int64_t, QuestRow>                   quests;
     std::map<std::string, int64_t>                by_name;
     std::map<int64_t, std::vector<QuestOfferRow>> instance_offers;   // PopulationInstance guid -> its offers, in the data's order

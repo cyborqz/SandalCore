@@ -29,3 +29,6 @@
 #include "area_session_market_cart_tests.inc"
 #include "area_session_market_materials_tests.inc"
 #include "area_session_market_unread_tests.inc"
+#include "destiny_session_tests.inc"
+#include "quest_events_session_tests.inc"
+#include "quest_book_loads_tests.inc"

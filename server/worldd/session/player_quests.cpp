@@ -90,6 +90,7 @@ void PlayerSession::init_quests(PlayerWorld& world, const svc::Character& charac
     }
     log_quest_markers(markers);
     quest_worker_->watch(character_id_);
+    destiny_seed_pending_ = true;   // the log is loaded: the first quest tick takes the Destiny tracks the character's level opens
     spdlog::info("[session] {}: quest log: {} quest(s) taken, {} finished, {} variable(s){}", pb_.setup().name, quest_log_.instances().size(), quest_log_.completed().size(),
                  quest_log_.variables().size(), repaired ? " (" + std::to_string(repaired) + " repaired or dropped: the log is saved again)" : "");
 }
@@ -243,6 +244,11 @@ void PlayerSession::on_abandon_quests(Connection& conn, const repl::ClientRpc& r
             spdlog::log(level_for(quests_logged_, 100), "[session] {}: abandon of quest instance {}: it is not in the log", name(), g.hex());
             continue;
         }
+        if (q->status != quest::Status::Active) {   // a quest that is done (or failed) stays in the log for a moment while the client is told: it leaves by that way, which counts it as finished once (its rewards were given when it was done)
+            ++quests_refused_;
+            spdlog::log(level_for(quests_logged_, 100), "[session] {}: abandon of quest instance {}: the quest is already {}", name(), g.hex(), q->status == quest::Status::Completed ? "done" : q->status == quest::Status::Failed ? "failed" : "paused");
+            continue;
+        }
         const content::QuestRow* def = qb->quest(q->record);
         if (def && !def->can_abandon) {   // the client drops these itself; the server refuses them too
             ++quests_refused_;
@@ -340,6 +346,11 @@ void PlayerSession::run_quests(Connection& conn, Clock::time_point now) {
     if (!qb) return;
     // the GM commands that arrived
     for (const svc::QuestCommand& cmd : quest_worker_->take(character_id_)) apply_quest_command(conn, cmd, now);
+    // the Destiny window's tracks: at the login and after a level gained (the client is in the world: the new quests reach it as any quest does)
+    if (destiny_seed_pending_ && phase_in_done_) {
+        destiny_seed_pending_ = false;
+        seed_destiny(conn, now);
+    }
     // a zone of influence that starts a quest for a character who stands in it (once a second): the starting areas' first quests
     if (phase_in_done_ && now - zone_checked_ >= std::chrono::seconds(1)) {
         zone_checked_ = now;
@@ -372,6 +383,7 @@ void PlayerSession::run_quests(Connection& conn, Clock::time_point now) {
 void PlayerSession::register_quests_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerAbandonQuests", [](PlayerSession& s, const RpcContext& c) { s.on_abandon_quests(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerSetQuestBlacklisted", [](PlayerSession& s, const RpcContext&) { s.on_quest_blacklisted(); });
+    t.add(RpcScope::PlayerController, "ServerGetDestinyClientData", [](PlayerSession& s, const RpcContext& c) { s.on_destiny_client_data(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerDebugStartQuest", [](PlayerSession& s, const RpcContext& c) { s.on_quest_debug_rpc(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerDebugEndQuest", [](PlayerSession& s, const RpcContext& c) { s.on_quest_debug_rpc(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerDebugFailQuestByInstance", [](PlayerSession& s, const RpcContext& c) { s.on_quest_debug_rpc(c.conn, c.rpc, c.now); });

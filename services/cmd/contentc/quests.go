@@ -200,6 +200,28 @@ type objectiveDetailJSON struct {
 	Data         map[string]any        `json:"d,omitempty"`
 	Markers      *markerJSON           `json:"mk,omitempty"`
 	Callout      int64                 `json:"cal,omitempty"` // (version 36) the map registration whose speech bubble the objective raises
+	SubQuest     *subQuestJSON         `json:"sq,omitempty"`  // a SubQuest objective: the quest it starts and whether it waits for that quest
+}
+
+// subQuestJSON is a SubQuest objective's SubQuestInfo: the quest it starts ("q"), how ("t": AutoGrant, ...) and whether the objective is done when that quest is ("w").
+type subQuestJSON struct {
+	Quest int64  `json:"q"`
+	Kind  string `json:"t,omitempty"`
+	Wait  int    `json:"w,omitempty"`
+}
+
+// subQuestOf reads the SubQuestInfo of a SubQuest objective record; nil when it names no quest.
+func subQuestOf(f designdb.Struct) *subQuestJSON {
+	info := structOf(f["SubQuestInfo"])
+	q := idGuid(info["SubQuest"])
+	if q == 0 {
+		return nil
+	}
+	s := &subQuestJSON{Quest: q, Kind: enumValue(strOf(info["InstantiationType"]))}
+	if boolOf(info["bWaitForCompletion"]) {
+		s.Wait = 1
+	}
+	return s
 }
 
 // markerJSON is what the map pins of an objective need besides the data of its kind (version 30; see objectiveMarkers).
@@ -413,7 +435,7 @@ func boolOf(v designdb.Value) bool {
 }
 
 // objectiveDetail reads everything the engine needs of an objective record besides the basic columns.
-func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
+func objectiveDetail(w *writer, orow designdb.Row, abilitiesByTags func([]string) []int64) (string, error) {
 	f := orow.Fields
 	typ := enumValue(strOf(f["ObjectiveType"]))
 	d := objectiveDetailJSON{Timeout: floatOf(f["Timeout"]), Rewards: idsOf(f["Rewards"])}
@@ -496,6 +518,16 @@ func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
 		if len(tagNames(k["TagQuery"])) > 0 {
 			data["tq"] = 1
 		}
+		// the query itself (the tag names in lower case), so that a kill counts for the creatures it names. A query that names no tag keeps an empty list, never a null: worldd reads the
+		// key as a list and refuses the whole quest book over a null (and it attaches no query that has no tag)
+		if q := readTagQuery(k["TagQuery"]); q != nil {
+			tags := make([]string, len(q.Tags))
+			for i, t := range q.Tags {
+				tags[i] = strings.ToLower(t)
+			}
+			q.Tags = tags
+			data["gq"] = q
+		}
 	case "Dialogue":
 		if src := sourceJSON(structOf(f["DialogueData"])["DialogueSources"]); len(src) > 0 {
 			data["src"] = src
@@ -564,8 +596,20 @@ func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
 			data["recipe"] = g
 		}
 	case "UseAbility":
-		if l := idsOf(structOf(f["AbilityUseData"])["Abilities"]); len(l) > 0 {
-			data["ab"] = l
+		// the abilities the use counts for: the ones the record names, and the ones that carry every tag it requires (a Dodge, a Guard, a weapon combo); "cmb": only in a fight
+		au := structOf(f["AbilityUseData"])
+		ab := idsOf(au["Abilities"])
+		if tags := tagStrings(au["RequiredAbilityTags"]); len(tags) > 0 {
+			data["tg"] = tags
+			if abilitiesByTags != nil {
+				ab = dedupeIDs(append(ab, abilitiesByTags(tags)...))
+			}
+		}
+		if len(ab) > 0 {
+			data["ab"] = ab
+		}
+		if boolOf(au["bMustBeInCombat"]) {
+			data["cmb"] = 1
 		}
 	case "Custom":
 		// the rule is ONE criterion: kept as a requirement of one criterion (an ALL over it) so that the conversations' evaluator reads it
@@ -588,6 +632,9 @@ func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
 	}
 	d.Markers = objectiveMarkers(f, typ)
 	d.Callout = objectiveCallout(f, typ)
+	if typ == "SubQuest" {
+		d.SubQuest = subQuestOf(f)
+	}
 	b, err := json.Marshal(d)
 	return string(b), err
 }
@@ -602,6 +649,7 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 	for _, r := range src.rows["NarrativeObjectiveV2"] {
 		objectives[r.Guid] = r
 	}
+	abilitiesByTags := abilityTagIndex(src.rows["AoCAbilityRecordBase"])
 
 	var quests, objs, missing, gated int
 	killSets := map[int64]bool{}
@@ -666,7 +714,7 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 			if of.err != nil {
 				return of.err
 			}
-			od, err := objectiveDetail(w, orow)
+			od, err := objectiveDetail(w, orow, abilitiesByTags)
 			if err != nil {
 				return fmt.Errorf("%s: %w", of.where, err)
 			}
@@ -689,6 +737,11 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 			}
 			objs++
 		}
+	}
+
+	// the Destiny window's tracks (the DestinySystem record) and the quest each track shows
+	if err := buildDestinyTracks(w, src, objectives, meta, opt); err != nil {
+		return err
 	}
 
 	// the creatures of the population sets the Kill objectives name (a kill counts for the sets its creature stands in)

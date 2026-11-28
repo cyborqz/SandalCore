@@ -571,10 +571,12 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
     bool accepted_cast = true;   // (the generic runtime has no refusal to give back: a pet's command goes on as before)
+    bool started = false;        // the server started the ability (not a refused request): a quest's UseAbility objective counts it
     if (pipeline_ && pipeline_->handles(ability)) {
         if (item_slot != -1) info.item_cast = consumable_cast(ability, item_slot, item_location);   // consumables: the item whose numbers the ability reads
         const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
         accepted_cast = accepted == Refusal::None;
+        started = accepted_cast;
         if (accepted == Refusal::None && info.item_cast) take_consumable(info.item_cast, instance);
         if (accepted == Refusal::None && !info.target_actors.empty()) pet_joins_owners_cast(info.target_actors.front());
         // Drop Crate: the cast plays its montage and the crate leaves the back at the montage's notify, whatever the place (the original drops nothing at a place a crate cannot lie)
@@ -584,6 +586,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
         }
     } else {
         const Refusal ran = runtime->trigger(ability, instance, ability_seconds(now), info);
+        started = ran == Refusal::None;
         // the game's rule: a Dodge the server took cancels every ability that has not gone out yet, gives back what it paid (the cast bars, the Salvo and the Barrage, the weapon swing under way, the held stance (Guard)
         // and every other ability in its wind up) and keeps a crate that has not left the back; a Dodge it refused ends nothing
         if (ran == Refusal::None && ability == content::kGuidDodge && pipeline_) {
@@ -595,6 +598,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     }
     take_ability_events();
     flush_abilities(conn);
+    if (started) quest_ability(conn, ability, now);   // quests: the UseAbility objectives (Sprint, Dodge, a ration, a weapon combo ...)
     // a pet's command is the ability's: the pet obeys only when the pipeline took the cast (a refused Go To, still on its cooldown, orders nothing)
     if (const int64_t command = pets::command_of_ability(ability); command != 0 && pet_actor_ && accepted_cast) {
         pet_command(conn, command, info.target_actors.empty() ? 0 : info.target_actors.front(), trigger_place, now);

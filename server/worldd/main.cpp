@@ -577,6 +577,7 @@ int main(int argc, char** argv) {
                                                : "verify: shared, and one shared update in eight is built the plain way as well and compared; a difference turns sharing off");
     players.set_position_sink(&saver);
     players.set_gm_commands(gm_commands);
+    players.set_destiny_tracks(true);   // the Destiny window's tracks: a character gets the ones its level opens
     players.set_reactions_enabled(!no_reactions);
     if (no_reactions) spdlog::info("[abilities] the game's reactions are OFF (--no-reactions)");
     const uint64_t dice_seed = combat_seed != 0 ? combat_seed : gather::fresh_seed();

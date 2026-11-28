@@ -17,6 +17,8 @@
 //      quest by itself (bCompletesQuest).  A done quest runs its success actions and hands out the rewards of the quest and of every objective that was done.
 //    * Actions (reveal, activate, succeed, fail, wake ...  an objective; set or raise a quest or player variable; give or take items; show a toast) run when an objective starts,
 //      ticks, succeeds or fails, and when a quest starts, ticks, succeeds or fails.  An action may have a condition of its own.
+//    * A SubQuest objective that is active starts the quest it names (AutoGrant: the world does, with a StartQuest effect) and is done when that quest is finished, or fails when it fails
+//      (bWaitForCompletion); a quest that was finished before counts at once.  The Destiny tracks are made of these (quest/destiny.h).
 //  The engine settles after every event: it goes on until nothing changes any more (the game does one step each tick; the result is the same).
 // ============================================================================
 #pragma once
@@ -24,6 +26,7 @@
 #include "dialogue/requirement.h"
 #include "quest/quest_book.h"
 #include "quest/quest_log.h"
+#include "vendor/sell_rules.h"
 
 #include <algorithm>
 #include <cmath>
@@ -45,11 +48,12 @@ struct Effect {
         ObjectiveDone,  // an objective of `quest` was completed (`objective` is its record)
         QuestDone,      // `quest` is done: take it out of the log as finished
         QuestFailed,    // `quest` failed: take it out of the log
-        StartQuest,     // start the quest `quest` (an ActivateQuest action)
+        StartQuest,     // start the quest `quest` (an ActivateQuest action, or `parent` != 0: the SubQuest objective of the quest `parent` that starts it)
         Told,           // `text`: something the data asked for that this milestone does not do (for the log, once)
     };
     Kind                                     kind = Kind::Told;
     int64_t                                  quest = 0, objective = 0;
+    int64_t                                  parent = 0;     // StartQuest: the quest whose SubQuest objective starts `quest` (0: an action does)
     std::vector<int64_t>                     tables;
     std::vector<std::pair<int64_t, int64_t>> items;
     std::string                              text;
@@ -75,6 +79,23 @@ inline int64_t dialogue_entry(const QuestLog& log, const QuestBook& book, int64_
     return 0;
 }
 
+/// Whether any quest of the log has an active, unfinished objective of kind `type` that `pred` accepts: the cheap look the session takes before it builds an engine for an event (an
+/// ability used, an item worn or sold), so that an event nobody listens for costs nothing.
+template <typename Pred>
+inline bool listens(const QuestLog& log, const QuestBook& book, const char* type, Pred&& pred) {
+    for (const QuestInstance& q : log.instances()) {
+        if (q.status != Status::Active) continue;
+        const content::QuestRow* d = book.quest(q.record);
+        if (!d) continue;
+        for (size_t i = 0; i < q.objectives.size() && i < d->objectives.size(); ++i) {
+            const ObjectiveState& o = q.objectives[i];
+            if (!o.active || o.completed || o.failed || d->objectives[i].type != type) continue;
+            if (pred(d->objectives[i])) return true;
+        }
+    }
+    return false;
+}
+
 class Engine {
 public:
     /// `ev` answers the rules (its Facts should be `facts`: the objective counts of the items carried come from them); `effects` collects what the world has to do.
@@ -82,6 +103,10 @@ public:
         : log_(log), book_(book), ev_(ev), facts_(facts), fx_(effects), now_(now) {}
 
     // ---- starting -------------------------------------------------------------------------------------------------------------------------------------------------
+
+    /// Whether the SubQuest objectives start their quests, wait for them and are linked to them (default: yes).  A world that does not give the Destiny tracks turns it off, and every
+    /// SubQuest objective stays as it was before this part: an objective nothing ever counts.
+    void set_sub_quests(bool on) { sub_quests_ = on; }
 
     /// Takes the quest (the caller has asked QuestLog::can_start): the instance joins the log, its start actions run and everything settles.  The instance, or null when the log has none.
     /// An objective that starts awake starts active (QuestLog::start_instance) and nothing activates it, so what it does when it starts (its start actions: the item a hand-in objective asks
@@ -93,7 +118,20 @@ public:
         const int64_t record = q->record;
         std::vector<size_t> starting;   // the objectives that start active
         for (size_t i = 0; i < q->objectives.size() && i < def.objectives.size(); ++i) {
-            if (q->objectives[i].active) starting.push_back(i);
+            if (!q->objectives[i].active) continue;
+            const content::QuestObjectiveRow& r = def.objectives[i];
+            if (sub_quests_ && r.type == "SubQuest" && r.sub_quest != 0 && !r.activation.empty()) {
+                // a SubQuest objective starts a quest, so it waits for its rule (the Destiny quests' milestones are awake from the start and open at a count of finished tasks)
+                ev_.scope(record);
+                const bool ok = ev_.holds(r.activation);
+                ev_.scope(0);
+                if (!ok) {
+                    q->objectives[i].active = false;
+                    q->objectives[i].start_time = 0;
+                    continue;
+                }
+            }
+            starting.push_back(i);
         }
         run_actions(def.start_actions, *q, -1);
         for (const size_t i : starting) {
@@ -121,6 +159,7 @@ public:
             any = any || changed;
             if (!changed) break;
         }
+        if (sub_quests_) log_.link_parents(book_.data());   // (the quests a SubQuest objective started carry their parent's guid to the client)
         return any;
     }
 
@@ -194,8 +233,9 @@ public:
         return finish_event(complete_objective(*q, static_cast<size_t>(i)));
     }
 
-    /// The character killed the creature `instance` (a population instance) of elite rank `elite`.
-    bool kill(int64_t instance, int elite) {
+    /// The character killed the creature `instance` (a population instance) of elite rank `elite`.  `tags` are the creature's gameplay tags in lower case, each with its parents (a Kill
+    /// objective by tag query counts the kills whose tags the query accepts).
+    bool kill(int64_t instance, int elite, const std::set<std::string>& tags = {}) {
         bool any = false;
         const std::vector<int64_t>& sets = book_.kill_sets(instance);
         // the quest items the creature drops for an active objective of the character's quests (before the kill counts: the kill may finish the objective)
@@ -224,6 +264,7 @@ public:
             if (r.advanced && elite < r.elite) return;
             bool match = std::find(r.kill_instances.begin(), r.kill_instances.end(), instance) != r.kill_instances.end();
             for (size_t k = 0; k < sets.size() && !match; ++k) match = std::find(r.kill_sets.begin(), r.kill_sets.end(), sets[k]) != r.kill_sets.end();
+            if (!match && r.kill_query) match = vendor::tag_query_matches(*r.kill_query, tags);
             if (!match) return;
             update_objective(q, i, r, 1);
             any = true;
@@ -310,11 +351,13 @@ public:
         return finish_event(any);
     }
 
-    /// The character used the ability `ability`.
-    bool ability(int64_t ability_id) {
+    /// The server started the ability `ability_id` for the character (`in_combat`: in a fight): every active UseAbility objective that lists it counts one use, those that count only
+    /// in a fight too when the character is in one.
+    bool ability(int64_t ability_id, bool in_combat = true) {
         bool any = false;
         each_active("UseAbility", [&](QuestInstance& q, size_t i, const content::QuestObjectiveRow& r) {
             if (std::find(r.abilities.begin(), r.abilities.end(), ability_id) == r.abilities.end()) return;
+            if (r.in_combat && !in_combat) return;
             update_objective(q, i, r, 1);
             any = true;
         });
@@ -357,8 +400,10 @@ private:
     const dialogue::Facts&    facts_;
     std::vector<Effect>&      fx_;
     double                    now_;
+    bool                      sub_quests_ = true;
     std::set<std::string>     told_;
     std::set<std::pair<int64_t, int64_t>> started_;   // (quest, objective) whose start actions have run in this engine's start of a quest
+    std::set<std::pair<int64_t, int64_t>> granted_;   // (quest, objective) of the SubQuest objectives whose quest this engine has asked the world to start
 
     bool finish_event(bool any) {
         if (any) settle();
@@ -633,6 +678,40 @@ private:
         return ok;
     }
 
+    /// A SubQuest objective that is active: it starts its quest (kind AutoGrant; the world does, through a StartQuest effect, which asks the quest's own rules again), and is done when
+    /// that quest is finished (bWaitForCompletion; else as soon as the character has it).  1: done, -1: the quest failed (so does the objective), 0: it goes on.  The one the Destiny
+    /// tracks list as a milestone does not start its quest yet (the Claim button's rewards come with the next slice).
+    int sub_quest(QuestInstance& q, size_t i, const content::QuestObjectiveRow& r) {
+        const ObjectiveState& o = q.objectives[i];
+        if (const QuestInstance* child = log_.find(r.sub_quest)) {
+            if (!r.sub_wait) return 1;
+            if (child->status == Status::Completed) return 1;
+            return child->status == Status::Failed ? -1 : 0;
+        }
+        const content::QuestRow* child = book_.quest(r.sub_quest);
+        if (!child) {
+            told("an objective starts the quest " + std::to_string(r.sub_quest) + ", which the data does not hold");
+            return 0;
+        }
+        if (!child->repeatable && log_.completions(child->guid) > 0) return 1;   // finished before (a log that was saved between the child's end and the parent's)
+        if (r.sub_kind != "AutoGrant") {
+            told("a SubQuest objective of the kind " + (r.sub_kind.empty() ? std::string("None") : r.sub_kind) + " is not done yet");
+            return 0;
+        }
+        if (book_.destiny_milestone(o.record)) {
+            told("the Destiny milestones' quests wait for the Claim button: not started yet");
+            return 0;
+        }
+        if (granted_.insert({q.record, o.record}).second) {
+            Effect e;
+            e.kind = Effect::Kind::StartQuest;
+            e.quest = child->guid;
+            e.parent = q.record;
+            fx_.push_back(std::move(e));
+        }
+        return 0;
+    }
+
     bool tick_quest(QuestInstance& q, const content::QuestRow& d) {
         bool any = run_actions(d.on_tick, q, -1);
         if (q.status != Status::Active) return true;
@@ -672,6 +751,13 @@ private:
                     any = true;
                 }
                 done = custom_holds(q, r);
+            } else if (sub_quests_ && r.type == "SubQuest" && r.sub_quest != 0) {
+                const int state = sub_quest(q, i, r);
+                if (state < 0) {
+                    any = fail_objective(q, i) || any;
+                    continue;
+                }
+                done = state > 0;
             } else {
                 if (r.type == "Collect" && (r.collect_type.empty() || r.collect_type == "InventoryUpdate") && (!r.items.empty() || !r.tags.empty())) {
                     // the count follows the items carried (the bag), up to what the objective asks for
@@ -682,7 +768,7 @@ private:
                         any = true;
                     }
                 }
-                if (r.type == "Kill" && r.tag_query && r.kill_sets.empty() && r.kill_instances.empty()) told("a kill objective by tag query is not done yet");
+                if (r.type == "Kill" && r.tag_query && !r.kill_query && r.kill_sets.empty() && r.kill_instances.empty()) told("a kill objective by tag query is not done yet");
                 done = o.count >= r.count;
             }
             if (done && complete_objective(q, i)) any = true;

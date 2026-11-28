@@ -37,3 +37,5 @@
 #include "session/members/mail.inc"
 #include "session/members/market.inc"
 #include "session/members/trade.inc"
+#include "session/members/destiny.inc"
+#include "session/members/quest_events.inc"

@@ -22,7 +22,9 @@ namespace aoc::worldd::quest {
 class QuestBook {
 public:
     QuestBook() = default;
-    explicit QuestBook(content::QuestData data) : d_(std::move(data)) {}
+    explicit QuestBook(content::QuestData data) : d_(std::move(data)) {
+        for (const content::DestinyTrackRow& t : d_.destiny_tracks) milestones_.insert(t.milestones.begin(), t.milestones.end());
+    }
 
     const content::QuestRow* quest(int64_t guid) const {
         const auto it = d_.quests.find(guid);
@@ -80,6 +82,16 @@ public:
         const auto it = d_.item_crate.find(item);
         return it == d_.item_crate.end() ? 0 : it->second;
     }
+    /// The Destiny window (quest/destiny.h): the tracks in the data's order, the track a quest record names (its _02_Root; null for none), and whether an objective is one of the tracks'
+    /// milestone objectives (a milestone's quest waits for the Claim button, which comes with the next part).
+    const std::vector<content::DestinyTrackRow>& destiny_tracks() const { return d_.destiny_tracks; }
+    const content::DestinyTrackRow* destiny_track(int64_t track_quest) const {
+        for (const content::DestinyTrackRow& t : d_.destiny_tracks) {
+            if (t.track_quest == track_quest) return &t;
+        }
+        return nullptr;
+    }
+    bool destiny_milestone(int64_t objective) const { return milestones_.count(objective) != 0; }
     size_t quests() const { return d_.quests.size(); }
     const content::QuestData& data() const { return d_; }
 
@@ -115,6 +127,7 @@ public:
 
 private:
     content::QuestData d_;
+    std::set<int64_t>  milestones_;   // the Destiny tracks' milestone objectives
 };
 
 }  // namespace aoc::worldd::quest

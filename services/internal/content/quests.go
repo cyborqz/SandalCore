@@ -22,6 +22,8 @@ import (
 //	item_quest        the quests an item is bound to: it is deleted when the quest is taken out of the log ('delete_all', 'delete_one'), or the quest is taken out of the log when the
 //	                  item is deleted ('abandon')
 //	item_crate        (version 27) the crate type of each crate item (ItemRecordBase.CrateId): what a construction deposit counts for a crate objective
+//	destiny_track     the six tracks of the Destiny window in the DestinySystem record's order: the quest the client names for a track (its _02_Root), the track's own quest (the SubQuest
+//	                  its first objective starts: the quest the window shows and keys its instance guid on), the skill tree and the milestone objectives (a JSON list)
 //	shrine_icd        (version 27) the Emberspring interactable definitions of the places, found by name (an Interact objective names the definition of the Emberspring to attune to)
 //	quest_kill_set    (version 27) the creatures of each population set a Kill objective names (npc_set_member, only for the sets objectives name): a kill counts for the sets its creature belongs to
 //
@@ -40,7 +42,8 @@ import (
 //	                         Interact {"comp": [...], "actor": [...]}, Collect {"cty": type, "items": [...], "tags": [...], "rar": [...]},
 //	                         GoTo {"loc": [{"x", "y", "z", "r", "done": 1, "hid": 1, "id": location id}], "area": 1},
 //	                         TurnIn {"items": [...], "tags": [...], "src": [...], "any": 1, "crate": 1, "ct": [crate types], "ci": [crate items], "qv": variable, "inc": 1},
-//	                         EventNotification {"nt": type, "recipe": id}, UseAbility {"ab": [...]}, Custom {"rule": a requirement of one criterion}}
+//	                         EventNotification {"nt": type, "recipe": id}, UseAbility {"ab": [...]}, Custom {"rule": a requirement of one criterion}},
+//	                         "sq": what a SubQuest objective starts {"q": the quest, "t": the instantiation type (AutoGrant ...), "w": 1 when the objective waits for that quest to finish}
 const QuestDDL = `
 CREATE TABLE quest (
     guid             INTEGER PRIMARY KEY,
@@ -100,6 +103,13 @@ CREATE TABLE item_quest (
 CREATE TABLE item_crate (
     item_guid  INTEGER PRIMARY KEY,
     crate_guid INTEGER NOT NULL            -- the CrateRecordBase the item is a crate of (ItemRecordBase.CrateId)
+);
+CREATE TABLE destiny_track (
+    ord         INTEGER PRIMARY KEY,       -- the track's place in the DestinySystem record
+    track_quest INTEGER NOT NULL,          -- DestinyTrackQuest: the quest the client's request names (First Steps: Destiny_Novice_FirstStep_02_Root)
+    quest_guid  INTEGER NOT NULL,          -- the quest its first objective starts (a SubQuest): the track's own quest (Destiny_Novice_FirstStep_02); 0 when there is none
+    skill_tree  INTEGER NOT NULL,          -- DestinyTrackSkillTree
+    milestones  TEXT NOT NULL              -- JSON list of the track's MilestoneRewardObjectives
 );
 CREATE TABLE shrine_icd (
     icd_guid    INTEGER PRIMARY KEY,       -- an InteractableComponentDef named ICD_<Place>_Attunable_Respawn_Shrine
@@ -161,7 +171,7 @@ CREATE TABLE dialogue_turnin (
 `
 
 // QuestTables are the tables QuestDDL creates, in the DDL's order.
-var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box", "item_reward_selection", "dialogue_turnin"}
+var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "destiny_track", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box", "item_reward_selection", "dialogue_turnin"}
 
 func createQuests(db *sql.DB) error {
 	if _, err := db.Exec(QuestDDL); err != nil {

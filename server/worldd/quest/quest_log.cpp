@@ -323,6 +323,26 @@ Started QuestLog::start(const content::QuestRow& def, double now, int64_t source
     return out;
 }
 
+void QuestLog::link_parents(const content::QuestData& book) {
+    std::map<int64_t, Guid128> parents;   // a quest record -> the instance of the quest that starts it
+    for (const QuestInstance& p : instances_) {
+        const auto def = book.quests.find(p.record);
+        if (def == book.quests.end()) continue;
+        for (size_t i = 0; i < p.objectives.size() && i < def->second.objectives.size(); ++i) {
+            const ObjectiveState& o = p.objectives[i];
+            const content::QuestObjectiveRow& r = def->second.objectives[i];
+            if (r.sub_quest != 0 && r.sub_quest != p.record && (o.active || o.completed) && !o.failed) parents.emplace(r.sub_quest, p.guid);
+        }
+    }
+    for (QuestInstance& q : instances_) {
+        const auto it = parents.find(q.record);
+        const Guid128 now = it == parents.end() ? Guid128{} : it->second;
+        if (q.parent == now) continue;
+        q.parent = now;
+        q.wire_dirty = true;   // (not `changed_`: the link is not saved)
+    }
+}
+
 bool QuestLog::remove(int64_t record) {
     for (auto it = instances_.begin(); it != instances_.end(); ++it) {
         if (it->record != record) continue;
@@ -472,6 +492,7 @@ size_t QuestLog::load(const svc::SavedQuestLog& saved, const content::QuestData&
     for (const svc::SavedVariable& v : saved.variables) {
         if (!v.name.empty() && v.value != 0) variables_[v.name] = v.value;
     }
+    link_parents(book);
     changed_ = dropped != 0;
     return dropped;
 }

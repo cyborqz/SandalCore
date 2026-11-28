@@ -504,6 +504,10 @@ public:
     /// default).  The admin API (worldctl) does not depend on it: it is the operator's, behind the service token.
     void set_gm_commands(bool on) { gm_commands_ = on; }
     bool gm_commands() const { return gm_commands_; }
+    /// Quests, the Destiny window: whether a character is given the Destiny tracks its level opens (quest/destiny.h) and whether the SubQuest objectives start their quests (the tracks are
+    /// made of them).  worldd turns it on; a test of the quests that is not about the tracks leaves it off, so the real data's characters and test quests keep the logs those tests expect.
+    void set_destiny_tracks(bool on) { destiny_tracks_ = on; }
+    bool destiny_tracks() const { return destiny_tracks_; }
     /// The game's reactions (a weapon's finisher effects, the Bard's Resonance and melodies) run unless this is turned off (--no-reactions / AOC_NO_REACTIONS=1).
     void set_reactions_enabled(bool on) { reactions_enabled_ = on; }
     bool reactions_enabled() const { return reactions_enabled_; }
@@ -753,6 +757,7 @@ private:
     mutable world::TownFloor             town_floor_;           // the towns in a bowl (town_floor())
     mutable uint64_t                     town_floor_stamp_ = ~0ull;   // the node people it was built from (their made + removed counts)
     bool                                 gm_commands_ = false;
+    bool                                 destiny_tracks_ = false;   // quests: the Destiny tracks are given at the login and by the levels (set_destiny_tracks)
     bool                                 reactions_enabled_ = true;
     GmPort*                              gm_port_ = nullptr;
     uint64_t                             respawns_made_ = 0;

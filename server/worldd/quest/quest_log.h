@@ -84,6 +84,7 @@ struct QuestInstance {
     double  start_time = 0;         // when it started, in the world's seconds
     double  end_time = 0;           // quests, slice 2: when it was completed or failed (not saved: a quest found done at the login is taken out of the log at once)
     int64_t source = 0;             // the NPC (population instance) that gave it, 0: none
+    Guid128 parent;                 // the instance of the quest whose SubQuest objective started it (zero: none in the log); found from the data, never saved (QuestLog::link_parents)
     std::vector<ObjectiveState> objectives;
     // what the client was told: the replication ids of its two items (kIndexNone while it was not sent), and whether it has to be sent again
     int32_t cache_id = -1, vars_id = -1;
@@ -129,6 +130,10 @@ public:
     /// Takes the quest: the instance joins the log (its objectives as the record says, then its start actions).  The caller has asked can_start.  `run_actions` false: the instance only (the
     /// quest engine runs the start actions itself, all of them).
     Started start(const content::QuestRow& def, double now, int64_t source, bool run_actions = true);
+
+    /// Finds each quest's parent again: the quest of the log with an objective that starts it (a SubQuest objective that is active or done).  The client's cache item carries the parent's
+    /// guid.  Nothing is saved (the data and the log say it again after a relog); an instance whose parent changed goes to the client again.
+    void link_parents(const content::QuestData& book);
 
     /// Takes the quest out of the log without counting it as finished (an abandon, a fail).  False when it is not in the log.
     bool remove(int64_t record);

@@ -62,6 +62,7 @@
 #include "bootstrap/constants.h"
 #include "bootstrap/player_setup.h"
 #include "market/window.h"
+#include "protocol/repl/destiny_rpc.h"
 #include "protocol/repl/leveling.h"
 #include "protocol/repl/replicator.h"
 #include "protocol/repl/skill_rpc.h"
@@ -465,6 +466,8 @@ public:
     std::optional<Send> node_summary(const repl::NodeSummary& summary);
     std::optional<Send> siege_summary(const repl::SiegeSummary& summary);
     std::optional<Send> siege_cooldowns();
+    /// The PlayerController's ClientReceiveDestinyClientData (quest/destiny.h): the Destiny window's tracks.  nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> destiny_client_data(std::span<const repl::DestinyTrackReply> tracks);
 
     /// The reply to ServerUpdateAccountCombatSettings (pkt#620): the PlayerController's
     /// CharacterInGameSettings.CombatSettings.* properties the caller extracted from the client's request, as an update

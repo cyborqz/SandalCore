@@ -3377,6 +3377,12 @@ bool parse_objective_detail(const std::string& text, QuestObjectiveRow& o) {
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
     if (j.is_discarded() || !j.is_object()) return false;
     o.show_dialogue = json_flag(j, "sd");
+    if (const auto sq = j.find("sq"); sq != j.end()) {   // a SubQuest objective: the quest it starts, how, and whether it waits for it
+        if (!sq->is_object()) return false;
+        o.sub_quest = json_int(*sq, "q");
+        o.sub_kind = json_str(*sq, "t");
+        o.sub_wait = json_flag(*sq, "w");
+    }
     o.timeout = json_num(j, "to");
     o.succeed_on_timeout = json_flag(j, "so");
     if (const auto it = j.find("ar"); it != j.end() && !parse_requirement_object(*it, o.activation)) return false;
@@ -3441,6 +3447,15 @@ bool parse_objective_detail(const std::string& text, QuestObjectiveRow& o) {
     o.notify = json_str(*d, "nt");
     o.recipe = json_int(*d, "recipe");
     if (!json_ints(*d, "ab", o.abilities)) return false;
+    o.in_combat = json_flag(*d, "cmb");
+    if (!json_strings(*d, "tg", o.ability_tags)) return false;
+    if (const auto gq = d->find("gq"); gq != d->end()) {   // a Kill objective's tag query: {"tok": [...], "tags": [...]}
+        if (!gq->is_object()) return false;
+        auto q = std::make_shared<TagQuery>();
+        if (!json_ints(*gq, "tok", q->tok) || !json_strings(*gq, "tags", q->tags)) return false;
+        q->present = q->tok.size() >= 2 && q->tok[1] != 0;
+        if (!q->tags.empty()) o.kill_query = std::move(q);   // a query that names no tag is no query: "all tags match" of none is true, so it would count every kill (the objective counts by its instances and sets alone)
+    }
     if (const auto rule = d->find("rule"); rule != d->end() && !parse_requirement_object(*rule, o.rule)) return false;
     return true;
 }
@@ -3558,6 +3573,23 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
                 out.turn_ins[r.node] = std::move(r);
             }
             if (step != SQLITE_DONE) return failed("dialogue_turnin");
+        }
+    }
+    {   // the Destiny window's tracks (contentc's destiny_track): a content.db built before it has none and the window shows no track
+        Stmt q(db_, "SELECT track_quest, quest_guid, skill_tree, milestones FROM destiny_track ORDER BY ord");
+        if (q.ok()) {
+            int step;
+            while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+                sqlite3_stmt* s = q.get();
+                if (!column_is_int(s, 0) || !column_is_int(s, 1) || !column_is_int(s, 2)) return unread("destiny_track", 0);
+                DestinyTrackRow r;
+                r.track_quest = sqlite3_column_int64(s, 0);
+                r.quest = sqlite3_column_int64(s, 1);
+                r.skill_tree = sqlite3_column_int64(s, 2);
+                if (!parse_guid_list(column_text(s, 3), r.milestones)) return unread("destiny_track", r.track_quest);
+                out.destiny_tracks.push_back(std::move(r));
+            }
+            if (step != SQLITE_DONE) return failed("destiny_track");
         }
     }
     {

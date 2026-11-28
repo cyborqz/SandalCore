@@ -91,6 +91,7 @@ std::optional<ElementState> cache_item(const repl::FastArrayLayout& layout, cons
     ok = top.set(es, "Quests.QuestObjectiveMarker.Center", zero_vector()) && ok;
     ok = top.set(es, "Quests.QuestObjectiveMarker.bCompletesGoToObjective", Value::boolean(true)) && ok;
     ok = top.set_guid(es, "Quests.InstanceGuid", q.guid) && ok;
+    if (!q.parent.zero()) ok = top.set_guid(es, "Quests.ParentInstanceGuid", q.parent) && ok;   // a quest a SubQuest objective started names the quest that started it
     ok = top.set(es, "Quests.RecordId", Value::i64(q.record)) && ok;
     const auto objectives = top.sub("Quests.Objectives");
     if (!objectives) return std::nullopt;

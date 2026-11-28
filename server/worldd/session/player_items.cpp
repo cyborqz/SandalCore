@@ -159,6 +159,12 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     if (outcome.equipment_changed) sync_cargo(conn, last_now_);
     // a resource bag worn, replaced or taken off: its container opens or closes on the client now, after the events that moved the bag
     for (const items::BagChange& c : outcome.bags) update_resource_container(conn, c);
+    // quests: an item put on counts for a Collect objective of the kind Equip (after the client has been told what moved)
+    if (outcome.equipment_changed) {
+        for (const items::Event& e : outcome.events) {
+            if (e.type == repl::StorageEventType::Add && e.container == svc::ItemContainer::Equipment) quest_collected(conn, "Equip", e.item.item_record_id, 1, last_now_);
+        }
+    }
 }
 
 void PlayerSession::follow_linked_stack(Connection& conn, const std::vector<bootstrap::ItemEvent>& events) {

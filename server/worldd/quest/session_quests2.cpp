@@ -31,6 +31,8 @@
 #include "items/acquired.h"
 #include "vendor/node_tax.h"
 #include "vendor/sell_rules.h"
+#include "quest/destiny.h"
+#include "session/player_combat_side.h"
 #include "quest/quest_wire.h"
 #include "quest/registry_points.h"
 #include "world/zoi_surface.h"
@@ -78,9 +80,11 @@ void PlayerSession::quest_engine(Connection& conn, Clock::time_point now, const 
     });
     std::vector<quest::Effect> effects;
     quest::Engine engine(quest_log_, *qb, ev, *facts, effects, quest_clock(now));
+    engine.set_sub_quests(world_->destiny_tracks());   // (the SubQuest objectives start their quests in a world that gives the Destiny tracks)
     fn(engine);
     apply_quest_effects(conn, effects, now);
     if (quest_log_.wire_pending()) quest_sync(conn, why);
+    push_destiny(conn);
 }
 
 void PlayerSession::apply_quest_effects(Connection& conn, std::vector<quest::Effect>& effects, Clock::time_point now) {
@@ -92,6 +96,7 @@ void PlayerSession::apply_quest_effects(Connection& conn, std::vector<quest::Eff
     for (const quest::Effect& e : effects) {
         switch (e.kind) {
             case quest::Effect::Kind::GrantTable:
+                if (quest_grants_.size() < 64) quest_grants_.insert(quest_grants_.end(), e.tables.begin(), e.tables.end());
                 grant_quest_rewards(conn, e.tables, "a quest action", now, e.quest);
                 break;
             case quest::Effect::Kind::GrantRewards:
@@ -125,11 +130,12 @@ void PlayerSession::apply_quest_effects(Connection& conn, std::vector<quest::Eff
                 const content::QuestRow* def = qb ? qb->quest(e.quest) : nullptr;
                 const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
                 if (!def || !book) break;
+                if (e.parent != 0 && quest_log_.find(def->guid)) break;   // (a SubQuest objective asks again while the quest it asked for waits behind this effect: nothing to say)
                 const auto facts = dialogue_facts(nullptr);
                 dialogue::Evaluator ev(*book, *facts);
                 const quest::Create c = quest_log_.can_start(def, ev, /*bypass_rules=*/false);
-                if (c == quest::Create::Ok) start_quest(conn, *def, 0, "a quest action started it", now);
-                else spdlog::log(level_for(quests_logged_, 200), "[session] {}: a quest action would start quest {}: not taken, {}", name(), def->name, quest::create_name(c));
+                if (c == quest::Create::Ok) start_quest(conn, *def, 0, e.parent != 0 ? "a SubQuest objective started it" : "a quest action started it", now);
+                else spdlog::log(level_for(quests_logged_, 200), "[session] {}: {} would start quest {}: not taken, {}", name(), e.parent != 0 ? "a SubQuest objective" : "a quest action", def->name, quest::create_name(c));
                 break;
             }
             case quest::Effect::Kind::Told:
@@ -306,7 +312,75 @@ void PlayerSession::run_talk_actions(Connection& conn, const dialogue::Result& r
 
 void PlayerSession::quest_kill(Connection& conn, const combat::KillReward& k, Clock::time_point now) {
     if (!quests_on_ || k.instance == 0 || quest_log_.instances().empty()) return;
-    quest_engine(conn, now, "a kill", [&](quest::Engine& eng) { eng.kill(k.instance, 0); });
+    // every kill reaches the engine: it also hands out the quest items the creature drops for an active objective of ANY kind (a Collect objective's drops included); only the creature's
+    // tags (a lookup in the population data) are worked out when an active Kill objective asks by tag query
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    std::set<std::string> tags;
+    if (qb && quest::listens(quest_log_, *qb, "Kill", [](const content::QuestObjectiveRow& r) { return r.kill_query != nullptr; })) tags = creature_tags(k);
+    quest_engine(conn, now, "a kill", [&](quest::Engine& eng) { eng.kill(k.instance, 0, tags); });
+}
+
+std::set<std::string> PlayerSession::creature_tags(const combat::KillReward& k) const {
+    std::set<std::string> out;
+    const auto add = [&out](std::string tag) {   // a tag and every parent of it, in lower case
+        std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        while (!tag.empty()) {
+            out.insert(tag);
+            const size_t dot = tag.rfind('.');
+            if (dot == std::string::npos) break;
+            tag.resize(dot);
+        }
+    };
+    add("character");   // every creature is a Character (the parent of the creature kinds: character.beast.wolf ...)
+    const spawns::AreaReport* area = world_ ? world_->area_report() : nullptr;
+    const content::PopulationData* data = area ? area->data.get() : nullptr;
+    if (!data) return out;
+    // the population's tags the way the spawn filter reads them: the instance's, its asset sets' and the asset's
+    if (const auto it = data->instances.find(k.instance); it != data->instances.end()) {
+        for (const std::string& t : it->second.tags) add(t);
+        for (const int64_t set : it->second.asset_sets) {
+            if (const auto st = data->asset_set_tags.find(set); st != data->asset_set_tags.end()) {
+                for (const std::string& t : st->second) add(t);
+            }
+        }
+    }
+    const world::WorldActor* actor = registry_ && k.npc != 0 ? registry_->find(k.npc) : nullptr;
+    if (actor) {
+        if (const auto it = data->assets.find(actor->npc.asset_guid); it != data->assets.end()) {
+            for (const std::string& t : it->second.tags) add(t);
+        }
+    }
+    return out;
+}
+
+void PlayerSession::quest_ability(Connection& conn, int64_t ability, Clock::time_point now) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!quests_on_ || !qb || ability == 0 || quest_log_.instances().empty()) return;
+    const bool listened = quest::listens(quest_log_, *qb, "UseAbility", [ability](const content::QuestObjectiveRow& r) {
+        return std::find(r.abilities.begin(), r.abilities.end(), ability) != r.abilities.end();
+    });
+    if (!listened) return;
+    quest_engine(conn, now, "an ability was used", [&](quest::Engine& eng) { eng.ability(ability, combat_flag_); });
+}
+
+void PlayerSession::quest_collected(Connection& conn, const char* how, int64_t item, int64_t count, Clock::time_point now) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!quests_on_ || !qb || item == 0 || count <= 0 || quest_log_.instances().empty()) return;
+    const std::string kind = how;
+    const bool listened = quest::listens(quest_log_, *qb, "Collect", [&](const content::QuestObjectiveRow& r) {
+        return r.collect_type == kind && std::find(r.items.begin(), r.items.end(), item) != r.items.end();
+    });
+    if (!listened) return;
+    quest_engine(conn, now, "an item was put on or sold", [&](quest::Engine& eng) { eng.collected(kind, item, count); });
+}
+
+void PlayerSession::kill_for_tests(Connection& conn, const combat::KillReward& kill, Clock::time_point now) {
+    apply_kill(conn, kill, now);   // (the combat world gives a kill through the tick; the area test world has no combat world)
+}
+
+void PlayerSession::set_fight_for_tests(bool in_fight) {
+    if (combat_side_) combat_side_->wants_in_combat = in_fight;
+    combat_flag_ = in_fight;   // (the bit the quests read: the combat tick sets it from the world's timer, and the area test world has no such timer)
 }
 
 void PlayerSession::quest_shrine(Connection& conn, int64_t place, Clock::time_point now) {
@@ -424,4 +498,86 @@ void PlayerSession::tick_quests(Connection& conn, Clock::time_point now) {
     });
 }
 
+// ---- the Destiny window ----------------------------------------------------------------------------------------------------------------------------------------
+
+void PlayerSession::seed_destiny(Connection& conn, Clock::time_point now) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
+    if (!quests_on_ || !qb || !book || !world_->destiny_tracks()) return;
+    const auto facts = dialogue_facts(nullptr);
+    dialogue::Evaluator ev(*book, *facts);
+    for (const content::QuestRow* def : quest::destiny_seeds(*qb, quest_log_, ev)) {
+        if (quest_log_.can_start(def, ev, /*bypass_rules=*/false) != quest::Create::Ok) continue;   // (a quest started before this one may have taken it)
+        ++destiny_seeded_;
+        start_quest(conn, *def, 0, "a Destiny track the character's level opens", now);
+    }
+}
+
+std::vector<repl::DestinyTrackReply> PlayerSession::destiny_reply(const std::vector<int64_t>& asked) const {
+    std::vector<repl::DestinyTrackReply> reply;
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!qb) return reply;
+    for (const quest::DestinyAnswer& a : quest::destiny_answers(*qb, quest_log_, asked)) {
+        repl::DestinyTrackReply r;
+        r.track_quest = a.track_quest;
+        r.guid[0] = a.guid.a;
+        r.guid[1] = a.guid.b;
+        r.guid[2] = a.guid.c;
+        r.guid[3] = a.guid.d;
+        r.completed = a.completed;
+        r.total = a.total;
+        r.active = a.active;
+        reply.push_back(r);
+    }
+    return reply;
+}
+
+void PlayerSession::push_destiny(Connection& conn) {
+    if (destiny_asked_.empty() || !quests_on_ || !world_ || !world_->quests()) return;
+    std::vector<repl::DestinyTrackReply> reply = destiny_reply(destiny_asked_);
+    if (reply == destiny_told_ || !room_for(1)) return;
+    destiny_told_ = reply;
+    ++destiny_answers_;
+    spdlog::log(level_for(destiny_logged_, 20), "[session] {}: the Destiny window's tracks changed: the client is told again ({} track(s))", name(), reply.size());
+    queue("ClientReceiveDestinyClientData", [reply = std::move(reply)](bootstrap::PlayerBootstrap& pb) { return pb.destiny_client_data(reply); }, conn, /*must_build=*/true);
+}
+
+void PlayerSession::on_destiny_client_data(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!quests_on_ || !qb) {
+        ++destiny_refused_;
+        spdlog::log(level_for(destiny_logged_, 20), "[session] {}: ServerGetDestinyClientData is ignored: quests are off for this character", name());
+        return;
+    }
+    if (!within_budget(destiny_budget_, "ServerGetDestinyClientData", now) || !room_for(1)) return;
+    // the tracks the client names, in its order; a call that does not read names none (and gets the empty answer: the window keeps its tracks locked)
+    const std::vector<int64_t> asked = repl::parse_destiny_request(rpc.call, quest::kMaxDestinyRequest);
+    std::vector<repl::DestinyTrackReply> reply = destiny_reply(asked);
+    destiny_asked_ = asked;
+    destiny_told_ = reply;
+    ++destiny_answers_;
+    spdlog::log(level_for(destiny_logged_, 20), "[session] {}: the Destiny window asks for {} track(s){}: {} answered, {} of them open", name(), asked.size(), rpc.call.decoded ? "" : " (the call does not read)", reply.size(),
+                std::count_if(reply.begin(), reply.end(), [](const repl::DestinyTrackReply& r) { return r.active; }));
+    queue("ClientReceiveDestinyClientData", [reply = std::move(reply)](bootstrap::PlayerBootstrap& pb) { return pb.destiny_client_data(reply); }, conn, /*must_build=*/true);
+}
+
 }}  // namespace aoc::worldd
+
+namespace aoc::worldd::bootstrap {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+
+std::optional<Send> PlayerBootstrap::destiny_client_data(std::span<const repl::DestinyTrackReply> tracks) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveDestinyClientData");
+    if (!rpc) return std::nullopt;
+    const std::optional<repl::RpcParams> params = repl::destiny_client_data_params(*rpc, tracks);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientReceiveDestinyClientData";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientReceiveDestinyClientData", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+}  // namespace aoc::worldd::bootstrap
