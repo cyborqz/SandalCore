@@ -1565,6 +1565,10 @@ public:
     /// `limit` rows from the `offset`th.  `total` is how many match.  `error` is set when a query fails.
     std::vector<ItemListRow> list_items(const std::string& filter, size_t limit, size_t offset, size_t& total, std::string& error) const;
 
+    /// The client's English bad-word list (contentc version 52: the bad_word table, read from the game's own config files), in the file's order.
+    /// `present` is false, and the list empty with `error` empty, in a content.db older than version 52 (no such table); `error` is set when the query fails.
+    std::vector<std::string> bad_words(bool& present, std::string& error) const;
+
     /// Gathering stage 3 (contentc version 14): the grid of a resource bag item.  nullopt with `error` empty for an item that is no resource bag; with `error` set when a query
     /// failed or the rows are not what contentc writes (a dimension below 1 or above the 255 cells a container holds, a cell outside the grid).
     std::optional<ResourceBagRecord> resource_bag(int64_t item_guid, std::string& error) const;

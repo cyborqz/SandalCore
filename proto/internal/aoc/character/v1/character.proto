@@ -85,6 +85,8 @@ service CharacterService {
   // Player trading (migration 0032): commits a two-character trade in ONE transaction, writing both characters'
   // inventories, wallets, processing jobs, known recipes and warehouses together with an idempotency record.
   rpc CommitPlayerTrade(CommitPlayerTradeRequest) returns (CommitPlayerTradeResponse);
+  // Marketplace (migration 0034): a seller's description of his storefront at one Marketplace, and the Marketplace's page version, in ONE transaction.
+  rpc SetStorefrontDescription(SetStorefrontDescriptionRequest) returns (SetStorefrontDescriptionResponse);
 }
 
 message Position {
@@ -640,6 +642,43 @@ message ListMarketListingsRequest {}
 message ListMarketListingsResponse {
   repeated MarketListing listings = 1;
   repeated NodeMarketTax node_taxes = 2;   // the rate of every node that has a row (a node with none charges the default, 0.5)
+  repeated StorefrontText storefronts = 3;       // migration 0034: every stored storefront description
+  repeated NodeHeaderRaises node_headers = 4;    // migration 0034: the count of changes of every node whose storefront pages changed
+}
+
+// Marketplace (migration 0034): one storefront's stored description: the market node, the seller's character id and the text (1 to 50 characters).
+message StorefrontText {
+  int64 node = 1;
+  string seller_id = 2;
+  string description = 3;
+}
+
+// Marketplace (migration 0034): how many times a node's storefront pages changed. The page version a client holds is the game's own 1843 plus this count.
+message NodeHeaderRaises {
+  int64 node = 1;
+  int64 raises = 2;
+}
+
+// Marketplace (migration 0034): how SetStorefrontDescription ended. The call is answered Ok with an outcome; a request the rules refuse is InvalidArgument, an unknown character
+// is NotFound.
+enum StorefrontOutcome {
+  STOREFRONT_OUTCOME_UNSPECIFIED = 0;   // never sent: a service of an older version, or a bug
+  STOREFRONT_OUTCOME_DONE = 1;          // the text was written (or deleted) and the node's count raised
+  STOREFRONT_OUTCOME_UNCHANGED = 2;     // the storefront held exactly this text already: nothing was written
+  STOREFRONT_OUTCOME_NO_LISTING = 3;    // the seller has no listing at the node: nothing was written
+}
+
+// Marketplace (migration 0034): a seller's storefront description at one Marketplace. In ONE transaction it raises the node's count, checks that the seller has a listing at the
+// node and writes the text; an empty description deletes it. Two edits at once end with the last one, whole. description is 0 to 50 UTF-16 code units with no control character.
+message SetStorefrontDescriptionRequest {
+  string character_id = 1;   // the seller
+  int64 node = 2;            // the market node
+  string description = 3;
+}
+message SetStorefrontDescriptionResponse {
+  StorefrontOutcome outcome = 1;
+  string description = 2;      // the text the storefront holds now ("" for none)
+  int64 header_raises = 3;     // the node's count now
 }
 
 // Marketplace (migration 0031): a node's sales tax: the rate the node charges on a sale (0.1 to 1; the game's default is 0.5) and the copper its sales have paid in.

@@ -70,6 +70,8 @@ public:
     BuyResult buy_listing(const BuyRequest& request) override;
     RemoveResult remove_listing(const RemoveRequest& request) override;
     ExpireResult expire_listing(const std::string& listing_id, const std::string& item_name) override;
+    /// Marketplace storefront descriptions (migration 0034): SetStorefrontDescription.
+    StorefrontResult set_storefront(const StorefrontRequest& request) override;
     MailClaimResult claim_mail(const std::string& character_id, const std::vector<MailClaim>& claims, const std::vector<MoneyClaim>& money_mails,
                                const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
                                const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) override;

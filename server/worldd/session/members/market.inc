@@ -6,8 +6,10 @@
 //  Included at the end of PlayerSession (session/player_session.h); it sets its own public: and private:.
 // ============================================================================
 public:
-    /// Marketplace: the steps (a listing's save, a purchase, a removal) the worker still writes (a test runs ticks until it is 0).
-    size_t market_pending() const { return market_pending_.size(); }
+    /// Marketplace: the steps (a listing's save, a purchase, a removal, a storefront description) the worker still writes (a test runs ticks until it is 0).
+    size_t market_pending() const { return market_pending_.size() + market_describes_.size(); }
+    /// Marketplace: the storefront edits of this session the worker still writes.
+    size_t market_describing() const { return market_describes_.size(); }
     /// Marketplace: true while a step's save is in flight; a bag save is held until it answers.
     bool market_save_in_flight() const { return market_save_in_flight_; }
     /// Marketplace: the purchases and removals of a cart that wait for the step before them (market/market_sales.inc).
@@ -33,7 +35,22 @@ private:
         int32_t                          quantity = 0;   // a purchase: the units asked for
     };
 
+    /// A seller's edit of his storefront's description that the worker still writes: the ticket the store answers it with, the text as sent (a refusal carries it) and the market.
+    struct PendingDescribe {
+        uint64_t    ticket = 0;
+        std::string text;
+        int64_t     node = 0;
+    };
+
     void push_storefront_pages(Connection& conn, int64_t node);
+    // the search and the storefront descriptions (market/market_storefronts.inc)
+    void on_market_search(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    void on_market_header_update(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Sends `headers` as pages of market::kStorefrontPageSize, bComplete on the last (one empty page for none), each page saying `echo`.
+    void send_storefront_pages(Connection& conn, int64_t node, std::vector<protocol::repl::MarketHeader> headers, const protocol::repl::MarketPageEcho& echo, const char* what);
+    void market_answer_header_update(Connection& conn, const std::string& text, uint8_t response);
+    /// Takes the answers of the edits the worker has written and tells the client of each.
+    void market_run_describes(Connection& conn, Clock::time_point now);
     void market_resync(Connection& conn, Clock::time_point now);
     bool market_hold_bag_save(const char* why);
     void run_market(Connection& conn, Clock::time_point now);
@@ -64,6 +81,10 @@ private:
     uint8_t market_refusal_code(const market::ListingSaveAnswer& answer) const;
 
     std::deque<PendingMarket>   market_pending_;          // the steps in flight, oldest first (one at a time)
+    std::deque<PendingDescribe> market_describes_;        // the storefront edits in flight, oldest first (market::kMaxQueuedDescribes at most)
+    /// ServerSearchMarketplaceHeaders: the game itself lets one search through when a second has passed since the last and answers nothing to the others.
+    RequestBudget               market_search_budget_{1, std::chrono::milliseconds(1000)};
+    size_t                      market_search_dropped_ = 0;   // the searches within a second of the one before
     std::deque<QueuedMarket>    market_queue_;            // the steps of a cart that wait for the one in flight, in the order of the lines (market::kMaxQueuedSteps at most)
     /// ServerRequestMarketplaceItemPurchase and ServerRequestMarketplaceItemRemoval: a cart is sent in one frame, so the burst holds a whole cart and the answers 3 of its lines past the
     /// line (the item budget of eight would drop the lines past the eighth without any answer); then ten a second.

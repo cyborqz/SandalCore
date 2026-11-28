@@ -412,11 +412,50 @@ struct NodeMarketTax {
     bool operator==(const NodeMarketTax&) const = default;
 };
 
+/// Marketplace storefront descriptions (migration 0034): one stored description (aoc.character.v1.StorefrontText): the market node, the seller's character id and the text
+/// (1 to 50 characters; a storefront with none has no row).
+struct StorefrontText {
+    int64_t     node = 0;
+    std::string seller_id;
+    std::string description;
+    bool operator==(const StorefrontText&) const = default;
+};
+
+/// How many times a node's storefront pages changed (aoc.character.v1.NodeHeaderRaises); the page version a client holds is the game's own 1843 plus this.
+struct NodeHeaderRaises {
+    int64_t node = 0;
+    int64_t raises = 0;
+    bool operator==(const NodeHeaderRaises&) const = default;
+};
+
 struct MarketListingsResult {
     CallStatus status = CallStatus::Failed;
     std::string reason;   // the service's message when status is not Ok; empty for Ok
     std::vector<MarketListing> listings;
     std::vector<NodeMarketTax> node_taxes;   // the rate of every node that has one
+    std::vector<StorefrontText> storefronts;     // every stored storefront description
+    std::vector<NodeHeaderRaises> node_headers;  // the count of page changes of every node that has one
+};
+
+/// Marketplace storefront descriptions: how SetStorefrontDescription ended when the call itself is Ok.  Done: the text was written (or deleted) and the node's count raised;
+/// Unchanged: the storefront held this text already, nothing was written (a repeat of an edit whose answer was lost); NoListing: the seller has no listing at the node, nothing was
+/// written.
+enum class StorefrontOutcome : uint8_t { Unspecified, Done, Unchanged, NoListing };
+
+/// Marketplace storefront descriptions: a seller's edit (aoc.character.v1.SetStorefrontDescriptionRequest); an empty description clears the text.
+struct StorefrontRequest {
+    std::string character_id;   // the seller
+    int64_t     node = 0;
+    std::string description;
+    bool operator==(const StorefrontRequest&) const = default;
+};
+
+struct StorefrontResult {
+    CallStatus        status = CallStatus::Failed;
+    std::string       reason;                  // the service's message when status is not Ok
+    StorefrontOutcome outcome = StorefrontOutcome::Unspecified;
+    std::string       description;             // the text the storefront holds now ("" for none)
+    int64_t           header_raises = 0;       // the node's count of page changes now
 };
 
 struct MarketSaveResult {
@@ -809,6 +848,13 @@ public:
     virtual ExpireResult expire_listing(const std::string& listing_id, const std::string& item_name) {
         (void)listing_id;
         (void)item_name;
+        return {};
+    }
+    /// Marketplace storefront descriptions (migration 0034): a seller's edit of his storefront's description at one market, in ONE transaction that also raises the market's page
+    /// version.  Ok with an outcome (Done, Unchanged, NoListing); Refused: a text or a node the rules refuse; NotFound: no such character; Unsupported: the service keeps no
+    /// descriptions.  Blocks; the caller is the market worker.
+    virtual StorefrontResult set_storefront(const StorefrontRequest& request) {
+        (void)request;
         return {};
     }
     /// Mail: ClaimMailItems that also takes the money of the mails named in `money_mails` into the purse (the `wallet` is the purse after it), in the same ONE transaction.  Each money

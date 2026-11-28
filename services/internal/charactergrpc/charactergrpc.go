@@ -165,6 +165,15 @@ type TradeStore interface {
 
 var _ TradeStore = (*character.Store)(nil)
 
+// StorefrontStore is the part of character.Store that keeps the storefront descriptions and the nodes' page counts (migration 0034). A store without it refuses
+// SetStorefrontDescription and sends no description and no count.
+type StorefrontStore interface {
+	SetStorefrontDescription(ctx context.Context, characterID string, node int64, description string) (character.StorefrontResult, error)
+	MarketStorefronts(ctx context.Context) ([]character.StorefrontText, []character.NodeHeaderRaises, error)
+}
+
+var _ StorefrontStore = (*character.Store)(nil)
+
 // NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
 // character). A store without it cannot answer GetCharacterByName.
 type NameStore interface {
@@ -738,7 +747,47 @@ func (s *Server) ListMarketListings(ctx context.Context, _ *characterv1.ListMark
 			resp.NodeTaxes = append(resp.NodeTaxes, &characterv1.NodeMarketTax{Node: t.Node, Rate: t.Rate, CollectedCopper: t.CollectedCopper})
 		}
 	}
+	if fronts, ok := s.store.(StorefrontStore); ok {
+		texts, raises, err := fronts.MarketStorefronts(ctx)
+		if err != nil {
+			return nil, toStatus(ctx, err)
+		}
+		for _, t := range texts {
+			resp.Storefronts = append(resp.Storefronts, &characterv1.StorefrontText{Node: t.Node, SellerId: t.SellerID, Description: t.Description})
+		}
+		for _, r := range raises {
+			resp.NodeHeaders = append(resp.NodeHeaders, &characterv1.NodeHeaderRaises{Node: r.Node, Raises: r.Raises})
+		}
+	}
 	return resp, nil
+}
+
+// storefrontOutcomeOf is the wire's outcome of SetStorefrontDescription's.
+func storefrontOutcomeOf(o character.StorefrontOutcome) characterv1.StorefrontOutcome {
+	switch o {
+	case character.StorefrontDone:
+		return characterv1.StorefrontOutcome_STOREFRONT_OUTCOME_DONE
+	case character.StorefrontUnchanged:
+		return characterv1.StorefrontOutcome_STOREFRONT_OUTCOME_UNCHANGED
+	case character.StorefrontNoListing:
+		return characterv1.StorefrontOutcome_STOREFRONT_OUTCOME_NO_LISTING
+	}
+	return characterv1.StorefrontOutcome_STOREFRONT_OUTCOME_UNSPECIFIED
+}
+
+// SetStorefrontDescription stores a seller's description of his storefront at one Marketplace and raises that Marketplace's page version, in one transaction (migration 0034; see
+// character.Store.SetStorefrontDescription). NotFound for an unknown character; InvalidArgument, with nothing changed, for a node of 0 or a text the rules refuse; Ok with the
+// outcome NO_LISTING (nothing written) for a seller who has no listing there.
+func (s *Server) SetStorefrontDescription(ctx context.Context, r *characterv1.SetStorefrontDescriptionRequest) (*characterv1.SetStorefrontDescriptionResponse, error) {
+	fs, ok := s.store.(StorefrontStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store keeps no storefront descriptions")
+	}
+	res, err := fs.SetStorefrontDescription(ctx, r.GetCharacterId(), r.GetNode(), r.GetDescription())
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.SetStorefrontDescriptionResponse{Outcome: storefrontOutcomeOf(res.Outcome), Description: res.Description, HeaderRaises: res.HeaderRaises}, nil
 }
 
 // marketOutcomeOf is the wire's outcome of a step's.

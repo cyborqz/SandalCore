@@ -677,6 +677,17 @@ DELETE FROM schema_migrations WHERE version = 31;
 COMMIT;
 ```
 
+**Rolling back migration 0034.** Migration 0034 (Marketplace storefront descriptions) adds TWO tables and writes nowhere else: `market_storefronts` (the description a seller gave his storefront at one Marketplace: the node, the seller, the text of 1 to 50 characters; a storefront with no row shows the default "<name>'s Storefront") and `node_market_headers` (how many times a node's storefront pages changed; the page version a client holds is the game's own 1843 plus this count). It backfills nothing and touches no existing table or column. The character service's `SetStorefrontDescription` writes the text and raises the node's count in one transaction, and `ListMarketListings` sends both tables' rows to worldd when it starts. The rollback drops the two tables with whatever they hold: every seller's description is forgotten (every storefront shows its default text again) and every node's count starts from 0 (a client that holds a higher version asks again only after it reconnects). No listing, mail or purchase is touched. Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0034 (market storefronts)
+BEGIN;
+DROP TABLE node_market_headers;
+DROP TABLE market_storefronts;
+DELETE FROM schema_migrations WHERE version = 34;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or

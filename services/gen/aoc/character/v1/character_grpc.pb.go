@@ -23,26 +23,27 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CharacterService_CreateCharacter_FullMethodName         = "/aoc.character.v1.CharacterService/CreateCharacter"
-	CharacterService_ListCharacters_FullMethodName          = "/aoc.character.v1.CharacterService/ListCharacters"
-	CharacterService_GetCharacter_FullMethodName            = "/aoc.character.v1.CharacterService/GetCharacter"
-	CharacterService_GetCharacterByName_FullMethodName      = "/aoc.character.v1.CharacterService/GetCharacterByName"
-	CharacterService_SaveCharacterState_FullMethodName      = "/aoc.character.v1.CharacterService/SaveCharacterState"
-	CharacterService_DeleteCharacter_FullMethodName         = "/aoc.character.v1.CharacterService/DeleteCharacter"
-	CharacterService_SaveInventory_FullMethodName           = "/aoc.character.v1.CharacterService/SaveInventory"
-	CharacterService_SaveProgress_FullMethodName            = "/aoc.character.v1.CharacterService/SaveProgress"
-	CharacterService_SaveGuild_FullMethodName               = "/aoc.character.v1.CharacterService/SaveGuild"
-	CharacterService_SaveGuildCooldown_FullMethodName       = "/aoc.character.v1.CharacterService/SaveGuildCooldown"
-	CharacterService_GetMails_FullMethodName                = "/aoc.character.v1.CharacterService/GetMails"
-	CharacterService_SaveMail_FullMethodName                = "/aoc.character.v1.CharacterService/SaveMail"
-	CharacterService_CreateMail_FullMethodName              = "/aoc.character.v1.CharacterService/CreateMail"
-	CharacterService_ClaimMailItems_FullMethodName          = "/aoc.character.v1.CharacterService/ClaimMailItems"
-	CharacterService_SaveInventoryAndListing_FullMethodName = "/aoc.character.v1.CharacterService/SaveInventoryAndListing"
-	CharacterService_ListMarketListings_FullMethodName      = "/aoc.character.v1.CharacterService/ListMarketListings"
-	CharacterService_BuyListing_FullMethodName              = "/aoc.character.v1.CharacterService/BuyListing"
-	CharacterService_RemoveListing_FullMethodName           = "/aoc.character.v1.CharacterService/RemoveListing"
-	CharacterService_ExpireListing_FullMethodName           = "/aoc.character.v1.CharacterService/ExpireListing"
-	CharacterService_CommitPlayerTrade_FullMethodName       = "/aoc.character.v1.CharacterService/CommitPlayerTrade"
+	CharacterService_CreateCharacter_FullMethodName          = "/aoc.character.v1.CharacterService/CreateCharacter"
+	CharacterService_ListCharacters_FullMethodName           = "/aoc.character.v1.CharacterService/ListCharacters"
+	CharacterService_GetCharacter_FullMethodName             = "/aoc.character.v1.CharacterService/GetCharacter"
+	CharacterService_GetCharacterByName_FullMethodName       = "/aoc.character.v1.CharacterService/GetCharacterByName"
+	CharacterService_SaveCharacterState_FullMethodName       = "/aoc.character.v1.CharacterService/SaveCharacterState"
+	CharacterService_DeleteCharacter_FullMethodName          = "/aoc.character.v1.CharacterService/DeleteCharacter"
+	CharacterService_SaveInventory_FullMethodName            = "/aoc.character.v1.CharacterService/SaveInventory"
+	CharacterService_SaveProgress_FullMethodName             = "/aoc.character.v1.CharacterService/SaveProgress"
+	CharacterService_SaveGuild_FullMethodName                = "/aoc.character.v1.CharacterService/SaveGuild"
+	CharacterService_SaveGuildCooldown_FullMethodName        = "/aoc.character.v1.CharacterService/SaveGuildCooldown"
+	CharacterService_GetMails_FullMethodName                 = "/aoc.character.v1.CharacterService/GetMails"
+	CharacterService_SaveMail_FullMethodName                 = "/aoc.character.v1.CharacterService/SaveMail"
+	CharacterService_CreateMail_FullMethodName               = "/aoc.character.v1.CharacterService/CreateMail"
+	CharacterService_ClaimMailItems_FullMethodName           = "/aoc.character.v1.CharacterService/ClaimMailItems"
+	CharacterService_SaveInventoryAndListing_FullMethodName  = "/aoc.character.v1.CharacterService/SaveInventoryAndListing"
+	CharacterService_ListMarketListings_FullMethodName       = "/aoc.character.v1.CharacterService/ListMarketListings"
+	CharacterService_BuyListing_FullMethodName               = "/aoc.character.v1.CharacterService/BuyListing"
+	CharacterService_RemoveListing_FullMethodName            = "/aoc.character.v1.CharacterService/RemoveListing"
+	CharacterService_ExpireListing_FullMethodName            = "/aoc.character.v1.CharacterService/ExpireListing"
+	CharacterService_CommitPlayerTrade_FullMethodName        = "/aoc.character.v1.CharacterService/CommitPlayerTrade"
+	CharacterService_SetStorefrontDescription_FullMethodName = "/aoc.character.v1.CharacterService/SetStorefrontDescription"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -127,6 +128,8 @@ type CharacterServiceClient interface {
 	// Player trading (migration 0032): commits a two-character trade in ONE transaction, writing both characters'
 	// inventories, wallets, processing jobs, known recipes and warehouses together with an idempotency record.
 	CommitPlayerTrade(ctx context.Context, in *CommitPlayerTradeRequest, opts ...grpc.CallOption) (*CommitPlayerTradeResponse, error)
+	// Marketplace (migration 0034): a seller's description of his storefront at one Marketplace, and the Marketplace's page version, in ONE transaction.
+	SetStorefrontDescription(ctx context.Context, in *SetStorefrontDescriptionRequest, opts ...grpc.CallOption) (*SetStorefrontDescriptionResponse, error)
 }
 
 type characterServiceClient struct {
@@ -337,6 +340,16 @@ func (c *characterServiceClient) CommitPlayerTrade(ctx context.Context, in *Comm
 	return out, nil
 }
 
+func (c *characterServiceClient) SetStorefrontDescription(ctx context.Context, in *SetStorefrontDescriptionRequest, opts ...grpc.CallOption) (*SetStorefrontDescriptionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetStorefrontDescriptionResponse)
+	err := c.cc.Invoke(ctx, CharacterService_SetStorefrontDescription_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -419,6 +432,8 @@ type CharacterServiceServer interface {
 	// Player trading (migration 0032): commits a two-character trade in ONE transaction, writing both characters'
 	// inventories, wallets, processing jobs, known recipes and warehouses together with an idempotency record.
 	CommitPlayerTrade(context.Context, *CommitPlayerTradeRequest) (*CommitPlayerTradeResponse, error)
+	// Marketplace (migration 0034): a seller's description of his storefront at one Marketplace, and the Marketplace's page version, in ONE transaction.
+	SetStorefrontDescription(context.Context, *SetStorefrontDescriptionRequest) (*SetStorefrontDescriptionResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -488,6 +503,9 @@ func (UnimplementedCharacterServiceServer) ExpireListing(context.Context, *Expir
 }
 func (UnimplementedCharacterServiceServer) CommitPlayerTrade(context.Context, *CommitPlayerTradeRequest) (*CommitPlayerTradeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CommitPlayerTrade not implemented")
+}
+func (UnimplementedCharacterServiceServer) SetStorefrontDescription(context.Context, *SetStorefrontDescriptionRequest) (*SetStorefrontDescriptionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetStorefrontDescription not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -870,6 +888,24 @@ func _CharacterService_CommitPlayerTrade_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_SetStorefrontDescription_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetStorefrontDescriptionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).SetStorefrontDescription(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_SetStorefrontDescription_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).SetStorefrontDescription(ctx, req.(*SetStorefrontDescriptionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -956,6 +992,10 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CommitPlayerTrade",
 			Handler:    _CharacterService_CommitPlayerTrade_Handler,
+		},
+		{
+			MethodName: "SetStorefrontDescription",
+			Handler:    _CharacterService_SetStorefrontDescription_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

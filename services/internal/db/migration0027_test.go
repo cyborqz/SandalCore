@@ -63,7 +63,7 @@ func before27(t *testing.T) *pgxpool.Pool {
 // schemaWithoutMails lists every column, constraint, index and table but the two of 0027: what 0027 must not change.
 func schemaWithoutMails(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases', 'character_trades')`
+	const skip = `('character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases', 'character_trades', 'market_storefronts', 'node_market_headers')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

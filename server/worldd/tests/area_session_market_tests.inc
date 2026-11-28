@@ -111,6 +111,12 @@ struct MarketHarness : Harness {
         populate();
         start();
     }
+    /// The same over a content.db made with `options` (the bad-word table, for instance).
+    MarketHarness(svc::Character r, PositionSink* market, const content_fixture::DbOptions& options) : Harness(with_start_purse(std::move(r)), options) {
+        fx.world->set_position_sink(market);
+        populate();
+        start();
+    }
     void populate() {
         manager = add_market_manager(fx, kCx + 800, kCy, "Marketplace Manager");
         edge = add_market_manager(fx, kCx + 2000, kCy, "Marketplace Manager Edge");   // inside the interaction range, past the market's 10 m

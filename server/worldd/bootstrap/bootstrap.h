@@ -533,7 +533,11 @@ public:
     /// The PlayerController's marketplace answers (market_rpc.h): the listing's answer, the storefront headers page and one seller's listings.
     /// nullopt before the pawn's second state or when a call's parameters do not build.
     std::optional<Send> market_registration_answer(const repl::MarketListing& listing, uint8_t response);
-    std::optional<Send> market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete);
+    /// A headers page: `echo` is what it says besides its headers (the market's version, and the search and rarity it answers; the default is the page of the window's open).
+    std::optional<Send> market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete, const repl::MarketPageEcho& echo = repl::MarketPageEcho{});
+    /// ClientMarketplaceHeaderUpdateResponse: the answer to a description edit (0, with the text the storefront shows now; 14, 15 with the refused text) and the refusal of a search (16,
+    /// with the text that was sent).
+    std::optional<Send> market_header_update_answer(const std::string& text, uint8_t response);
     std::optional<Send> market_data(const repl::GuidValue& seller, std::span<const repl::MarketListing> listings);
     /// The answers to a purchase (the listing, the units the request named and the response) and to a removal (the listing and the response).
     std::optional<Send> market_purchase_answer(const repl::GuidValue& listing, int32_t quantity, uint8_t response);

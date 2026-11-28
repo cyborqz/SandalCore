@@ -372,6 +372,30 @@ void PlayerWorld::settle_trade(std::chrono::milliseconds max_wait) {
     }
 }
 
+const market::BadWords* PlayerWorld::market_bad_words() const {
+    if (!market_bad_words_) {
+        market::BadWords words;
+        if (content_) {
+            bool present = false;
+            std::string error;
+            std::vector<std::string> list = content_->bad_words(present, error);
+            if (!error.empty()) {
+                spdlog::error("[market] the client's bad-word list could not be read ({}): storefront descriptions are refused until it can", error);
+                return nullptr;
+            }
+            if (!present) {
+                spdlog::warn("[market] content.db has no bad_word table (it was built by a contentc before version 52): storefront descriptions are not checked for bad words; rebuild it with this "
+                             "checkout's contentc");
+            } else {
+                spdlog::info("[market] the client's bad-word list is read: {} word(s)", list.size());
+            }
+            words.set(std::move(list));
+        }
+        market_bad_words_ = std::move(words);
+    }
+    return &*market_bad_words_;
+}
+
 void PlayerWorld::note_mail(const std::string& character_id) const {
     std::lock_guard<std::mutex> lock(mail_notes_mu_);
     mail_notes_.insert(character_id);

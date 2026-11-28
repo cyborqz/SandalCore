@@ -58,7 +58,7 @@ func before32(t *testing.T) *pgxpool.Pool {
 
 func schemaWithoutTrades(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_trades')`
+	const skip = `('character_trades', 'market_storefronts', 'node_market_headers')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

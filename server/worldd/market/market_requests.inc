@@ -12,6 +12,7 @@
 #include "market/give_back.h"
 #include "market/listings.h"
 #include "market/market.h"
+#include "market/storefront_text.h"
 #include "market/undo.h"
 
 #include "bootstrap/bootstrap.h"
@@ -128,7 +129,7 @@ repl::MarketHeader header_of(int64_t node, const market::Storefront& sf) {
     h.node = node;
     h.seller = sf.seller;
     h.seller_name = sf.seller_name;
-    h.description = sf.seller_name + "'s Storefront";
+    h.description = sf.description.empty() ? market::default_description(sf.seller_name) : sf.description;   // what the seller wrote, else "<name>'s Storefront"
     h.issue_date = sf.issue_date;
     return h;
 }
@@ -209,6 +210,7 @@ void PlayerSession::on_market_registration(Connection& conn, const repl::ClientR
         listing.item.instance_guid = items::guid_hex(*instance);
     }
     listing.item_name = item_name_of(*record);
+    listing.rarity = static_cast<uint8_t>(std::clamp(record->rarity_of(static_cast<double>(held->quality)), 0, items::kRarityCount - 1));   // a search by rarity reads it
     listing.price_per_unit = copper;
     listing.issue_date = sync_now(now);
     listing.expiration_date = listing.issue_date + market::kListingSeconds;
@@ -285,6 +287,7 @@ void PlayerSession::run_market(Connection& conn, Clock::time_point now) {
         market_pending_.pop_front();
         market_landed(conn, now, std::move(job), answer);
     }
+    market_run_describes(conn, now);
 }
 
 void PlayerSession::market_refund(const PendingMarket& job) {
@@ -297,6 +300,14 @@ void PlayerSession::market_refund(const PendingMarket& job) {
 }
 
 void PlayerSession::market_end(const char* why) {
+    // the storefront edits in flight go to the world: it takes their answers, so the cache hears of each one the service stored (they touch no bag)
+    if (!market_describes_.empty()) {
+        std::vector<uint64_t> tickets;
+        for (const PendingDescribe& d : market_describes_) tickets.push_back(d.ticket);
+        spdlog::info("[market] {}: the session ends with {} storefront description(s) in flight ({}): the world takes their answers", name(), tickets.size(), why);
+        market_describes_.clear();
+        if (world_) world_->market_listings()->hand_over_describes(std::move(tickets));
+    }
     // the steps of a cart that never started hold nothing and have changed nothing: they are dropped, and no answer is owed to a client that is gone
     if (!market_queue_.empty()) {
         spdlog::info("[market] {}: the session ends with {} queued step(s) that never started ({}): dropped, nothing paid", name(), market_queue_.size(), why);
@@ -400,7 +411,9 @@ void PlayerSession::on_market_headers(Connection& conn, const repl::ClientRpc& r
     for (const market::Storefront& sf : world_->market_listings()->storefronts(*node)) headers.push_back(header_of(*node, sf));
     spdlog::log(level_for(market_answered_logged_, 20), "[market] {}: the storefront page of node {} is sent: {} storefront(s), the client holds version {}", name(), *node, headers.size(),
                 request->version);
-    queue("ClientReceiveMarketplaceHeaders", [node = *node, headers](bootstrap::PlayerBootstrap& pb) { return pb.market_headers(node, headers, true); }, conn, /*must_build=*/true);
+    // the market's version: the game's own 1843 and the number of times a description edit changed the pages (a client that holds a smaller one clears what it holds)
+    const repl::MarketPageEcho echo{repl::kMarketplaceHeaderVersion + world_->market_listings()->header_raises(*node), std::string(), repl::kMarketplaceAnyRarity};
+    queue("ClientReceiveMarketplaceHeaders", [node = *node, headers, echo](bootstrap::PlayerBootstrap& pb) { return pb.market_headers(node, headers, true, echo); }, conn, /*must_build=*/true);
 }
 
 /// The storefront pages the window's open is followed by, as the game's own server sends them without being asked: the other sellers' storefronts, 100 a page, bComplete on the
@@ -417,12 +430,13 @@ void PlayerSession::push_storefront_pages(Connection& conn, int64_t node) {
     if (others.size() > market::kMaxPushedStorefronts) others.resize(market::kMaxPushedStorefronts);   // the Refresh button and the search reach the rest
     const size_t pages = std::max<size_t>(1, (others.size() + market::kStorefrontPageSize - 1) / market::kStorefrontPageSize);
     if (!room_for(pages)) return;
+    const repl::MarketPageEcho echo{repl::kMarketplaceHeaderVersion + world_->market_listings()->header_raises(node), std::string(), repl::kMarketplaceAnyRarity};   // (see on_market_headers)
     for (size_t p = 0; p < pages; ++p) {
         const size_t first = p * market::kStorefrontPageSize;
         const size_t last = std::min(others.size(), first + market::kStorefrontPageSize);
         std::vector<repl::MarketHeader> page(others.begin() + static_cast<std::ptrdiff_t>(first), others.begin() + static_cast<std::ptrdiff_t>(last));
         const bool complete = p + 1 == pages;
-        queue("ClientReceiveMarketplaceHeaders", [node, page = std::move(page), complete](bootstrap::PlayerBootstrap& pb) { return pb.market_headers(node, page, complete); }, conn,
+        queue("ClientReceiveMarketplaceHeaders", [node, page = std::move(page), complete, echo](bootstrap::PlayerBootstrap& pb) { return pb.market_headers(node, page, complete, echo); }, conn,
               /*must_build=*/true);
     }
     spdlog::log(level_for(market_answered_logged_, 20), "[market] {}: the open of node {} pushes {} page(s) of storefronts, {} of the {} other storefront(s)", name(), node, pages,
@@ -466,6 +480,8 @@ void PlayerSession::register_market_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerRequestMarketplaceData", [](PlayerSession& s, const RpcContext& c) { s.on_market_data(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerRequestMarketplaceItemPurchase", [](PlayerSession& s, const RpcContext& c) { s.on_market_purchase(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerRequestMarketplaceItemRemoval", [](PlayerSession& s, const RpcContext& c) { s.on_market_removal(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerSearchMarketplaceHeaders", [](PlayerSession& s, const RpcContext& c) { s.on_market_search(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerRequestMarketplaceHeaderUpdate", [](PlayerSession& s, const RpcContext& c) { s.on_market_header_update(c.conn, c.rpc, c.now); });
 }
 
 }  // namespace aoc::worldd
@@ -511,11 +527,23 @@ std::optional<Send> PlayerBootstrap::market_removal_answer(const repl::GuidValue
     return rpcs(Role::PlayerController, "ClientMarketplaceItemRemovalResponse", std::span<const repl::RpcRequest>(&call, 1));
 }
 
-std::optional<Send> PlayerBootstrap::market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete) {
+std::optional<Send> PlayerBootstrap::market_header_update_answer(const std::string& text, uint8_t response) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientMarketplaceHeaderUpdateResponse");
+    if (!rpc) return std::nullopt;
+    const std::optional<repl::RpcParams> params = repl::market_header_update_params(*rpc, text, response);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientMarketplaceHeaderUpdateResponse";
+    call.params = *params;
+    return rpcs(Role::PlayerController, "ClientMarketplaceHeaderUpdateResponse", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::market_headers(int64_t node, std::span<const repl::MarketHeader> headers, bool complete, const repl::MarketPageEcho& echo) {
     if (!ok_ || !second_state_added_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveMarketplaceHeaders");
     if (!rpc) return std::nullopt;
-    const std::optional<repl::RpcParams> params = repl::market_headers_params(*rpc, node, headers, complete);
+    const std::optional<repl::RpcParams> params = repl::market_headers_params(*rpc, node, headers, complete, echo);
     if (!params) return std::nullopt;
     repl::RpcRequest call;
     call.rpc = "ClientReceiveMarketplaceHeaders";

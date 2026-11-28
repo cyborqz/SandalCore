@@ -509,6 +509,18 @@ svc::ExpireResult CharacterSaver::expire_listing_now(const std::string& listing_
     }
 }
 
+svc::StorefrontResult CharacterSaver::set_storefront_now(const svc::StorefrontRequest& request) {
+    try {
+        return api_.set_storefront(request);
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] the storefront description of {} at node {} threw {}", request.character_id, request.node, e.what());
+        svc::StorefrontResult result;
+        result.status = svc::CallStatus::Unavailable;
+        result.reason = "the call threw";
+        return result;
+    }
+}
+
 bool CharacterSaver::flush(std::chrono::milliseconds max_wait) {
     std::unique_lock<std::mutex> lock(mu_);
     return idle_cv_.wait_for(lock, max_wait, [this] { return (order_.empty() && !in_flight_) || abandon_; }) && order_.empty() && !in_flight_;

@@ -93,6 +93,9 @@ struct DbOptions {
     bool        dialogue_tables = false;
     /// The recipe items' item_learn table (contentc version 44), with the Tailoring Level 15 recipe item and one that names no recipe.  Needs item_tables and progress_tables.
     bool        recipe_tables = false;
+    /// The Marketplace's bad-word table (contentc version 52): when set, `bad_word` holds these rows, as the SQL after VALUES ("(0, 'one'), (1, 'two')"), which a test makes up; the
+    /// words of the game's own list are never written in a source file.
+    const char* bad_word_rows = nullptr;
 };
 
 /// Plan D1: the GM items of the fixture (real record Guids; the actions and tables of the 10 and gear scrolls are the real ones).
@@ -515,6 +518,10 @@ inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
     if (o.class_table) {
         ok = exec(db, "CREATE TABLE class (guid INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, archetype_id INTEGER NOT NULL UNIQUE)") && ok;
         ok = exec(db, "INSERT INTO class VALUES (108640158570105, 'Bard', 17747), (108640161388154, 'Cleric', 17748), (108640201692798, 'Tank', 17754)") && ok;
+    }
+    if (o.bad_word_rows) {
+        ok = exec(db, "CREATE TABLE bad_word (ord INTEGER PRIMARY KEY, word TEXT NOT NULL UNIQUE)") && ok;
+        ok = exec(db, (std::string("INSERT INTO bad_word (ord, word) VALUES ") + o.bad_word_rows).c_str()) && ok;
     }
     if (o.stat_table) {
         ok = exec(db, "CREATE TABLE class_stat_base (class_guid INTEGER NOT NULL, level INTEGER NOT NULL, stat_guid INTEGER NOT NULL, "

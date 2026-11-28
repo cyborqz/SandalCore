@@ -48,6 +48,7 @@
 #include "items/inventory.h"
 #include "items/rarity.h"
 #include "market/market_store.h"
+#include "market/storefront_text.h"
 #include "nav/area_nav.h"
 #include "npc/area_npcs.h"
 #include "protocol/server_guid_allocator.h"
@@ -402,6 +403,12 @@ public:
     world::CityNodes* city_nodes() const { return city_nodes_; }
     /// The market's listings (market/listings.h): one per registered stack, read from the character service when the world gets its sink and cached in memory.
     market::MarketStore* market_listings() const { return &market_listings_; }
+    /// The client's English bad-word list (content.db's bad_word table, read from the game's own config files), read the first time it is asked for.  Empty
+    /// in a content.db older than contentc version 52 (a warning says so, once); nullptr when it could not be read (the storefront edit is then refused).  Never a list of the
+    /// server's own: the words are the game's.
+    const market::BadWords* market_bad_words() const;
+    /// A test's own list in place of content.db's.
+    void set_market_bad_words(market::BadWords words) { market_bad_words_ = std::move(words); }
     /// Nodes 1, stage 2: what the client is told about the nodes (world/node_wire.h; built from content.db and the registry), set by main with the registry; null in a world
     /// with no nodes (a GameStateMode::Tier3 join then lists none).  The pointer must outlive this object.
     void set_node_wire(const world::NodeWire* wire) { node_wire_ = wire; }
@@ -739,6 +746,7 @@ private:
     std::optional<vendor::TownShops>     shops_;
     std::optional<warehouse::Book>       warehouses_;   // storage clerks, step 0
     mutable market::ServiceMarketStore   market_listings_;   // the marketplace's listings, read from the character service and cached in memory
+    mutable std::optional<market::BadWords> market_bad_words_;   // the client's bad-word list (market_bad_words)
     std::optional<content::CraftStationData> stations_;   // crafting, step 0: the station definitions and which asset is whose station
     std::optional<content::CraftRecipeData>  recipes_;    // crafting, step 1: the recipes
     std::map<std::pair<int64_t, int64_t>, uint64_t> placed_stations_;   // (node, plot) -> the actor of a station a game master placed

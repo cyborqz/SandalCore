@@ -32,6 +32,10 @@ inline constexpr int64_t kManagerInteraction = 6064632772967071745ll;  // ID_Mar
 /// listings).
 inline constexpr size_t kMaxQueuedSteps = 10;
 
+/// The storefront edits (descriptions) a session holds in line behind the one it has in flight: they are written one after the other and the last one in the line is the text that
+/// stays; an edit past this many is answered 3.
+inline constexpr size_t kMaxQueuedDescribes = 4;
+
 /// The storefronts on one page the window's open sends, and the most it sends (the Refresh button and the search reach the rest): 30 pages stay inside a session's reply queue.
 inline constexpr size_t kStorefrontPageSize = 100;
 inline constexpr size_t kMaxPushedStorefronts = 30 * kStorefrontPageSize;

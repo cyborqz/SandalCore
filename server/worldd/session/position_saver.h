@@ -183,6 +183,16 @@ public:
         r.status = svc::CallStatus::Unavailable;
         return r;
     }
+    /// Marketplace storefront descriptions (migration 0034): a seller's edit of his storefront's description at one market, ONE call of the character service and ONE transaction there
+    /// (which also raises the market's page version).  Blocks and is made on the world's market worker, which asks again (the same request) until the answer is clear: Ok with an
+    /// outcome (Done, Unchanged, NoListing), a refusal (Refused, NotFound) or Unsupported.  Unavailable and Failed settle nothing: the edit may or may not be stored, and asking again is
+    /// safe (the same text again is Unchanged).  A sink that cannot ask answers Unavailable.
+    virtual svc::StorefrontResult set_storefront_now(const svc::StorefrontRequest& request) {
+        (void)request;
+        svc::StorefrontResult r;
+        r.status = svc::CallStatus::Unavailable;
+        return r;
+    }
     /// Mail: the claim of attachments AND of the money of mails, in ONE call (see claim_mail_items).  With no money mail it is claim_mail_items.  A sink that cannot ask answers
     /// Unavailable.
     virtual svc::MailClaimResult claim_mail(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::MoneyClaim>& money_mails,
@@ -300,6 +310,7 @@ public:
     svc::BuyResult buy_listing_now(const svc::BuyRequest& request) override;
     svc::RemoveResult remove_listing_now(const svc::RemoveRequest& request) override;
     svc::ExpireResult expire_listing_now(const std::string& listing_id, const std::string& item_name) override;
+    svc::StorefrontResult set_storefront_now(const svc::StorefrontRequest& request) override;
     svc::MailClaimResult claim_mail(const std::string& character_id, const std::vector<svc::MailClaim>& claims, const std::vector<svc::MoneyClaim>& money_mails,
                                     std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
                                     std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) override;

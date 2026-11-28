@@ -692,6 +692,8 @@ MarketListingsResult GrpcServices::list_market_listings() {
     }
     for (const auto& l : resp.listings()) r.listings.push_back(market_listing_of(l));
     for (const auto& t : resp.node_taxes()) r.node_taxes.push_back(NodeMarketTax{t.node(), t.rate(), t.collected_copper()});
+    for (const auto& s : resp.storefronts()) r.storefronts.push_back(StorefrontText{s.node(), s.seller_id(), s.description()});
+    for (const auto& h : resp.node_headers()) r.node_headers.push_back(NodeHeaderRaises{h.node(), h.raises()});
     return r;
 }
 
@@ -983,6 +985,32 @@ CommitTradeResult GrpcServices::commit_player_trade(const CommitTradeRequest& re
         return r;
     }
     r.replayed = resp.replayed();
+    return r;
+}
+
+StorefrontResult GrpcServices::set_storefront(const StorefrontRequest& request) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::SetStorefrontDescriptionRequest req;
+    req.set_character_id(request.character_id);
+    req.set_node(request.node);
+    req.set_description(request.description);
+    characterv1::SetStorefrontDescriptionResponse resp;
+    const grpc::Status s = stubs_->character->SetStorefrontDescription(&ctx, req, &resp);
+    StorefrontResult r;
+    r.status = map_grpc_status(s);
+    if (r.status != CallStatus::Ok) {
+        r.reason = s.error_message();
+        return r;
+    }
+    switch (resp.outcome()) {
+    case characterv1::STOREFRONT_OUTCOME_DONE: r.outcome = StorefrontOutcome::Done; break;
+    case characterv1::STOREFRONT_OUTCOME_UNCHANGED: r.outcome = StorefrontOutcome::Unchanged; break;
+    case characterv1::STOREFRONT_OUTCOME_NO_LISTING: r.outcome = StorefrontOutcome::NoListing; break;
+    default: r.outcome = StorefrontOutcome::Unspecified; break;
+    }
+    r.description = resp.description();
+    r.header_raises = resp.header_raises();
     return r;
 }
 // ~ Cyb - C O A ~

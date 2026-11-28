@@ -796,6 +796,9 @@ func Create(db *sql.DB) error {
 	if err := createWarehouse(db); err != nil {
 		return err
 	}
+	if err := createBadWords(db); err != nil {
+		return err
+	}
 	if err := createEffectControl(db); err != nil { // extends ab_effect: after the ability tables
 		return err
 	}

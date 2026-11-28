@@ -25,6 +25,10 @@
 //
 //  The expiry sweep (poll, every minute and once when the listings are read): the listings whose time has come are expired one call
 //  each on the worker, never on the tick; a seller who is online is told of the new mail (set_mail_note).
+//
+//  A storefront description (submit_describe): one call of the character service on the same worker, which stores the text and raises the market's page version in one
+//  transaction.  The answer joins the cache (the description and the version) when it is taken, by the session that asked or, when that session ended, by the world's poll.
+//  Search and the storefront pages read the cache: no database is asked.
 // ============================================================================
 #pragma once
 
@@ -114,6 +118,12 @@ public:
         job.expire_name = std::move(item_name);
         return enqueue(std::move(job), sink);
     }
+    uint64_t submit_describe(svc::StorefrontRequest request, PositionSink* sink) {
+        Job job;
+        job.kind = Kind::Describe;
+        job.describe = std::move(request);
+        return enqueue(std::move(job), sink);
+    }
 
     /// Queues a read of every listed row, which the worker asks for again until it answers Ok.
     uint64_t submit_load(PositionSink* sink) {
@@ -160,7 +170,7 @@ public:
 private:
     using Clock = std::chrono::steady_clock;
 
-    enum class Kind : uint8_t { Register, Buy, Remove, Expire, Load };
+    enum class Kind : uint8_t { Register, Buy, Remove, Expire, Describe, Load };
 
     struct Job {
         uint64_t          ticket = 0;
@@ -170,6 +180,7 @@ private:
         svc::RemoveRequest remove;       // Remove
         std::string       expire_id;     // Expire
         std::string       expire_name;
+        svc::StorefrontRequest describe; // Describe
         PositionSink*     sink = nullptr;
         int               attempt = 0;    // the tries that were not answered clearly
         Clock::time_point not_before{};   // the next try waits for this
@@ -210,6 +221,9 @@ private:
             break;
         case Kind::Expire:
             spdlog::error("[market] stopping with the expiry of listing {} undecided; {}", job.expire_id, why);
+            break;
+        case Kind::Describe:
+            spdlog::error("[market] stopping with the storefront description of {} at node {} undecided; {}", job.describe.character_id, job.describe.node, why);
             break;
         case Kind::Load:
             break;
@@ -331,12 +345,36 @@ private:
         return answer;
     }
 
+    /// One try of a seller's edit of his storefront's description.  The same request again is safe: a text the storefront holds already is answered Unchanged and writes nothing.
+    static ListingSaveAnswer describe_once(const Job& job) {
+        ListingSaveAnswer answer;
+        if (!job.sink) {
+            answer.status = svc::CallStatus::Refused;
+            answer.reason = "the world has no character service";
+            return answer;
+        }
+        const svc::StorefrontResult result = job.sink->set_storefront_now(job.describe);
+        answer.status = result.status;
+        answer.reason = result.reason;
+        if (result.status != svc::CallStatus::Ok) return answer;
+        switch (result.outcome) {
+        case svc::StorefrontOutcome::Done: answer.outcome = svc::MarketOutcome::Done; break;
+        case svc::StorefrontOutcome::Unchanged: answer.outcome = svc::MarketOutcome::Replayed; break;
+        case svc::StorefrontOutcome::NoListing: answer.outcome = svc::MarketOutcome::ListingGone; break;
+        default: break;
+        }
+        answer.description = result.description;
+        answer.header_raises = result.header_raises;
+        return answer;
+    }
+
     static const char* kind_name(Kind kind) {
         switch (kind) {
         case Kind::Register: return "listing save";
         case Kind::Buy: return "purchase";
         case Kind::Remove: return "removal";
         case Kind::Expire: return "expiry";
+        case Kind::Describe: return "storefront description";
         case Kind::Load: return "read";
         }
         return "step";
@@ -350,6 +388,7 @@ private:
         case Kind::Buy: answer = buy_once(job); break;
         case Kind::Remove: answer = remove_once(job); break;
         case Kind::Expire: answer = expire_once(job); break;
+        case Kind::Describe: answer = describe_once(job); break;
         case Kind::Load: return false;
         }
         if (is_clear(answer.status)) {
@@ -435,6 +474,11 @@ public:
     size_t count(const ::aoc::protocol::repl::GuidValue& seller) const override { return cache_.count(seller); }
     const Listing* find(const ::aoc::protocol::repl::GuidValue& guid) const override { return cache_.find(guid); }
     size_t size() const override { return cache_.size(); }
+    std::vector<Storefront> search(int64_t node, std::string_view text, int rarity, const ::aoc::protocol::repl::GuidValue& except) const override {
+        return cache_.search(node, text, rarity, except);
+    }
+    uint64_t header_raises(int64_t node) const override { return cache_.header_raises(node); }
+    void set_description(int64_t node, const ::aoc::protocol::repl::GuidValue& seller, const std::string& text) override { cache_.set_description(node, seller, text); }
 
     /// The rate of the sales tax of `node`: the rate its row stored when the listings were read, or the game's default.  Each node's rate is read once, with the listings.
     float node_rate(int64_t node) const override {
@@ -502,6 +546,27 @@ public:
         if (jobs_) jobs_->forget(ticket);
     }
 
+    /// Queues a seller's edit of his storefront's description on the worker.  It touches no bag and no listing, so nothing of the character is counted as saving and no listing is busy.
+    uint64_t submit_describe(DescribeRequest request) override {
+        if (!sink_ || !loaded_) return 0;
+        svc::StorefrontRequest call;
+        call.character_id = items::guid_hex(request.seller);
+        call.node = request.node;
+        call.description = request.description;
+        const uint64_t ticket = jobs().submit_describe(std::move(call), sink_);
+        Submitted step;
+        step.op = Op::Describe;
+        step.listing.node = request.node;
+        step.listing.seller = request.seller;
+        step.listing.seller_name = request.seller_name;
+        submitted_[ticket] = std::move(step);
+        return ticket;
+    }
+    bool take_describe(uint64_t ticket, ListingSaveAnswer& out) override { return take_one(ticket, out); }
+    void hand_over_describes(std::vector<uint64_t> tickets) override {
+        for (const uint64_t t : tickets) orphan_describes_.push_back(t);
+    }
+
     void hand_over(HandOver over) override {
         if (over.listings.empty()) return;
         Orphan orphan;
@@ -557,6 +622,10 @@ public:
             orphans_.erase(orphans_.begin() + static_cast<std::ptrdiff_t>(i));
         }
         take_expiries();
+        for (auto it = orphan_describes_.begin(); it != orphan_describes_.end();) {   // the edits of sessions that ended: the cache hears of each one the service stored
+            ListingSaveAnswer answer;
+            it = take_one(*it, answer) ? orphan_describes_.erase(it) : it + 1;
+        }
         sweep(world_now);
     }
 
@@ -576,7 +645,7 @@ public:
     size_t expiring() const { return expiring_.size(); }
 
 private:
-    enum class Op : uint8_t { Register, Buy, Remove, Expire };
+    enum class Op : uint8_t { Register, Buy, Remove, Expire, Describe };
     using ListingKey = std::array<uint32_t, 4>;
 
     static ListingKey key_of(const ::aoc::protocol::repl::GuidValue& g) { return {g.a, g.b, g.c, g.d}; }
@@ -584,7 +653,7 @@ private:
     /// A step the worker has and the cache has not applied yet: what it is, the listing as it was when the step was made, the units it moves and the character whose bags it writes.
     struct Submitted {
         Op          op = Op::Register;
-        Listing     listing;
+        Listing     listing;     // a storefront description: only its node, seller and seller_name
         int32_t     quantity = 0;
         std::string character;   // the character counted in open_saves_ (empty: none)
     };
@@ -640,6 +709,13 @@ private:
         };
         if (step.op == Op::Register) {
             if (answer.stored()) cache_.add(step.listing);
+            return;
+        }
+        if (step.op == Op::Describe) {
+            if (answer.stored()) {
+                cache_.set_description(step.listing.node, step.listing.seller, answer.description);
+                cache_.raise_header_count(step.listing.node, static_cast<uint64_t>(std::max<int64_t>(0, answer.header_raises)));
+            }
             return;
         }
         if (answer.stored()) {
@@ -791,7 +867,9 @@ private:
             listing.guid = *guid;
             listing.item = row.item;
             listing.item.container = svc::ItemContainer::Backpack;
-            listing.item_name = item_name(row.item.item_record_id, content_);
+            const NameAndRarity facts = name_and_rarity(row.item.item_record_id, row.item.quality, content_);
+            listing.item_name = facts.name;
+            listing.rarity = facts.rarity;
             listing.price_per_unit = row.price_per_unit;
             // the database's time is Unix milliseconds; the client reads its synchronized clock, whose offset from Unix time is fixed while the world runs
             listing.issue_date = bootstrap::effect_clock(world_now) + (static_cast<double>(row.issue_date_ms) - static_cast<double>(unix_now_ms)) / 1000.0;
@@ -799,17 +877,36 @@ private:
             listing.status = static_cast<uint8_t>(row.status);
             cache_.add(listing);
         }
+        for (const svc::StorefrontText& text : result.storefronts) {
+            const std::optional<::aoc::protocol::repl::GuidValue> seller = items::guid_of(text.seller_id);
+            if (!seller || text.node == 0 || text.description.empty()) {
+                spdlog::warn("[market] a saved storefront description of seller {} at node {} does not read: left out", text.seller_id, text.node);
+                continue;
+            }
+            cache_.set_description(text.node, *seller, text.description);
+        }
+        for (const svc::NodeHeaderRaises& header : result.node_headers) {
+            if (header.node != 0 && header.raises > 0) cache_.raise_header_count(header.node, static_cast<uint64_t>(header.raises));
+        }
         loaded_ = true;
         next_sweep_ = std::chrono::steady_clock::time_point{};   // the listings that ended while the world was down are expired at the first poll
-        spdlog::info("[market] {} saved listing(s) read, {} node rate(s)", cache_.size(), rates_.size());
+        spdlog::info("[market] {} saved listing(s) read, {} node rate(s), {} storefront description(s)", cache_.size(), rates_.size(), result.storefronts.size());
     }
 
-    static std::string item_name(int64_t record_id, const content::ContentDb* content) {
-        if (!content) return {};
+    /// What a listed stack shows: its record's display name, and its rarity at the stack's quality (items/rarity.h).
+    struct NameAndRarity {
+        std::string name;
+        uint8_t     rarity = 0;
+    };
+    static NameAndRarity name_and_rarity(int64_t record_id, int32_t quality, const content::ContentDb* content) {
+        NameAndRarity out;
+        if (!content) return out;
         std::string error;
         const std::optional<content::ItemRecord> record = content->item(record_id, error);
-        if (!record) return {};
-        return record->display_name.empty() ? record->name : record->display_name;
+        if (!record) return out;
+        out.name = record->display_name.empty() ? record->name : record->display_name;
+        out.rarity = static_cast<uint8_t>(std::clamp(record->rarity_of(static_cast<double>(quality)), 0, items::kRarityCount - 1));
+        return out;
     }
 
     PositionSink*                  sink_ = nullptr;
@@ -821,6 +918,7 @@ private:
     std::map<uint64_t, Submitted>  expiring_;     // the expiries the worker has not answered, or the sweep has not taken
     std::set<ListingKey>           busy_listings_; // the listings a purchase, a removal or an expiry is in flight for
     std::vector<Orphan>            orphans_;      // the steps of sessions that ended, oldest first
+    std::vector<uint64_t>          orphan_describes_;   // the tickets of storefront edits whose session ended
     mutable std::mutex             gate_mu_;      // guards open_saves_, which the log-in thread reads
     std::map<std::string, int>     open_saves_;   // by character id: the steps with no answer taken, and the steps of ended sessions whose bags are not queued
     std::function<bool(const std::string&)> login_pending_;   // a log-in of the character waits to be applied (see set_login_check)

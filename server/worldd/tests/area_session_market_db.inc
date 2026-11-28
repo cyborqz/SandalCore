@@ -52,11 +52,15 @@ struct MarketDb : RecordingSink {
     std::map<int64_t, float>   rates;        // the node's stored rate (none: 0.5)
     std::map<int64_t, int64_t> collected;    // the tax each node has taken in
     std::map<std::string, std::string> purchases;   // the purchase id and the listing it was made for
+    std::map<std::pair<int64_t, std::string>, std::string> storefronts;   // the description of a storefront, by (node, seller): none when the seller gave it none
+    std::map<int64_t, int64_t> header_raises;                              // how many times a node's storefront pages changed
     std::map<std::string, std::string> names;       // a character's name, for a listing's seller
     uint64_t                   next_id = 1;
 
     // what a test sets to hold or spoil a step
-    bool hold_buy = false, hold_remove = false, hold_expire = false, hold_claim = false;
+    bool hold_buy = false, hold_remove = false, hold_expire = false, hold_claim = false, hold_storefront = false;
+    int  fail_storefront_before = 0;     // the next n edits are not stored and not answered (Unavailable)
+    int  lose_storefront_answers = 0;    // the next n edits are stored and the answer is lost (Unavailable): the world asks again with the same text, which the store holds already
     int  lose_buy_answers = 0;        // the next n purchases are stored and the answer is lost (Unavailable): the world asks again with the same id
     bool lose_all_answers = false;    // every purchase's answer is lost, a repeat of it too: the world never hears
     int  fail_buy_before = 0;         // the next n purchases are not stored and not answered (Unavailable)
@@ -65,7 +69,8 @@ struct MarketDb : RecordingSink {
     bool started = false;
 
     // what it saw
-    int buy_calls = 0, remove_calls = 0, expire_calls = 0, claim_calls = 0, listing_saves = 0;
+    int buy_calls = 0, remove_calls = 0, expire_calls = 0, claim_calls = 0, listing_saves = 0, storefront_calls = 0;
+    std::vector<svc::StorefrontRequest> storefront_requests;
     int claim_money_asks = 0, claim_changed_refusals = 0;   // the claims that named money, and the ones refused because the mail held another amount
     std::vector<svc::BuyRequest>    buys;
     std::vector<svc::RemoveRequest> removes;
@@ -82,7 +87,7 @@ struct MarketDb : RecordingSink {
     }
     /// Seeds a listing of `seller` (a character this world has no session of, or one it has): `quantity` units of `record` at `price` copper each, listed `issued_ago_ms` ago, ending `expires_in_ms` from now.
     std::string seed_listing(const std::string& seller, const std::string& seller_name, int64_t node, int64_t record, int32_t quantity, int64_t price, int64_t expires_in_ms = 72ll * 3600 * 1000,
-                             int64_t issued_ago_ms = 1000) {
+                             int64_t issued_ago_ms = 1000, int32_t quality = 1) {
         std::lock_guard<std::mutex> lock(mu);
         market_db::Row row;
         row.l.id = fresh();
@@ -93,7 +98,7 @@ struct MarketDb : RecordingSink {
         row.l.item.item_record_id = record;
         row.l.item.instance_guid = fresh();
         row.l.item.quantity = quantity;
-        row.l.item.quality = 1;
+        row.l.item.quality = quality;
         row.l.item.durability = 11;
         row.l.item.created_at_ms = 1'771'299'474'000ll;
         row.l.price_per_unit = price;
@@ -174,7 +179,7 @@ struct MarketDb : RecordingSink {
     }
     void release_all() {
         std::lock_guard<std::mutex> lock(mu);
-        hold_buy = hold_remove = hold_expire = hold_claim = false;
+        hold_buy = hold_remove = hold_expire = hold_claim = hold_storefront = false;
         cv.notify_all();
     }
     void reset_started() {
@@ -194,7 +199,65 @@ struct MarketDb : RecordingSink {
             r.listings.push_back(l);
         }
         for (const auto& [node, rate] : rates) r.node_taxes.push_back({node, rate, collected[node]});
+        for (const auto& [key, text] : storefronts) r.storefronts.push_back({key.first, key.second, text});
+        for (const auto& [node, raises] : header_raises) {
+            if (raises > 0) r.node_headers.push_back({node, raises});
+        }
         return r;
+    }
+
+    // ---- the storefront descriptions (migration 0034): what SetStorefrontDescription does in one transaction ----------------------------------------------------
+    /// The description a seller gave his storefront at a node ("" when none), and the node's count of page changes.
+    std::string storefront_of(int64_t node, const std::string& seller) {
+        std::lock_guard<std::mutex> lock(mu);
+        const auto it = storefronts.find({node, seller});
+        return it == storefronts.end() ? std::string() : it->second;
+    }
+    int64_t raises_of(int64_t node) {
+        std::lock_guard<std::mutex> lock(mu);
+        return header_raises[node];
+    }
+    svc::StorefrontResult set_storefront_now(const svc::StorefrontRequest& r) override {
+        std::unique_lock<std::mutex> lock(mu);
+        ++storefront_calls;
+        storefront_requests.push_back(r);
+        started = true;
+        cv.notify_all();
+        cv.wait(lock, [this] { return !hold_storefront; });
+        svc::StorefrontResult out;
+        out.status = svc::CallStatus::Ok;
+        if (fail_storefront_before > 0) {
+            --fail_storefront_before;
+            out.status = svc::CallStatus::Unavailable;
+            out.reason = "the service is down";
+            return out;
+        }
+        bool listed = false;
+        for (const market_db::Row& row : rows) listed = listed || (row.l.seller_id == r.character_id && row.l.node == r.node && row.status == market_db::kListed);
+        const auto key = std::make_pair(r.node, r.character_id);
+        const std::string current = storefronts.count(key) != 0 ? storefronts[key] : std::string();
+        out.description = current;
+        out.header_raises = header_raises[r.node];
+        if (!listed) {
+            out.outcome = svc::StorefrontOutcome::NoListing;
+            return out;
+        }
+        if (current == r.description) {
+            out.outcome = svc::StorefrontOutcome::Unchanged;
+        } else {
+            if (r.description.empty()) storefronts.erase(key);
+            else storefronts[key] = r.description;
+            out.description = r.description;
+            out.header_raises = ++header_raises[r.node];
+            out.outcome = svc::StorefrontOutcome::Done;
+        }
+        if (lose_storefront_answers > 0) {
+            --lose_storefront_answers;
+            out = svc::StorefrontResult{};
+            out.status = svc::CallStatus::Unavailable;
+            out.reason = "the answer was lost";
+        }
+        return out;
     }
 
     svc::MarketSaveResult save_inventory_and_listing_now(const std::string& id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet,

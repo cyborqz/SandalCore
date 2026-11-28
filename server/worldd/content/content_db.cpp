@@ -3804,6 +3804,39 @@ std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string
     return out;
 }
 
+std::vector<std::string> ContentDb::bad_words(bool& present, std::string& error) const {
+    std::vector<std::string> out;
+    present = false;
+    {
+        Stmt probe(db_, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bad_word'");
+        if (!probe.ok()) {
+            error = "content.db bad_word query failed: " + db_message(db_);
+            return out;
+        }
+        if (sqlite3_step(probe.get()) != SQLITE_ROW) return out;   // a file older than contentc version 52
+    }
+    present = true;
+    Stmt q(db_, "SELECT word FROM bad_word ORDER BY ord");
+    if (!q.ok()) {
+        error = "content.db bad_word query failed: " + db_message(db_);
+        return out;
+    }
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        if (!column_is_text(q.get(), 0)) {
+            error = "content.db bad_word has a row whose word is no text";
+            out.clear();
+            return out;
+        }
+        out.push_back(column_text(q.get(), 0));
+    }
+    if (step != SQLITE_DONE) {
+        error = "content.db bad_word query failed: " + db_message(db_);
+        out.clear();
+    }
+    return out;
+}
+
 std::vector<ContentDb::ItemListRow> ContentDb::list_items(const std::string& filter, size_t limit, size_t offset, size_t& total, std::string& error) const {
     std::vector<ItemListRow> out;
     total = 0;

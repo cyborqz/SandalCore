@@ -43,7 +43,8 @@ import (
 // ability tables. 51 folds GetAbilityItemInstance/GetItemInstanceStat into the consumed-item op (a
 // potion's HealingMod reads its own Health), so the stat program changes.
 // 52 kept the quest each SubQuest objective starts, the Destiny window's six tracks (the destiny_track table), the ability tags and the must-be-in-combat flag of a UseAbility objective, and the tag query of a Kill objective
-const Version = "52"
+// 53 added bad_word, the client's English bad-word list (the Marketplace's storefront descriptions)
+const Version = "53"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -492,6 +493,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildWarehouse(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildBadWords(w, &opt, meta); err != nil {
 		return nil, err
 	}
 

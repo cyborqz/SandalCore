@@ -456,6 +456,35 @@ static void test_mount_content(const fs::path& dir) {
 // == CoA | C.Y.B ==
 
 
+/// The client's bad-word list (contentc version 52): a content.db with no table has none, one with a table gives its words in the file's order.
+static void test_bad_words(const fs::path& dir) {
+    std::printf("bad_word: the client's English bad-word list\n");
+    std::string error;
+    const fs::path plain = dir / "nobadwords.db";
+    write_db(plain);
+    {
+        auto db = content::ContentDb::open(plain.string(), error);
+        CHECK(db.has_value(), "a content.db with no bad_word table opens");
+        if (db) {
+            bool present = true;
+            error.clear();
+            const std::vector<std::string> none = db->bad_words(present, error);
+            CHECK(!present && none.empty() && error.empty(), "it has no list, and says so without an error (a file built before contentc version 52)");
+        }
+    }
+    DbOptions with;
+    with.bad_word_rows = "(2, 'Third'), (0, 'first'), (1, 'second word')";
+    const fs::path listed = dir / "badwords.db";
+    write_db(listed, with);
+    auto db = content::ContentDb::open(listed.string(), error);
+    CHECK(db.has_value(), "a content.db with a bad_word table opens");
+    if (!db) return;
+    bool present = false;
+    error.clear();
+    const std::vector<std::string> words = db->bad_words(present, error);
+    CHECK(present && error.empty() && words == std::vector<std::string>({"first", "second word", "Third"}), "the words come in the file's order (the ord column), spelled as the file spells them");
+}
+
 static void test_real_content_db() {
     std::printf("the real content.db (AOC_CONTENT_DB)\n");
     const char* env = std::getenv("AOC_CONTENT_DB");
@@ -634,6 +663,40 @@ static void test_real_content_db() {
         const auto not_a_recipe = db->item_learn(6064630214426886486ll, ierror);   // the Bard's starter chest
         CHECK(not_a_recipe && not_a_recipe->empty(), "an item that is no recipe item has none");
     }
+
+    // the client's bad-word list (contentc version 52), read from the game's own DefaultAoCBadWords.ini: the table holds the file's words, once each, in its order.  The words are
+    // read here at test time; none is written in this file.
+    {
+        bool present = false;
+        error.clear();
+        const std::vector<std::string> words = db->bad_words(present, error);
+        CHECK(present && error.empty() && !words.empty(), "the real content.db holds the client's bad-word list (it was built by contentc version 52 or later)");
+        bool plain = true;
+        std::map<std::string, int> seen;
+        for (const std::string& w : words) {
+            plain = plain && !w.empty() && w.find_first_of("\r\n\t \x7f") == std::string::npos;
+            ++seen[w];
+        }
+        CHECK(plain && seen.size() == words.size(), "each word is one non-empty word with no white space, and none is in the list twice");
+        const char* config = std::getenv("AOC_CLIENT_CONFIG");
+        if (config && *config) {
+            std::ifstream in((fs::path(config) / "DefaultAoCBadWords.ini").string(), std::ios::binary);
+            std::string line, all;
+            std::vector<std::string> expected;
+            std::map<std::string, int> held;
+            while (std::getline(in, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+                const std::string key = "+BadWordsEnglish=";
+                const size_t at = line.find(key);
+                if (at == std::string::npos) continue;
+                const std::string word = line.substr(at + key.size());
+                if (held[word]++ == 0) expected.push_back(word);
+            }
+            CHECK(!expected.empty() && words == expected, "the table is the game's own ini file's list, each word once, in the file's order");
+        } else {
+            std::printf("  [note] AOC_CLIENT_CONFIG is not set: the table is not compared with the ini file it was read from\n");
+        }
+    }
 }
 
 int main() {
@@ -642,6 +705,7 @@ int main() {
     test_queries(dir);
     test_stat_content(dir);
     test_mount_content(dir);
+    test_bad_words(dir);
     std::error_code ec;
     fs::remove_all(dir, ec);
     test_real_content_db();

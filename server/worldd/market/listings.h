@@ -12,6 +12,7 @@
 // ============================================================================
 #pragma once
 
+#include "market/storefront_text.h"
 #include "protocol/repl/value.h"
 #include "svc/services.h"
 
@@ -19,7 +20,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -51,15 +54,30 @@ struct Listing {
     double               issue_date = 0;
     double               expiration_date = 0;
     uint8_t              status = kListed;
+    /// The rarity the listed stack shows (EItemRarity: Common 0 ... Artifact 6): its record's quality curve at the stack's quality (items/rarity.h).  A search by rarity reads it.
+    uint8_t              rarity = 0;
     bool operator==(const Listing&) const = default;
 };
 
-/// One storefront: the seller and the day his first listing at that market was made (the header's issue date).
+/// What a search sends for "any rarity" (the client's dropdown: its first choice), and the first value that is none (EItemRarity has 0 to 6).
+inline constexpr int kAnyRarity = 7;
+
+/// One storefront: the seller and the day his first listing at that market was made (the header's issue date), and the description the seller gave it at that market (empty:
+/// none, the page shows the default "<name>'s Storefront").
 struct Storefront {
     ::aoc::protocol::repl::GuidValue seller;
     std::string          seller_name;
     double               issue_date = 0;
+    std::string          description;
     bool operator==(const Storefront&) const = default;
+};
+
+/// A seller's edit of the description of his storefront at one market: stored in the character service in one step, which also raises the market's page version.
+struct DescribeRequest {
+    int64_t                          node = 0;
+    ::aoc::protocol::repl::GuidValue seller;
+    std::string                      seller_name;
+    std::string                      description;   // "" clears it
 };
 
 /// One listing's save: the listing as the session made it, its dates in Unix milliseconds, the fee it took, and the seller's bags, purse, jobs, recipes and warehouse as they
@@ -84,6 +102,10 @@ struct ListingSaveAnswer {
     svc::MarketOutcome outcome = svc::MarketOutcome::Unspecified;
     int32_t            available = 0;      // a refusal for the units: what the listing holds
     std::string        seller_id;          // a purchase or an expiry that was stored: the seller, whose mail changed
+    /// A description edit: Done (written) and Replayed (the storefront held this text already) are stored, ListingGone says the seller has no listing at the market; `description` is
+    /// the text the storefront holds now and `header_raises` the market's page-version count now.
+    std::string        description;
+    int64_t            header_raises = 0;
     /// Whether the step is in the database now.
     bool stored() const { return status == svc::CallStatus::Ok && svc::market_outcome_stored(outcome); }
 };
@@ -142,6 +164,17 @@ public:
     /// The listing with `guid` (nullptr: none).
     virtual const Listing* find(const ::aoc::protocol::repl::GuidValue& guid) const = 0;
     virtual size_t size() const = 0;
+    /// The storefronts at `node` that list an item whose name holds `text` (whatever the case) and whose rarity is `rarity` (kAnyRarity: any), without `except`'s own, in the order
+    /// of storefronts().  The text is not empty.  Reads the cache: no database is asked.
+    virtual std::vector<Storefront> search(int64_t node, std::string_view text, int rarity, const ::aoc::protocol::repl::GuidValue& except) const {
+        (void)node; (void)text; (void)rarity; (void)except;
+        return {};
+    }
+    /// How many times the storefront pages of `node` changed (a description edit raises it): the page version a client holds is the game's own 1843 plus this.
+    virtual uint64_t header_raises(int64_t) const { return 0; }
+    /// Sets the description the cache holds for a storefront ("" takes it away): the world's own copy of what the character service stored, which the storefront pages read.  A
+    /// test sets one to see the pages carry it.
+    virtual void set_description(int64_t, const ::aoc::protocol::repl::GuidValue&, const std::string&) {}
     /// The rate of the sales tax of `node`: the one its row stores, or the game's default.
     virtual float node_rate(int64_t) const { return kDefaultTaxRate; }
     /// Whether a purchase, a removal or an expiry of the listing is in flight (one step at a time for a listing).
@@ -161,6 +194,13 @@ public:
     virtual bool take_listing(uint64_t, ListingSaveAnswer&) { return false; }
     /// Drops a ticket and its answer.
     virtual void forget_listing(uint64_t) {}
+    /// Queues a seller's edit of his storefront's description; its ticket names the answer, taken with take_describe.  0: the store cannot (no service, or the listings are not read).
+    /// The edit is one call of the character service, which also raises the market's page version; the answer joins the cache when it is taken.
+    virtual uint64_t submit_describe(DescribeRequest) { return 0; }
+    /// Takes an edit's answer when the service has it (a clear one: the store asks again for an unclear one); false while it has not.  A stored edit joins the cache.
+    virtual bool take_describe(uint64_t, ListingSaveAnswer&) { return false; }
+    /// A session that ends with edits in flight hands their tickets over: the world takes their answers (the cache must hear of an edit the service stored).
+    virtual void hand_over_describes(std::vector<uint64_t>) {}
     /// A session that ends with saves in flight hands them over with the bags it ends with (see HandOver); the world finishes them.
     virtual void hand_over(HandOver) {}
     /// Whether a save handed over by an ended session of `seller` is still being finished: the seller makes no new listing meanwhile.
@@ -201,12 +241,52 @@ public:
                 if (at->seller == l.seller) break;
             }
             if (at == out.end()) {
-                out.push_back(Storefront{l.seller, l.seller_name, l.issue_date});
+                out.push_back(Storefront{l.seller, l.seller_name, l.issue_date, description_at(node, l.seller)});
             } else if (l.issue_date < at->issue_date) {
                 at->issue_date = l.issue_date;
             }
         }
         return out;
+    }
+
+    /// The storefronts at `node` with a listing whose name holds `text` at the rarity asked for (see MarketStore::search).
+    std::vector<Storefront> search(int64_t node, std::string_view text, int rarity, const ::aoc::protocol::repl::GuidValue& except) const override {
+        std::vector<Storefront> out;
+        const auto it = by_node_.find(node);
+        if (it == by_node_.end() || text.empty()) return out;
+        const std::string needle = folded(text);
+        std::set<SellerKey> matching;
+        for (size_t index : it->second) {
+            const Listing& l = listings_[index];
+            if (l.seller == except) continue;
+            if (rarity != kAnyRarity && l.rarity != rarity) continue;
+            if (contains_folded(l.item_name, needle)) matching.insert(key_of(l.seller));
+        }
+        if (matching.empty()) return out;
+        for (Storefront& sf : storefronts(node)) {
+            if (matching.count(key_of(sf.seller)) != 0) out.push_back(std::move(sf));
+        }
+        return out;
+    }
+
+    /// The description `seller` gave his storefront at `node` ("" when none).
+    std::string description_at(int64_t node, const ::aoc::protocol::repl::GuidValue& seller) const {
+        const auto it = descriptions_.find(SellerAtNode{key_of(seller), node});
+        return it == descriptions_.end() ? std::string() : it->second;
+    }
+    /// Sets the description of a storefront ("" takes it away).  The listings and their indexes are not touched.
+    void set_description(int64_t node, const ::aoc::protocol::repl::GuidValue& seller, const std::string& text) override {
+        if (text.empty()) descriptions_.erase(SellerAtNode{key_of(seller), node});
+        else descriptions_[SellerAtNode{key_of(seller), node}] = text;
+    }
+    uint64_t header_raises(int64_t node) const override {
+        const auto it = raises_.find(node);
+        return it == raises_.end() ? 0 : it->second;
+    }
+    /// Sets a node's count of page changes when it is higher than the one held: a count never goes down.
+    void raise_header_count(int64_t node, uint64_t raises) {
+        uint64_t& held = raises_[node];
+        if (raises > held) held = raises;
     }
 
     std::vector<Listing> listings(int64_t node, const ::aoc::protocol::repl::GuidValue& seller) const override {
@@ -230,13 +310,11 @@ public:
 
     size_t size() const override { return listings_.size(); }
 
-    /// Drops every listing and index: a store over the character service fills the cache again from the database's rows.
+    /// Drops every listing and index, and every description and count: a store over the character service fills the cache again from the database's rows.
     void clear() {
-        listings_.clear();
-        by_node_.clear();
-        by_seller_at_node_.clear();
-        by_seller_.clear();
-        by_guid_.clear();
+        clear_listings();
+        descriptions_.clear();
+        raises_.clear();
     }
 
     /// Takes the listing with `guid` out (a sold, removed or expired listing); false when there is none.  The indexes are made again, so a pointer find() gave is not valid after it.
@@ -248,7 +326,7 @@ public:
         for (size_t i = 0; i < listings_.size(); ++i) {
             if (i != it->second) kept.push_back(std::move(listings_[i]));
         }
-        clear();
+        clear_listings();   // (the descriptions stay: a seller whose listings sold out keeps his text for the next listing)
         for (const Listing& l : kept) add(l);
         return true;
     }
@@ -278,6 +356,16 @@ private:
 
     static SellerKey key_of(const ::aoc::protocol::repl::GuidValue& g) { return {g.a, g.b, g.c, g.d}; }
 
+    void clear_listings() {
+        listings_.clear();
+        by_node_.clear();
+        by_seller_at_node_.clear();
+        by_seller_.clear();
+        by_guid_.clear();
+    }
+
+    std::map<SellerAtNode, std::string>             descriptions_;   // the description of a storefront, by (seller, node); a storefront with none has no entry
+    std::map<int64_t, uint64_t>                     raises_;         // how many times a node's storefront pages changed
     std::vector<Listing>                            listings_;
     std::map<int64_t, std::vector<size_t>>          by_node_;
     std::map<SellerAtNode, std::vector<size_t>>     by_seller_at_node_;

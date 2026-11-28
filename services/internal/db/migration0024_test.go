@@ -38,7 +38,7 @@ func before24(t *testing.T) *pgxpool.Pool {
 // schemaWithoutFriends lists every column, constraint, index and table but the two of 0024 and the table of the later migration 0025 (PvP): what 0024 must not change.
 func schemaWithoutFriends(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases', 'character_trades')`   // #23 (MrJambix)
+	const skip = `('character_pvp', 'character_friends', 'character_friend_requests', 'guilds', 'guild_ranks', 'guild_members', 'character_guild_cooldowns', 'character_mails', 'character_mail_items', 'character_market_listings', 'character_mail_money', 'node_market_taxes', 'market_purchases', 'character_trades', 'market_storefronts', 'node_market_headers')`   // #23 (MrJambix)
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

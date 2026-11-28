@@ -32,3 +32,4 @@
 #include "destiny_session_tests.inc"
 #include "quest_events_session_tests.inc"
 #include "quest_book_loads_tests.inc"
+#include "area_session_market_search_tests.inc"
